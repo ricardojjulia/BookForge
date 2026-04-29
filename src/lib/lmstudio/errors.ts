@@ -4,6 +4,9 @@ export function getLmStudioErrorMessage(
   context: { model?: string; task?: string; modelSource?: string; configuredModels?: string[] } = {},
 ) {
   const message = extractErrorMessage(error);
+  if (/Expected model:/i.test(message) || /Configured fallback order:/i.test(message)) {
+    return message;
+  }
   const modelLine = context.model ? `Expected model: ${context.model}.` : "";
   const taskLine = context.task ? `Task: ${context.task}.` : "";
   const sourceLine = context.modelSource ? `Selection source: ${context.modelSource}.` : "";
