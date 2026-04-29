@@ -1,0 +1,745 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { buildJobProgress, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
+import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
+import { createLmStudioClient, testLmStudioConnection } from "@/lib/lmstudio/client";
+import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
+import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
+import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
+import { buildFullBookRewriteUnitPrompt } from "@/lib/prompts/builders";
+import { applyRewritePlanDefaults } from "@/lib/rewrite/plan-defaults";
+import { clampStrategySettings, getRewriteStrategy, rewriteStrategies } from "@/lib/rewrite/strategies";
+import { createClient } from "@/lib/supabase/server";
+
+const schema = z.object({
+  maxUnits: z.number().int().positive().max(5000).optional(),
+  campaignId: z.string().uuid().optional(),
+  paragraphId: z.string().uuid().optional(),
+  rewriteExistingDrafts: z.boolean().default(false),
+  rewriteAccepted: z.boolean().default(false),
+  retryJobId: z.string().uuid().optional(),
+  distributeAcrossChapters: z.boolean().default(false),
+  coverageMode: z.enum(["normal", "uncovered_chapter_sample"]).default("normal"),
+  strategyId: z.enum([
+    "conservative_polish",
+    "humanized_literary",
+    "clarity_readability",
+    "downsize_abridge",
+    "emotional_depth",
+    "theology_worldview",
+    "creative_enhancement",
+    "custom",
+  ]).default("humanized_literary"),
+  strategySettings: z
+    .object({
+      voicePreservation: z.number().optional(),
+      expansionLimitPercent: z.number().optional(),
+      sentenceRhythm: z.number().optional(),
+      literaryIntensity: z.number().optional(),
+      readabilityTarget: z.string().optional(),
+      theologicalEmphasis: z.number().optional(),
+      continuityStrictness: z.number().optional(),
+      targetReductionPercent: z.number().optional(),
+    })
+    .optional(),
+  authorInstructions: z.string().max(3000).optional(),
+});
+
+type ChapterRow = {
+  id: string;
+  chapter_number: number;
+  title: string | null;
+  summary: string | null;
+  exclude_from_rewrite?: boolean | null;
+  section_type?: string | null;
+};
+
+type ParagraphRow = {
+  id: string;
+  chapter_id?: string;
+  paragraph_number: number;
+  original_text: string;
+  is_locked: boolean | null;
+  scene_id: string | null;
+};
+
+type ExistingRevisionRow = {
+  paragraph_id: string | null;
+  accepted: boolean | null;
+  rejected: boolean | null;
+};
+
+type RetryJobSettings = {
+  progress?: {
+    failedUnits?: Array<{ id?: string; type?: string }>;
+  };
+};
+
+function getErrorMessage(error: unknown) {
+  const lmStudioMessage = getLmStudioErrorMessage(error, "");
+  if (lmStudioMessage) return lmStudioMessage;
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return "Rewrite execution failed.";
+}
+
+export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
+  const startedAt = new Date().toISOString();
+
+  try {
+    const { bookId } = await context.params;
+    const body = schema.parse(await readJsonBody(request));
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
+    const [
+      { data: bible },
+      { data: rewritePlan, error: planError },
+      { data: continuityLedger },
+      { data: chapters, error: chaptersError },
+      { data: existingRevisions, error: existingError },
+    ] = await Promise.all([
+      supabase.from("book_bibles").select("content").eq("book_id", bookId).maybeSingle(),
+      supabase
+        .from("coherence_reports")
+        .select("content")
+        .eq("book_id", bookId)
+        .eq("report_type", "rewrite_plan")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("coherence_reports")
+        .select("content,created_at")
+        .eq("book_id", bookId)
+        .eq("report_type", "continuity_ledger")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("chapters")
+        .select("id,chapter_number,title,summary,section_type,exclude_from_rewrite")
+        .eq("book_id", bookId)
+        .order("chapter_number"),
+      supabase
+        .from("revision_versions")
+        .select("paragraph_id,accepted,rejected")
+        .eq("book_id", bookId)
+        .not("paragraph_id", "is", null),
+    ]);
+
+    if (planError) throw planError;
+    if (chaptersError) throw chaptersError;
+    if (existingError) throw existingError;
+    if (!rewritePlan?.content) {
+      return NextResponse.json({ error: "Generate a Rewrite Architect plan before executing the rewrite." }, { status: 400 });
+    }
+    if (body.campaignId) {
+      const { data: campaign, error: campaignError } = await supabase
+        .from("rewrite_campaigns")
+        .select("status")
+        .eq("id", body.campaignId)
+        .eq("book_id", bookId)
+        .single();
+      if (campaignError) throw campaignError;
+      if (["paused", "cancelled", "completed"].includes(String(campaign.status || ""))) {
+        return NextResponse.json({ error: `Rewrite campaign is ${campaign.status}. Resume or create a new campaign before running another batch.` }, { status: 400 });
+      }
+    }
+
+    const normalizedRewritePlan = {
+      ...applyRewritePlanDefaults(rewritePlan.content as Record<string, unknown>),
+      latestContinuityLedger: continuityLedger?.content || null,
+    };
+    const settings = await getUserLmStudioSettings(user.id);
+    const availableModels = await getAvailableModels(settings.baseUrl);
+    const rewriteSelection = selectBestRewriteModel(availableModels, {
+      qualityProfile: settings.qualityProfile,
+      contextWindowTokens: settings.contextWindowTokens,
+    });
+    const model = rewriteSelection.best?.model || settings.primaryRewriteModel || "local-model";
+    const client = createLmStudioClient(settings);
+    const selectedStrategy = getRewriteStrategy(body.strategyId);
+    const rewriteStrategy = {
+      ...selectedStrategy,
+      settings: clampStrategySettings({
+        ...selectedStrategy.settings,
+        ...(body.strategySettings || {}),
+      }),
+      instructions:
+        body.strategyId === "custom" && body.authorInstructions?.trim()
+          ? [...rewriteStrategies.custom.instructions, body.authorInstructions.trim()]
+          : selectedStrategy.instructions,
+    };
+
+    const { data: job, error: jobError } = await supabase
+      .from("revision_jobs")
+      .insert({
+        book_id: bookId,
+        mode: "full_book_rewrite",
+        status: "running",
+        settings: {
+          model,
+          campaignId: body.campaignId || null,
+          rewriteModelSelection: rewriteSelection,
+          maxUnits: body.maxUnits || null,
+          rewriteExistingDrafts: body.rewriteExistingDrafts,
+          rewriteAccepted: body.rewriteAccepted,
+          distributeAcrossChapters: body.distributeAcrossChapters,
+          strategyId: rewriteStrategy.id,
+          strategyLabel: rewriteStrategy.label,
+          strategySettings: rewriteStrategy.settings,
+          authorInstructions: body.authorInstructions || null,
+          unit: "paragraph",
+          progress: buildJobProgress({
+            taskName: "Full-book rewrite draft",
+            currentUnit: "Planning eligible paragraphs",
+            totalUnits: body.maxUnits || 0,
+            attempted: 0,
+            successful: 0,
+            failed: 0,
+            skipped: 0,
+            startedAt,
+            estimatedSecondsPerUnit: estimateSecondsPerRewriteUnit(model),
+          }),
+        },
+        prompt_snapshot: "Full-book rewrite executor: paragraph units with Manuscript Blueprint, Rewrite Architect plan, adjacent chapter summaries, and local paragraph context.",
+        created_by: user.id,
+        started_at: startedAt,
+      })
+      .select("id")
+      .single();
+    if (jobError) throw jobError;
+
+    if (body.campaignId) {
+      const { error: campaignStartError } = await supabase
+        .from("rewrite_campaigns")
+        .update({
+          status: "running",
+          last_revision_job_id: job.id,
+          last_error: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", body.campaignId)
+        .eq("book_id", bookId);
+      if (campaignStartError) throw campaignStartError;
+    }
+
+    let attempted = 0;
+    let rewritten = 0;
+    let skipped = 0;
+    let skippedExistingDrafts = 0;
+    let skippedAccepted = 0;
+    let jobSettings: unknown = {
+      model,
+      rewriteModelSelection: rewriteSelection,
+      maxUnits: body.maxUnits || null,
+      campaignId: body.campaignId || null,
+      rewriteExistingDrafts: body.rewriteExistingDrafts,
+      rewriteAccepted: body.rewriteAccepted,
+      distributeAcrossChapters: body.distributeAcrossChapters,
+      coverageMode: body.coverageMode,
+      strategyId: rewriteStrategy.id,
+      strategyLabel: rewriteStrategy.label,
+      strategySettings: rewriteStrategy.settings,
+      authorInstructions: body.authorInstructions || null,
+      unit: "paragraph",
+    };
+    const { pendingDraftParagraphIds, acceptedParagraphIds } = getExistingRevisionState(
+      (existingRevisions || []) as ExistingRevisionRow[],
+    );
+    const anyRevisionParagraphIds = new Set(
+      ((existingRevisions || []) as ExistingRevisionRow[]).map((revision) => revision.paragraph_id).filter(Boolean),
+    );
+    const retryParagraphIds = body.retryJobId ? await getRetryParagraphIds(supabase, body.retryJobId) : null;
+    const warnings: unknown[] = [];
+    const eligibleByChapter: RewriteUnit[][] = [];
+
+    for (const [chapterIndex, chapter] of ((chapters || []) as ChapterRow[]).entries()) {
+      if (chapter.exclude_from_rewrite) {
+        continue;
+      }
+      const { data: paragraphs, error: paragraphsError } = await supabase
+        .from("paragraphs")
+        .select("id,paragraph_number,original_text,is_locked,scene_id")
+        .eq("chapter_id", chapter.id)
+        .order("paragraph_number");
+      if (paragraphsError) throw paragraphsError;
+
+      const rows = (paragraphs || []) as ParagraphRow[];
+      if (body.coverageMode === "uncovered_chapter_sample" && rows.some((paragraph) => anyRevisionParagraphIds.has(paragraph.id))) {
+        continue;
+      }
+      const chapterUnits: RewriteUnit[] = [];
+      for (const [paragraphIndex, paragraph] of rows.entries()) {
+        if (body.paragraphId && paragraph.id !== body.paragraphId) {
+          continue;
+        }
+        if (retryParagraphIds && !retryParagraphIds.has(paragraph.id)) {
+          continue;
+        }
+        if (paragraph.is_locked || shouldSkipParagraph(paragraph.original_text, chapter.title)) {
+          skipped += 1;
+          continue;
+        }
+        if (!body.rewriteExistingDrafts && pendingDraftParagraphIds.has(paragraph.id)) {
+          skipped += 1;
+          skippedExistingDrafts += 1;
+          continue;
+        }
+        if (!body.rewriteAccepted && acceptedParagraphIds.has(paragraph.id)) {
+          skipped += 1;
+          skippedAccepted += 1;
+          continue;
+        }
+
+        chapterUnits.push({ chapter, chapterIndex, paragraph, paragraphIndex, rows });
+      }
+      if (chapterUnits.length) eligibleByChapter.push(chapterUnits);
+      if (body.paragraphId && chapterUnits.length > 0) break;
+    }
+
+    const eligibleUnits = limitEligibleUnits(
+      body.distributeAcrossChapters ? roundRobinUnits(eligibleByChapter) : eligibleByChapter.flat(),
+      body.maxUnits,
+    );
+    attempted = 0;
+    jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+      taskName: "Full-book rewrite draft",
+      currentUnit: eligibleUnits.length ? `Rewrite unit 1 of ${eligibleUnits.length}` : "No eligible units",
+      totalUnits: eligibleUnits.length,
+      attempted: 0,
+      successful: 0,
+      failed: 0,
+      skipped,
+      startedAt,
+      estimatedSecondsPerUnit: estimateSecondsPerRewriteUnit(model),
+      message:
+        skipped > 0
+          ? `Skipped ${skipped} locked, title-only, existing-draft, or accepted paragraph(s) before the run.`
+          : null,
+    });
+
+    for (const [unitIndex, unit] of eligibleUnits.entries()) {
+      const pauseStatus = await waitWhileRevisionJobPaused(supabase, job.id);
+      if (pauseStatus === "cancelled") {
+        break;
+      }
+      const currentStatus = await getRevisionJobStatus(supabase, job.id);
+      if (currentStatus === "cancelled") {
+        break;
+      }
+
+      const { chapter, chapterIndex, paragraph, paragraphIndex, rows } = unit;
+      attempted += 1;
+      jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+        currentUnit: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number} (${unitIndex + 1}/${eligibleUnits.length})`,
+        totalUnits: eligibleUnits.length,
+        attempted,
+        successful: rewritten,
+        failed: 0,
+        skipped,
+      });
+
+      try {
+        const prompt = buildFullBookRewriteUnitPrompt({
+          manuscriptBlueprint: bible?.content,
+          rewritePlan: normalizedRewritePlan,
+          chapterTitle: chapter.title || `Chapter ${chapter.chapter_number}`,
+          chapterSummary: chapter.summary,
+          previousChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex - 1]?.summary,
+          nextChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex + 1]?.summary,
+          previousParagraph: rows[paragraphIndex - 1]?.original_text,
+          nextParagraph: rows[paragraphIndex + 1]?.original_text,
+          rewriteStrategy,
+          authorInstructions: body.authorInstructions,
+          paragraphNumber: paragraph.paragraph_number,
+          text: paragraph.original_text,
+        });
+
+        const completion = await client.chat.completions.create({
+          model,
+          temperature: Math.min(settings.temperature, 0.55),
+          top_p: settings.topP,
+          max_tokens: Math.min(settings.maxOutputTokens, 1800),
+          messages: [{ role: "user", content: prompt }],
+          response_format: { type: "text" },
+        });
+
+        const parsed = parseRewriteResponse(completion.choices[0]?.message.content || "{}");
+        const revisedText = extractRevisedText(parsed) || paragraph.original_text;
+        const continuityWarnings = extractArray(parsed, "continuityWarnings");
+
+        const { error: versionError } = await supabase.from("revision_versions").insert({
+          revision_job_id: job.id,
+          book_id: bookId,
+          chapter_id: chapter.id,
+          scene_id: paragraph.scene_id,
+          paragraph_id: paragraph.id,
+          original_text: paragraph.original_text,
+          revised_text: revisedText,
+          revision_notes: extractString(parsed, "revisionNotes") || "Full-book rewrite draft.",
+          continuity_warnings: continuityWarnings,
+        });
+        if (versionError) throw versionError;
+
+        rewritten += 1;
+        warnings.push(...continuityWarnings);
+        jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+          currentUnit:
+            unitIndex + 1 >= eligibleUnits.length
+              ? "Finalizing rewrite job"
+              : `Rewrite unit ${unitIndex + 2} of ${eligibleUnits.length}`,
+          totalUnits: eligibleUnits.length,
+          attempted,
+          successful: rewritten,
+          failed: 0,
+          skipped,
+          failedUnits: [],
+        });
+      } catch (unitError) {
+        const message = getErrorMessage(unitError);
+        jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+          currentUnit: `Failed at chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`,
+          totalUnits: eligibleUnits.length,
+          attempted,
+          successful: rewritten,
+          failed: 1,
+          skipped,
+          message,
+          failedUnits: [
+            {
+              id: paragraph.id,
+              type: "paragraph",
+              label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`,
+              error: message,
+            },
+          ],
+        });
+        throw unitError;
+      }
+    }
+
+    const completedAt = new Date().toISOString();
+    const finalStatus = await getRevisionJobStatus(supabase, job.id);
+    const completedStatus = finalStatus === "cancelled" ? "cancelled" : "completed";
+    const { error: updateError } = await supabase
+      .from("revision_jobs")
+      .update({
+        status: completedStatus,
+        completed_at: completedAt,
+        settings: {
+          model,
+          campaignId: body.campaignId || null,
+          rewriteModelSelection: rewriteSelection,
+          maxUnits: body.maxUnits || null,
+          rewriteExistingDrafts: body.rewriteExistingDrafts,
+          rewriteAccepted: body.rewriteAccepted,
+          distributeAcrossChapters: body.distributeAcrossChapters,
+          coverageMode: body.coverageMode,
+          strategyId: rewriteStrategy.id,
+          strategyLabel: rewriteStrategy.label,
+          strategySettings: rewriteStrategy.settings,
+          authorInstructions: body.authorInstructions || null,
+          unit: "paragraph",
+          attempted,
+          rewritten,
+          skipped,
+          skippedExistingDrafts,
+          skippedAccepted,
+          retryJobId: body.retryJobId || null,
+          warningCount: warnings.length,
+          progress: buildJobProgress({
+            taskName: "Full-book rewrite draft",
+            currentUnit: completedStatus === "cancelled" ? "Cancelled" : "Complete",
+            totalUnits: eligibleUnits.length,
+            attempted,
+            successful: rewritten,
+            failed: 0,
+            skipped,
+            failedUnits: [],
+            startedAt,
+            completedAt,
+            estimatedSecondsPerUnit: estimateSecondsPerRewriteUnit(model),
+            message:
+              completedStatus === "cancelled"
+                ? "The rewrite was cancelled. Saved revision versions remain available for review."
+                : "Rewrite draft versions saved. Review, accept, reject, or rerun selected paragraphs.",
+          }),
+        },
+      })
+      .eq("id", job.id);
+    if (updateError) throw updateError;
+
+    if (body.campaignId) {
+      const campaignStats = await getCampaignStats(supabase, bookId);
+      const { data: campaign } = await supabase
+        .from("rewrite_campaigns")
+        .select("goal,batches_run")
+        .eq("id", body.campaignId)
+        .eq("book_id", bookId)
+        .maybeSingle();
+      const campaignComplete = campaign
+        ? isCampaignComplete(String(campaign.goal || "full_coverage"), campaignStats)
+        : false;
+      const { error: campaignUpdateError } = await supabase
+        .from("rewrite_campaigns")
+        .update({
+          status: completedStatus === "cancelled" ? "cancelled" : campaignComplete ? "completed" : "active",
+          total_paragraphs: campaignStats.totalParagraphs,
+          untouched_paragraphs: campaignStats.untouchedParagraphs,
+          pending_draft_paragraphs: campaignStats.pendingDraftParagraphs,
+          accepted_paragraphs: campaignStats.acceptedParagraphs,
+          sampled_chapters: campaignStats.sampledChapters,
+          fully_covered_chapters: campaignStats.fullyCoveredChapters,
+          total_chapters: campaignStats.totalChapters,
+          batches_run: Number(campaign?.batches_run || 0) + 1,
+          last_revision_job_id: job.id,
+          completed_at: campaignComplete || completedStatus === "cancelled" ? completedAt : null,
+          updated_at: completedAt,
+        })
+        .eq("id", body.campaignId)
+        .eq("book_id", bookId);
+      if (campaignUpdateError) throw campaignUpdateError;
+    }
+
+    await supabase.from("coherence_reports").insert({
+      book_id: bookId,
+      report_type: "rewrite_execution",
+      content: {
+        revisionJobId: job.id,
+        model,
+        attempted,
+        rewritten,
+        skipped,
+        skippedExistingDrafts,
+        skippedAccepted,
+        continuityWarnings: warnings.slice(0, 100),
+        startedAt,
+        completedAt,
+        nextStep: "Review revision versions, accept or reject changes, then rerun all BookForge Critic lenses.",
+      },
+    });
+
+    return NextResponse.json({
+      content: {
+        revisionJobId: job.id,
+        model,
+        attempted,
+        rewritten,
+        skipped,
+        skippedExistingDrafts,
+        skippedAccepted,
+        continuityWarningCount: warnings.length,
+        status: completedStatus,
+      },
+    });
+  } catch (error) {
+    console.error("Rewrite execution failed", error);
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+  }
+}
+
+type RewriteUnit = {
+  chapter: ChapterRow;
+  chapterIndex: number;
+  paragraph: ParagraphRow;
+  paragraphIndex: number;
+  rows: ParagraphRow[];
+};
+
+function roundRobinUnits(groups: RewriteUnit[][]) {
+  const output: RewriteUnit[] = [];
+  const maxLength = Math.max(0, ...groups.map((group) => group.length));
+  for (let index = 0; index < maxLength; index += 1) {
+    for (const group of groups) {
+      const unit = group[index];
+      if (unit) output.push(unit);
+    }
+  }
+  return output;
+}
+
+function limitEligibleUnits(units: RewriteUnit[], maxUnits?: number) {
+  return maxUnits ? units.slice(0, maxUnits) : units;
+}
+
+async function getRetryParagraphIds(
+  supabase: Awaited<ReturnType<typeof import("@/lib/supabase/server").createClient>>,
+  jobId: string,
+) {
+  const { data, error } = await supabase.from("revision_jobs").select("settings").eq("id", jobId).single();
+  if (error) throw error;
+  const settings = data.settings as RetryJobSettings | null;
+  const ids = (settings?.progress?.failedUnits || [])
+    .filter((unit) => unit.type === "paragraph" && unit.id)
+    .map((unit) => String(unit.id));
+  return ids.length ? new Set(ids) : new Set<string>();
+}
+
+function estimateSecondsPerRewriteUnit(model: string) {
+  const lower = model.toLowerCase();
+  if (/(70b|72b)/.test(lower)) return 55;
+  if (/(30b|32b|34b)/.test(lower)) return 32;
+  if (/(14b|13b)/.test(lower)) return 20;
+  if (/(7b|8b)/.test(lower)) return 12;
+  return 24;
+}
+
+function getExistingRevisionState(revisions: ExistingRevisionRow[]) {
+  const pendingDraftParagraphIds = new Set<string>();
+  const acceptedParagraphIds = new Set<string>();
+
+  revisions.forEach((revision) => {
+    if (!revision.paragraph_id) return;
+    if (revision.accepted) {
+      acceptedParagraphIds.add(revision.paragraph_id);
+      return;
+    }
+    if (!revision.rejected) {
+      pendingDraftParagraphIds.add(revision.paragraph_id);
+    }
+  });
+
+  return { pendingDraftParagraphIds, acceptedParagraphIds };
+}
+
+async function readJsonBody(request: Request) {
+  try {
+    return await request.json();
+  } catch {
+    return {};
+  }
+}
+
+async function getAvailableModels(baseUrl: string) {
+  try {
+    return (await testLmStudioConnection({ baseUrl })).models;
+  } catch {
+    return [];
+  }
+}
+
+function shouldSkipParagraph(text: string, title: string | null) {
+  const clean = text.trim();
+  const words = clean.split(/\s+/).filter(Boolean).length;
+  if (words < 8) return true;
+  if (title && clean.toLowerCase() === title.trim().toLowerCase()) return true;
+  return false;
+}
+
+function parseRewriteResponse(content: string) {
+  return parseModelJsonOrFallback(content, (raw, parseError) => ({
+    revisedText: raw,
+    revisionNotes: `Model returned malformed JSON: ${parseError}`,
+    continuityWarnings: [],
+    ledgerUpdates: [],
+    confidence: 0,
+  }));
+}
+
+function extractRevisedText(parsed: unknown) {
+  return parsed && typeof parsed === "object" && typeof (parsed as Record<string, unknown>).revisedText === "string"
+    ? String((parsed as Record<string, unknown>).revisedText).trim()
+    : "";
+}
+
+function extractString(parsed: unknown, key: string) {
+  return parsed && typeof parsed === "object" && typeof (parsed as Record<string, unknown>)[key] === "string"
+    ? String((parsed as Record<string, unknown>)[key])
+    : "";
+}
+
+function extractArray(parsed: unknown, key: string) {
+  return parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>)[key])
+    ? ((parsed as Record<string, unknown>)[key] as unknown[])
+    : [];
+}
+
+async function getCampaignStats(
+  supabase: Awaited<ReturnType<typeof import("@/lib/supabase/server").createClient>>,
+  bookId: string,
+) {
+  const [
+    { count: paragraphCount },
+    { data: chapters, error: chaptersError },
+    { data: paragraphs, error: paragraphsError },
+    { data: pendingDrafts, error: pendingError },
+    { data: acceptedDrafts, error: acceptedError },
+    { data: revisionRows, error: revisionError },
+  ] = await Promise.all([
+    supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId),
+    supabase.from("chapters").select("id").eq("book_id", bookId),
+    supabase.from("paragraphs").select("id,chapter_id").eq("book_id", bookId),
+    supabase
+      .from("revision_versions")
+      .select("paragraph_id")
+      .eq("book_id", bookId)
+      .eq("accepted", false)
+      .eq("rejected", false)
+      .not("paragraph_id", "is", null),
+    supabase
+      .from("revision_versions")
+      .select("paragraph_id")
+      .eq("book_id", bookId)
+      .eq("accepted", true)
+      .not("paragraph_id", "is", null),
+    supabase
+      .from("revision_versions")
+      .select("paragraph_id")
+      .eq("book_id", bookId)
+      .not("paragraph_id", "is", null),
+  ]);
+  if (chaptersError) throw chaptersError;
+  if (paragraphsError) throw paragraphsError;
+  if (pendingError) throw pendingError;
+  if (acceptedError) throw acceptedError;
+  if (revisionError) throw revisionError;
+
+  const pendingDraftParagraphCount = new Set((pendingDrafts || []).map((row) => row.paragraph_id).filter(Boolean)).size;
+  const acceptedParagraphCount = new Set((acceptedDrafts || []).map((row) => row.paragraph_id).filter(Boolean)).size;
+  const paragraphIdsWithRevisions = new Set((revisionRows || []).map((row) => row.paragraph_id).filter(Boolean));
+  const paragraphsByChapter = (paragraphs || []).reduce<Record<string, Array<{ id: string }>>>((groups, paragraph) => {
+    groups[paragraph.chapter_id] ||= [];
+    groups[paragraph.chapter_id].push(paragraph);
+    return groups;
+  }, {});
+  const coverage = (chapters || []).map((chapter) => {
+    const chapterParagraphs = paragraphsByChapter[chapter.id] || [];
+    return {
+      totalParagraphs: chapterParagraphs.length,
+      rewrittenParagraphs: chapterParagraphs.filter((paragraph) => paragraphIdsWithRevisions.has(paragraph.id)).length,
+    };
+  });
+  const totalChapters = coverage.filter((chapter) => chapter.totalParagraphs > 0).length;
+  const sampledChapters = coverage.filter((chapter) => chapter.rewrittenParagraphs > 0).length;
+  const fullyCoveredChapters = coverage.filter(
+    (chapter) => chapter.totalParagraphs > 0 && chapter.rewrittenParagraphs >= chapter.totalParagraphs,
+  ).length;
+  const totalParagraphs = paragraphCount || 0;
+
+  return {
+    totalParagraphs,
+    untouchedParagraphs: Math.max(0, totalParagraphs - pendingDraftParagraphCount - acceptedParagraphCount),
+    pendingDraftParagraphs: pendingDraftParagraphCount,
+    acceptedParagraphs: acceptedParagraphCount,
+    sampledChapters,
+    fullyCoveredChapters,
+    totalChapters,
+  };
+}
+
+function isCampaignComplete(goal: string, stats: Awaited<ReturnType<typeof getCampaignStats>>) {
+  if (goal === "sample_all_chapters") {
+    return stats.totalChapters > 0 && stats.sampledChapters >= stats.totalChapters;
+  }
+  if (goal === "full_coverage") {
+    return stats.totalParagraphs > 0 && stats.untouchedParagraphs <= 0;
+  }
+  return false;
+}

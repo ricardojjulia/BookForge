@@ -9,9 +9,27 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@mantine/core": "^9.1.1",
+    "@mantine/dropzone": "^9.1.1",
+    "@mantine/hooks": "^9.1.1",
+    "@mantine/notifications": "^9.1.1",
+    "@supabase/ssr": "^0.10.2",
+    "@supabase/supabase-js": "^2.105.1",
+    "@tabler/icons-react": "^3.41.1",
+    "@types/pdfkit": "^0.17.6",
+    "diff": "^9.0.0",
+    "docx": "^9.6.1",
+    "framer-motion": "^12.38.0",
+    "jsonrepair": "^3.14.0",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.12.0",
+    "marked": "^18.0.2",
     "next": "16.2.4",
+    "openai": "^6.35.0",
+    "pdfkit": "^0.18.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

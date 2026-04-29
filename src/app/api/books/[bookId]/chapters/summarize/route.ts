@@ -1,0 +1,308 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { buildJobProgress, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
+import { estimateAiCallPlan } from "@/lib/ai/call-planner";
+import { createLmStudioClient } from "@/lib/lmstudio/client";
+import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
+import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
+import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
+import { buildChapterSummaryPrompt } from "@/lib/prompts/builders";
+import { createClient } from "@/lib/supabase/server";
+
+const schema = z.object({
+  chapterIds: z.array(z.string().uuid()).optional(),
+  retryJobId: z.string().uuid().optional(),
+});
+
+type RetryJobSettings = {
+  progress?: {
+    failedUnits?: Array<{ id?: string; type?: string }>;
+  };
+};
+
+function getErrorMessage(error: unknown) {
+  const lmStudioMessage = getLmStudioErrorMessage(error, "");
+  if (lmStudioMessage) return lmStudioMessage;
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return "Chapter summary generation failed.";
+}
+
+export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
+  try {
+    const { bookId } = await context.params;
+    const body = schema.parse(await readJsonBody(request));
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
+    const retryChapterIds = body.retryJobId ? await getRetryChapterIds(supabase, body.retryJobId) : null;
+    let chaptersQuery = supabase
+      .from("chapters")
+      .select("id,title,chapter_number,original_text")
+      .eq("book_id", bookId)
+      .order("chapter_number");
+
+    if (retryChapterIds?.size) {
+      chaptersQuery = chaptersQuery.in("id", Array.from(retryChapterIds));
+    } else if (body.chapterIds?.length) {
+      chaptersQuery = chaptersQuery.in("id", body.chapterIds);
+    }
+
+    const [{ data: chapters, error: chaptersError }, { count: scenes }, { count: paragraphs }] =
+      await Promise.all([
+        chaptersQuery,
+        supabase.from("scenes").select("id", { count: "exact", head: true }).eq("book_id", bookId),
+        supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId),
+      ]);
+    if (chaptersError) throw chaptersError;
+
+    const chapterRows = chapters || [];
+    if (!chapterRows.length) {
+      return NextResponse.json({
+        content: {
+          summarized: 0,
+          aiCallPlan: { expectedCalls: 0, actualCalls: 0, unitStrategy: "chapters" },
+        },
+      });
+    }
+
+    const settings = await getUserLmStudioSettings(user.id);
+    const client = createLmStudioClient(settings);
+    const model = settings.extractionModel || settings.primaryRewriteModel || "local-model";
+    const plan = estimateAiCallPlan({
+      task: "book-bible",
+      selectedModel: model,
+      qualityProfile: settings.qualityProfile,
+      contextWindowTokens: settings.contextWindowTokens,
+      maxOutputTokens: settings.maxOutputTokens,
+      chapterCount: chapterRows.length,
+      sceneCount: scenes || 0,
+      paragraphCount: paragraphs || 0,
+    });
+
+    const startedAt = new Date().toISOString();
+    const { data: job, error: jobError } = await supabase
+      .from("revision_jobs")
+      .insert({
+        book_id: bookId,
+        mode: "chapter_summaries",
+        status: "running",
+        settings: {
+          model,
+          unit: "chapter",
+          chapterIds: body.chapterIds || null,
+          retryJobId: body.retryJobId || null,
+          progress: buildJobProgress({
+            taskName: "Generate chapter summaries",
+            currentUnit: chapterRows.length ? `Chapter 1 of ${chapterRows.length}` : "No chapters",
+            totalUnits: chapterRows.length,
+            attempted: 0,
+            successful: 0,
+            failed: 0,
+            skipped: 0,
+            startedAt,
+            estimatedSecondsPerUnit: plan.estimatedSecondsPerCall,
+          }),
+        },
+        prompt_snapshot: "Chapter summary extractor: one focused LM Studio call per chapter.",
+        created_by: user.id,
+        started_at: startedAt,
+      })
+      .select("id")
+      .single();
+    if (jobError) throw jobError;
+
+    let jobSettings: unknown = {
+      model,
+      unit: "chapter",
+      chapterIds: body.chapterIds || null,
+      retryJobId: body.retryJobId || null,
+    };
+    const results = [];
+    let attempted = 0;
+    let failed = 0;
+
+    for (const [index, chapter] of chapterRows.entries()) {
+      const pauseStatus = await waitWhileRevisionJobPaused(supabase, job.id);
+      if (pauseStatus === "cancelled") break;
+      const currentStatus = await getRevisionJobStatus(supabase, job.id);
+      if (currentStatus === "cancelled") break;
+
+      attempted += 1;
+      jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+        currentUnit: `Chapter ${chapter.chapter_number}: ${chapter.title || `Chapter ${chapter.chapter_number}`} (${index + 1}/${chapterRows.length})`,
+        totalUnits: chapterRows.length,
+        attempted,
+        successful: results.length,
+        failed,
+        skipped: 0,
+      });
+      const title = chapter.title || `Chapter ${chapter.chapter_number}`;
+      try {
+        const prompt = buildChapterSummaryPrompt({ title, text: chapter.original_text || "" });
+
+        const completion = await client.chat.completions.create({
+          model,
+          temperature: Math.min(settings.temperature, 0.45),
+          top_p: settings.topP,
+          max_tokens: Math.min(settings.maxOutputTokens, 1800),
+          messages: [{ role: "user", content: prompt }],
+          response_format: { type: "text" },
+        });
+
+        const raw = completion.choices[0]?.message.content || "{}";
+        const parsed = parseChapterSummaryModelResponse(raw);
+        const summary = extractSummary(parsed);
+
+        const { error: updateError } = await supabase
+          .from("chapters")
+          .update({
+            summary,
+            status: "summarized",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", chapter.id);
+        if (updateError) throw updateError;
+
+        results.push({
+          chapterId: chapter.id,
+          chapterNumber: chapter.chapter_number,
+          title,
+          summary,
+          analysis: parsed,
+        });
+        jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+          currentUnit: index + 1 >= chapterRows.length ? "Finalizing summaries" : `Chapter ${index + 2} of ${chapterRows.length}`,
+          totalUnits: chapterRows.length,
+          attempted,
+          successful: results.length,
+          failed,
+          skipped: 0,
+          failedUnits: [],
+        });
+      } catch (chapterError) {
+        failed += 1;
+        jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+          currentUnit: `Failed at chapter ${chapter.chapter_number}`,
+          totalUnits: chapterRows.length,
+          attempted,
+          successful: results.length,
+          failed,
+          skipped: 0,
+          message: getErrorMessage(chapterError),
+          failedUnits: [
+            {
+              id: chapter.id,
+              type: "chapter",
+              label: `Chapter ${chapter.chapter_number}: ${title}`,
+              error: getErrorMessage(chapterError),
+            },
+          ],
+        });
+        throw chapterError;
+      }
+    }
+
+    const completedAt = new Date().toISOString();
+    const finalStatus = await getRevisionJobStatus(supabase, job.id);
+    const completedStatus = finalStatus === "cancelled" ? "cancelled" : "completed";
+    const { error: finalJobError } = await supabase
+      .from("revision_jobs")
+      .update({
+        status: completedStatus,
+        completed_at: completedAt,
+        settings: {
+          model,
+          unit: "chapter",
+          chapterIds: body.chapterIds || null,
+          retryJobId: body.retryJobId || null,
+          progress: buildJobProgress({
+            taskName: "Generate chapter summaries",
+            currentUnit: completedStatus === "cancelled" ? "Cancelled" : "Complete",
+            totalUnits: chapterRows.length,
+            attempted,
+            successful: results.length,
+            failed,
+            skipped: completedStatus === "cancelled" ? Math.max(0, chapterRows.length - attempted) : 0,
+            failedUnits: [],
+            startedAt,
+            completedAt,
+            estimatedSecondsPerUnit: plan.estimatedSecondsPerCall,
+            message:
+              completedStatus === "cancelled"
+                ? "Summary job cancelled. Completed chapter summaries were saved."
+                : "Chapter summaries saved and ready for rewrite context.",
+          }),
+        },
+      })
+      .eq("id", job.id);
+    if (finalJobError) throw finalJobError;
+
+    return NextResponse.json({
+      content: {
+        summarized: results.length,
+        chapters: results.map(({ chapterNumber, title, summary }) => ({ chapterNumber, title, summary })),
+        aiCallPlan: {
+          ...plan,
+          expectedCalls: chapterRows.length,
+          actualCalls: results.length,
+          unitStrategy: "chapters",
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Chapter summary generation failed", error);
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+  }
+}
+
+async function getRetryChapterIds(
+  supabase: Awaited<ReturnType<typeof import("@/lib/supabase/server").createClient>>,
+  jobId: string,
+) {
+  const { data, error } = await supabase.from("revision_jobs").select("settings").eq("id", jobId).single();
+  if (error) throw error;
+  const settings = data.settings as RetryJobSettings | null;
+  const ids = (settings?.progress?.failedUnits || [])
+    .filter((unit) => unit.type === "chapter" && unit.id)
+    .map((unit) => String(unit.id));
+  return ids.length ? new Set(ids) : new Set<string>();
+}
+
+async function readJsonBody(request: Request) {
+  try {
+    return await request.json();
+  } catch {
+    return {};
+  }
+}
+
+function parseChapterSummaryModelResponse(content: string) {
+  return parseModelJsonOrFallback(content, (raw, parseError) => ({
+    chapterSummary: raw,
+    charactersPresent: [],
+    locations: [],
+    importantEvents: [],
+    emotionalBeats: [],
+    motifs: [],
+    timelineNotes: [],
+    continuityNotes: [],
+    parseWarning: parseError,
+  }));
+}
+
+function extractSummary(parsed: unknown) {
+  if (parsed && typeof parsed === "object") {
+    const object = parsed as Record<string, unknown>;
+    const summary = object.chapterSummary || object.summary;
+    if (typeof summary === "string" && summary.trim()) return summary.trim();
+  }
+
+  if (typeof parsed === "string" && parsed.trim()) return parsed.trim();
+  return "Summary generated, but the model returned an empty summary field.";
+}
