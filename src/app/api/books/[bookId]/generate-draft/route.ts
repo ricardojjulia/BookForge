@@ -21,8 +21,8 @@ type ArchitectureChapter = {
   partTitle?: string;
 };
 
-function getErrorMessage(error: unknown) {
-  const lmStudioMessage = getLmStudioErrorMessage(error, "");
+function getErrorMessage(error: unknown, context: { model?: string; task?: string; modelSource?: string; configuredModels?: string[] } = {}) {
+  const lmStudioMessage = getLmStudioErrorMessage(error, "", context);
   if (lmStudioMessage) return lmStudioMessage;
   if (error instanceof Error) return error.message;
   if (typeof error === "object" && error && "message" in error) {
@@ -104,7 +104,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
 
     const settings = await getUserLmStudioSettings(user.id);
     const client = createLmStudioClient(settings);
-    const model = settings.primaryRewriteModel || settings.reasoningModel || settings.extractionModel || "local-model";
+    const modelSelection = selectDraftGenerationModel(settings);
+    const model = modelSelection.model;
     const generated: Array<{ chapterNumber: number; title: string | null; paragraphCount: number }> = [];
 
     const { data: job, error: jobError } = await supabase
@@ -116,6 +117,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         settings: {
           limit,
           model,
+          modelSource: modelSelection.source,
+          configuredModelFallbackOrder: modelSelection.configuredModels,
           generationKind: "planned_chapter_draft",
         },
         created_by: user.id,
@@ -150,14 +153,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
           nextChapterSummary: summarizeArchitectureChapter(nextChapter),
         });
 
-        const completion = await client.chat.completions.create({
-          model,
-          temperature: Math.min(Math.max(settings.temperature, 0.45), 0.8),
-          top_p: settings.topP,
-          max_tokens: Math.min(Math.max(settings.maxOutputTokens, 2048), 6000),
-          messages: [{ role: "user", content: prompt }],
-          response_format: { type: "text" },
-        });
+        const completion = await client.chat.completions
+          .create({
+            model,
+            temperature: Math.min(Math.max(settings.temperature, 0.45), 0.8),
+            top_p: settings.topP,
+            max_tokens: Math.min(Math.max(settings.maxOutputTokens, 2048), 6000),
+            messages: [{ role: "user", content: prompt }],
+            response_format: { type: "text" },
+          })
+          .catch((error) => {
+            throw new Error(
+              `Chapter ${chapter.chapter_number}: ${chapter.title || "Untitled"}: ${getErrorMessage(error, {
+                model,
+                task: "Generate Planned Draft",
+                modelSource: modelSelection.source,
+                configuredModels: modelSelection.configuredModels,
+              })}`,
+            );
+          });
 
         const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "", (raw) => ({
           chapterText: raw,
@@ -252,6 +266,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
           settings: {
             limit,
             model,
+            modelSource: modelSelection.source,
+            configuredModelFallbackOrder: modelSelection.configuredModels,
             generationKind: "planned_chapter_draft",
             generated,
             remaining,
@@ -284,7 +300,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         .from("revision_jobs")
         .update({
           status: "failed",
-          error_message: getErrorMessage(error),
+          error_message: getErrorMessage(error, {
+            model,
+            task: "Generate Planned Draft",
+            modelSource: modelSelection.source,
+            configuredModels: modelSelection.configuredModels,
+          }),
           completed_at: new Date().toISOString(),
         })
         .eq("id", job.id);
@@ -294,6 +315,51 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     console.error("Creation draft generation failed", error);
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
+}
+
+function selectDraftGenerationModel(settings: Awaited<ReturnType<typeof getUserLmStudioSettings>>) {
+  if (settings.primaryRewriteModel) {
+    return {
+      model: settings.primaryRewriteModel,
+      source: "Primary rewrite model",
+      configuredModels: [
+        `Primary rewrite model: ${settings.primaryRewriteModel}`,
+        settings.reasoningModel ? `Reasoning model: ${settings.reasoningModel}` : "",
+        settings.extractionModel ? `Extraction model: ${settings.extractionModel}` : "",
+      ],
+    };
+  }
+  if (settings.reasoningModel) {
+    return {
+      model: settings.reasoningModel,
+      source: "Reasoning model fallback because no primary rewrite model is configured",
+      configuredModels: [
+        "Primary rewrite model: not configured",
+        `Reasoning model: ${settings.reasoningModel}`,
+        settings.extractionModel ? `Extraction model: ${settings.extractionModel}` : "",
+      ],
+    };
+  }
+  if (settings.extractionModel) {
+    return {
+      model: settings.extractionModel,
+      source: "Extraction model fallback because no primary rewrite or reasoning model is configured",
+      configuredModels: [
+        "Primary rewrite model: not configured",
+        "Reasoning model: not configured",
+        `Extraction model: ${settings.extractionModel}`,
+      ],
+    };
+  }
+  return {
+    model: "local-model",
+    source: "Default fallback because no task-specific model is configured",
+    configuredModels: [
+      "Primary rewrite model: not configured",
+      "Reasoning model: not configured",
+      "Extraction model: not configured",
+    ],
+  };
 }
 
 function flattenArchitectureChapters(architecture: unknown): ArchitectureChapter[] {
