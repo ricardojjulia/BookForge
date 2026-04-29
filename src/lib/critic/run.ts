@@ -1,6 +1,7 @@
 import { estimateAiCallPlan } from "@/lib/ai/call-planner";
 import { buildCriticPrompt } from "@/lib/critic/prompts";
 import { extractCriticScore } from "@/lib/critic/score";
+import { summarizeCriticContent } from "@/lib/critic/summary";
 import { createLmStudioClient } from "@/lib/lmstudio/client";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
@@ -112,9 +113,11 @@ export async function runCriticLens(input: {
   const parsedContent =
     typeof parsed === "object" && parsed ? (parsed as Record<string, unknown>) : { executiveSummary: String(parsed) };
   const numericScore = extractCriticScore(parsedContent);
+  const executiveSummary = summarizeCriticContent(parsedContent);
   const content = {
     ...parsedContent,
     ...(parsedContent.score && typeof parsedContent.score === "object" ? { scoreBreakdown: parsedContent.score } : {}),
+    executiveSummary,
     score: numericScore,
     rewriteStage: stage,
     aiCallPlan: {

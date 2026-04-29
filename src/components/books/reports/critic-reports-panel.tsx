@@ -4,6 +4,7 @@ import { Accordion, Badge, Button, Group, JsonInput, Paper, SimpleGrid, Stack, T
 import { useDisclosure } from "@mantine/hooks";
 import { useRouter } from "next/navigation";
 import { extractCriticScore } from "@/lib/critic/score";
+import { summarizeCriticContent } from "@/lib/critic/summary";
 
 type CriticReport = {
   id: string;
@@ -51,7 +52,7 @@ export function CriticReportsPanel({ bookId, reports }: { bookId: string; report
                 </Accordion.Control>
                 <Accordion.Panel>
                   <Stack>
-                    <Text>{summary(content)}</Text>
+                    <Text>{summarizeCriticContent(content)}</Text>
                     <Group>
                       <RecheckCriticButton bookId={bookId} reportType={report.report_type} />
                     </Group>
@@ -117,15 +118,6 @@ function FindingsToggle({ content }: { content: Record<string, unknown> }) {
 
 function formatReportType(type: string) {
   return type.replace(/^critic:/, "").replace(/_/g, " ");
-}
-
-function summary(content: Record<string, unknown>) {
-  return (
-    stringValue(content.executiveSummary) ||
-    stringValue(content.summary) ||
-    stringValue(content.rawModelResponse) ||
-    "No summary returned."
-  );
 }
 
 function stringValue(value: unknown) {
