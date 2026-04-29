@@ -11,7 +11,7 @@ import { criticLenses } from "@/lib/critic/prompts";
 import { fetchJson } from "@/lib/http/fetch-json";
 import type { CriticLens } from "@/lib/types";
 
-type AiDashboardTask = "book-bible" | "critic" | "chapter-summaries";
+type AiDashboardTask = "book-bible" | "critic" | "chapter-summaries" | "generate-draft";
 
 type PendingTask = {
   path: string;
@@ -34,11 +34,13 @@ export function BookActions({
   chapterCount,
   sceneCount,
   paragraphCount,
+  plannedChapterCount = 0,
 }: {
   bookId: string;
   chapterCount: number;
   sceneCount: number;
   paragraphCount: number;
+  plannedChapterCount?: number;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
@@ -69,7 +71,8 @@ export function BookActions({
     setLoading(`preflight:${task}`);
     try {
       const status = await getModelStatus();
-      const modelKey = task === "critic" ? "reasoningModel" : "extractionModel";
+      const modelKey =
+        task === "critic" ? "reasoningModel" : task === "generate-draft" ? "primaryRewriteModel" : "extractionModel";
       const configured = status.configuredModels.find((item) => item.key === modelKey);
       const selectedModel = configured?.model || "";
       const plan = estimateAiCallPlan({
@@ -83,14 +86,21 @@ export function BookActions({
         paragraphCount,
       });
       const estimatedUnits =
-        task === "chapter-summaries"
+        task === "generate-draft"
+          ? Math.min(Math.max(plannedChapterCount, 1), 3)
+          : task === "chapter-summaries"
           ? Math.max(chapterCount, 1)
           : plan.unitStrategy === "paragraphs"
             ? paragraphCount
             : plan.unitStrategy === "scenes"
               ? sceneCount
               : Math.max(chapterCount, 1);
-      const expectedAiCalls = task === "chapter-summaries" ? Math.max(chapterCount, 1) : plan.expectedCalls;
+      const expectedAiCalls =
+        task === "generate-draft"
+          ? Math.min(Math.max(plannedChapterCount, 1), 3)
+          : task === "chapter-summaries"
+            ? Math.max(chapterCount, 1)
+            : plan.expectedCalls;
       const warnings = [
         ...status.warnings,
         ...plan.warnings,
@@ -105,13 +115,21 @@ export function BookActions({
               "BookForge will make one focused extraction call per chapter so these summaries are reliable reusable context.",
             ]
           : []),
+        ...(task === "generate-draft"
+          ? [
+              "BookForge will generate only a small batch of planned chapter shells in this run. Continue running batches until all planned chapters have prose.",
+              "Generated prose becomes the first-draft original text for AI-created books; imported manuscript originals are not affected.",
+            ]
+          : []),
       ];
       const taskPath =
         task === "book-bible"
           ? `/api/books/${bookId}/analyze`
           : task === "chapter-summaries"
             ? `/api/books/${bookId}/chapters/summarize`
-            : `/api/books/${bookId}/critic`;
+            : task === "generate-draft"
+              ? `/api/books/${bookId}/generate-draft`
+              : `/api/books/${bookId}/critic`;
 
       setPendingTask({
         path: taskPath,
@@ -122,14 +140,19 @@ export function BookActions({
               ? "Generate Manuscript Blueprint"
               : task === "chapter-summaries"
                 ? "Generate Chapter Summaries"
+                : task === "generate-draft"
+                  ? "Generate Planned Draft"
                 : `BookForge Critic: ${criticLenses[lens].label}`,
           taskDescription:
             task === "book-bible"
               ? "Analyze manuscript structure and extract reusable book context for future revisions."
               : task === "chapter-summaries"
                 ? "Summarize every chapter for future Manuscript Blueprint, Critic, and revision context."
+                : task === "generate-draft"
+                  ? "Write prose for planned AI-created chapter shells using the accepted Creation Wizard architecture."
                 : "Evaluate the book through the selected critic lens without rewriting manuscript text.",
-          requiredModelType: task === "critic" ? "Reasoning model" : "Extraction model",
+          requiredModelType:
+            task === "critic" ? "Reasoning model" : task === "generate-draft" ? "Primary rewrite model" : "Extraction model",
           selectedModel,
           lmStudioConnected: status.connected,
           modelAvailable: Boolean(configured?.available),
@@ -144,8 +167,10 @@ export function BookActions({
           usableContextTokens: plan.usableContextTokens,
           estimatedSecondsPerCall: plan.estimatedSecondsPerCall,
           estimatedTotalSeconds:
-            task === "chapter-summaries" ? plan.estimatedSecondsPerCall * expectedAiCalls : plan.estimatedTotalSeconds,
-          unitStrategy: task === "chapter-summaries" ? "chapters" : plan.unitStrategy,
+            task === "chapter-summaries" || task === "generate-draft"
+              ? plan.estimatedSecondsPerCall * expectedAiCalls
+              : plan.estimatedTotalSeconds,
+          unitStrategy: task === "chapter-summaries" || task === "generate-draft" ? "chapters" : plan.unitStrategy,
           modelSizeB: plan.modelSizeB,
           quantization: plan.quantization,
           warnings,
@@ -328,6 +353,16 @@ export function BookActions({
           title="Rewrite & Export"
           description="Move from architecture to reviewable drafts and final files."
         >
+          {plannedChapterCount > 0 && (
+            <Button
+              fullWidth
+              color="orange"
+              loading={loading === "preflight:generate-draft" || loading === `/api/books/${bookId}/generate-draft`}
+              onClick={() => openPreflight("generate-draft")}
+            >
+              Generate Planned Draft ({Math.min(plannedChapterCount, 3)} of {plannedChapterCount})
+            </Button>
+          )}
           <Button component={Link} href={`/books/${bookId}/rewrite-plan`} color="dark" variant="light" fullWidth>
             Rewrite Architect
           </Button>
@@ -425,6 +460,14 @@ function formatResultMessage(path: string, result: { content?: Record<string, un
   if (path.includes("/chapters/summarize")) {
     const summarized = result.content?.summarized;
     return `Chapter summaries saved.${typeof summarized === "number" ? ` Summarized ${summarized} chapter(s).` : ""}`;
+  }
+
+  if (path.includes("/generate-draft")) {
+    const generated = result.content?.generated;
+    const remaining = result.content?.remaining;
+    return `Planned draft generated.${typeof generated === "number" ? ` Drafted ${generated} chapter(s).` : ""}${
+      typeof remaining === "number" ? ` ${remaining} planned chapter(s) remaining.` : ""
+    }`;
   }
 
   return "Task completed and saved.";

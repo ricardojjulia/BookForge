@@ -51,6 +51,10 @@ export function parseManuscript(originalText: string, title = "Untitled Book"): 
   };
 }
 
+export function parseChapterScenes(text: string): ParsedScene[] {
+  return splitScenes(text);
+}
+
 function splitChapters(text: string): ParsedChapter[] {
   const lines = text.split("\n");
   const starts: Array<{ index: number; title: string }> = [];

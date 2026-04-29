@@ -3,6 +3,7 @@ export type StructureAuditChapter = {
   chapter_number: number;
   title: string | null;
   original_text?: string | null;
+  status?: string | null;
   section_type?: string | null;
   exclude_from_rewrite?: boolean | null;
   exclude_from_export?: boolean | null;
@@ -51,7 +52,23 @@ export function auditBookStructure(chapters: StructureAuditChapter[], paragraphs
     const wordCount = chapterParagraphs.reduce((sum, paragraph) => sum + countWords(paragraph.original_text), 0);
     const titleLooksLikeMatter = looksLikeFrontMatter(chapter.title);
 
-    if (chapterParagraphs.length === 0 || wordCount < 20) {
+    const isPlannedCreationShell =
+      chapter.status === "planned" ||
+      /Draft text has not been generated yet\. This planned chapter shell was created from BookForge Creator architecture\./i.test(
+        chapter.original_text || "",
+      );
+
+    if ((chapterParagraphs.length === 0 || wordCount < 20) && isPlannedCreationShell) {
+      issues.push({
+        id: `planned-${chapter.id}`,
+        severity: "low",
+        title: "Planned chapter awaiting generated draft",
+        description:
+          "This chapter was created from the BookForge Creator architecture. It is expected to stay short until you run Generate Planned Draft.",
+        chapterId: chapter.id,
+        chapterNumber: chapter.chapter_number,
+      });
+    } else if (chapterParagraphs.length === 0 || wordCount < 20) {
       issues.push({
         id: `empty-${chapter.id}`,
         severity: "high",

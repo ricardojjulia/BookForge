@@ -167,6 +167,14 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           workflow: rewriteWorkflow as RewriteWorkflowRow,
         })
       : null;
+  const plannedChapterCount =
+    chapters?.filter(
+      (chapter) =>
+        chapter.status === "planned" ||
+        /Draft text has not been generated yet\. This planned chapter shell was created from BookForge Creator architecture\./i.test(
+          chapter.original_text || "",
+        ),
+    ).length || 0;
 
   return (
     <AppShell>
@@ -242,6 +250,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
             chapterCount={chapters?.length || 0}
             sceneCount={scenes || 0}
             paragraphCount={paragraphs || 0}
+            plannedChapterCount={plannedChapterCount}
           />
         </Paper>
 
