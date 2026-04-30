@@ -3,9 +3,10 @@ import { z } from "zod";
 import { buildJobProgress, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
 import { estimateAiCallPlan } from "@/lib/ai/call-planner";
 import { buildBookBiblePrompt } from "@/lib/prompts/builders";
-import { createLmStudioClient } from "@/lib/lmstudio/client";
+import { createLmStudioClient, testLmStudioConnection } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
+import { getExtractionModelCandidates, selectLoadedLmStudioModel } from "@/lib/lmstudio/model-selection";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { createClient } from "@/lib/supabase/server";
 
@@ -19,8 +20,11 @@ type RetryJobSettings = {
   };
 };
 
-function getErrorMessage(error: unknown) {
-  const lmStudioMessage = getLmStudioErrorMessage(error, "");
+function getErrorMessage(
+  error: unknown,
+  context: { model?: string; task?: string; modelSource?: string; configuredModels?: string[] } = {},
+) {
+  const lmStudioMessage = getLmStudioErrorMessage(error, "", context);
   if (lmStudioMessage) return lmStudioMessage;
   if (error instanceof Error) return error.message;
   if (typeof error === "object" && error && "message" in error) {
@@ -48,7 +52,12 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     const settings = await getUserLmStudioSettings(user.id);
     const client = createLmStudioClient(settings);
-    const model = settings.extractionModel || settings.primaryRewriteModel || "local-model";
+    const availableModels = await getAvailableModels(settings.baseUrl);
+    const modelSelection = selectLoadedLmStudioModel({
+      candidates: getExtractionModelCandidates(settings),
+      availableModels,
+    });
+    const model = modelSelection.model;
     const plan = estimateAiCallPlan({
       task: "book-bible",
       selectedModel: model,
@@ -76,6 +85,10 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         status: "running",
         settings: {
           model,
+          modelSource: modelSelection.source,
+          configuredModelFallbackOrder: modelSelection.configuredModels,
+          availableModels: modelSelection.availableModels,
+          usedLoadedFallback: modelSelection.usedLoadedFallback,
           unit: "analysis_chunk",
           retryJobId: body.retryJobId || null,
           retryChunkNumbers: retryChunkNumbers ? Array.from(retryChunkNumbers) : null,
@@ -99,7 +112,15 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       .single();
     if (jobError) throw jobError;
 
-    let jobSettings: unknown = { model, unit: "analysis_chunk", retryJobId: body.retryJobId || null };
+    let jobSettings: unknown = {
+      model,
+      modelSource: modelSelection.source,
+      configuredModelFallbackOrder: modelSelection.configuredModels,
+      availableModels: modelSelection.availableModels,
+      usedLoadedFallback: modelSelection.usedLoadedFallback,
+      unit: "analysis_chunk",
+      retryJobId: body.retryJobId || null,
+    };
     const partials = [];
     let attempted = 0;
     let failed = 0;
@@ -155,7 +176,12 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         });
       } catch (chunkError) {
         failed += 1;
-        const message = getErrorMessage(chunkError);
+        const message = getErrorMessage(chunkError, {
+          model,
+          task: "Generate Manuscript Blueprint",
+          modelSource: modelSelection.source,
+          configuredModels: modelSelection.configuredModels,
+        });
         await updateRevisionJobProgress(supabase, job.id, jobSettings, {
           currentUnit: `Failed at analysis chunk ${chunk.chunkNumber}`,
           totalUnits: chunks.length,
@@ -212,6 +238,10 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         completed_at: completedAt,
         settings: {
           model,
+          modelSource: modelSelection.source,
+          configuredModelFallbackOrder: modelSelection.configuredModels,
+          availableModels: modelSelection.availableModels,
+          usedLoadedFallback: modelSelection.usedLoadedFallback,
           unit: "analysis_chunk",
           retryJobId: body.retryJobId || null,
           progress: buildJobProgress({
@@ -251,6 +281,14 @@ async function readJsonBody(request: Request) {
     return await request.json();
   } catch {
     return {};
+  }
+}
+
+async function getAvailableModels(baseUrl: string) {
+  try {
+    return (await testLmStudioConnection({ baseUrl })).models;
+  } catch {
+    return [];
   }
 }
 

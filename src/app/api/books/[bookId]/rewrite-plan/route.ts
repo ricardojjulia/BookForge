@@ -4,6 +4,7 @@ import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
 import { createLmStudioClient, testLmStudioConnection } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
+import { getReasoningModelCandidates, selectLoadedLmStudioModel } from "@/lib/lmstudio/model-selection";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { applyRewritePlanDefaults } from "@/lib/rewrite/plan-defaults";
 import { buildRewritePlanPrompt } from "@/lib/rewrite/plan-prompt";
@@ -60,13 +61,17 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
 
     const settings = await getUserLmStudioSettings(user.id);
     const client = createLmStudioClient(settings);
-    const model = settings.reasoningModel || settings.primaryRewriteModel || "local-model";
     let availableModels: string[] = [];
     try {
       availableModels = (await testLmStudioConnection({ baseUrl: settings.baseUrl })).models;
     } catch {
       availableModels = [];
     }
+    const modelSelection = selectLoadedLmStudioModel({
+      candidates: getReasoningModelCandidates(settings),
+      availableModels,
+    });
+    const model = modelSelection.model;
     const rewriteModelSelection = selectBestRewriteModel(availableModels, {
       qualityProfile: settings.qualityProfile,
       contextWindowTokens: settings.contextWindowTokens,
@@ -123,6 +128,7 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
         },
         sourceCriticReports: reports?.length || 0,
         rewriteModelSelection,
+        plannerModelSelection: modelSelection,
         generatedAt: new Date().toISOString(),
       },
       { chapters: chapters || [] },

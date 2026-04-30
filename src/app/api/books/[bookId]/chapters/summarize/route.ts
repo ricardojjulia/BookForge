@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildJobProgress, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
 import { estimateAiCallPlan } from "@/lib/ai/call-planner";
-import { createLmStudioClient } from "@/lib/lmstudio/client";
+import { createLmStudioClient, testLmStudioConnection } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
+import { getExtractionModelCandidates, selectLoadedLmStudioModel } from "@/lib/lmstudio/model-selection";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { buildChapterSummaryPrompt } from "@/lib/prompts/builders";
 import { createClient } from "@/lib/supabase/server";
@@ -20,8 +21,11 @@ type RetryJobSettings = {
   };
 };
 
-function getErrorMessage(error: unknown) {
-  const lmStudioMessage = getLmStudioErrorMessage(error, "");
+function getErrorMessage(
+  error: unknown,
+  context: { model?: string; task?: string; modelSource?: string; configuredModels?: string[] } = {},
+) {
+  const lmStudioMessage = getLmStudioErrorMessage(error, "", context);
   if (lmStudioMessage) return lmStudioMessage;
   if (error instanceof Error) return error.message;
   if (typeof error === "object" && error && "message" in error) {
@@ -73,7 +77,12 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     const settings = await getUserLmStudioSettings(user.id);
     const client = createLmStudioClient(settings);
-    const model = settings.extractionModel || settings.primaryRewriteModel || "local-model";
+    const availableModels = await getAvailableModels(settings.baseUrl);
+    const modelSelection = selectLoadedLmStudioModel({
+      candidates: getExtractionModelCandidates(settings),
+      availableModels,
+    });
+    const model = modelSelection.model;
     const plan = estimateAiCallPlan({
       task: "book-bible",
       selectedModel: model,
@@ -94,6 +103,10 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         status: "running",
         settings: {
           model,
+          modelSource: modelSelection.source,
+          configuredModelFallbackOrder: modelSelection.configuredModels,
+          availableModels: modelSelection.availableModels,
+          usedLoadedFallback: modelSelection.usedLoadedFallback,
           unit: "chapter",
           chapterIds: body.chapterIds || null,
           retryJobId: body.retryJobId || null,
@@ -119,6 +132,10 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     let jobSettings: unknown = {
       model,
+      modelSource: modelSelection.source,
+      configuredModelFallbackOrder: modelSelection.configuredModels,
+      availableModels: modelSelection.availableModels,
+      usedLoadedFallback: modelSelection.usedLoadedFallback,
       unit: "chapter",
       chapterIds: body.chapterIds || null,
       retryJobId: body.retryJobId || null,
@@ -187,6 +204,12 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         });
       } catch (chapterError) {
         failed += 1;
+        const message = getErrorMessage(chapterError, {
+          model,
+          task: "Generate Chapter Summaries",
+          modelSource: modelSelection.source,
+          configuredModels: modelSelection.configuredModels,
+        });
         jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
           currentUnit: `Failed at chapter ${chapter.chapter_number}`,
           totalUnits: chapterRows.length,
@@ -194,13 +217,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           successful: results.length,
           failed,
           skipped: 0,
-          message: getErrorMessage(chapterError),
+          message,
           failedUnits: [
             {
               id: chapter.id,
               type: "chapter",
               label: `Chapter ${chapter.chapter_number}: ${title}`,
-              error: getErrorMessage(chapterError),
+              error: message,
             },
           ],
         });
@@ -218,6 +241,10 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         completed_at: completedAt,
         settings: {
           model,
+          modelSource: modelSelection.source,
+          configuredModelFallbackOrder: modelSelection.configuredModels,
+          availableModels: modelSelection.availableModels,
+          usedLoadedFallback: modelSelection.usedLoadedFallback,
           unit: "chapter",
           chapterIds: body.chapterIds || null,
           retryJobId: body.retryJobId || null,
@@ -279,6 +306,14 @@ async function readJsonBody(request: Request) {
     return await request.json();
   } catch {
     return {};
+  }
+}
+
+async function getAvailableModels(baseUrl: string) {
+  try {
+    return (await testLmStudioConnection({ baseUrl })).models;
+  } catch {
+    return [];
   }
 }
 
