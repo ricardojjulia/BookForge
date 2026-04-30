@@ -1,6 +1,7 @@
 "use client";
 
-import { Accordion, Badge, Button, Group, JsonInput, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { useMemo, useState } from "react";
+import { Accordion, Badge, Button, Group, JsonInput, Pagination, Paper, Select, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { useRouter } from "next/navigation";
 import { extractCriticScore } from "@/lib/critic/score";
@@ -13,57 +14,95 @@ type CriticReport = {
   content: Record<string, unknown> | null;
 };
 
+const REPORTS_PER_PAGE = 12;
+
 export function CriticReportsPanel({ bookId, reports }: { bookId: string; reports: CriticReport[] }) {
+  const [page, setPage] = useState(1);
+  const [filter, setFilter] = useState("all");
+  const reportTypeOptions = useMemo(() => getReportTypeOptions(reports), [reports]);
+  const filteredReports = useMemo(() => filterReports(reports, filter), [reports, filter]);
+  const totalPages = Math.max(1, Math.ceil(filteredReports.length / REPORTS_PER_PAGE));
+  const visibleReports = filteredReports.slice((page - 1) * REPORTS_PER_PAGE, page * REPORTS_PER_PAGE);
+
+  function updateFilter(value: string | null) {
+    setFilter(value || "all");
+    setPage(1);
+  }
+
   return (
     <Paper withBorder radius="md" p="xl" bg="white" mt="xl">
-      <Group justify="space-between" mb="md">
+      <Group justify="space-between" mb="md" align="flex-start">
         <div>
           <Title order={2}>Saved Critic Reports</Title>
           <Text c="dimmed">BookForge Critic saves reports here for review and comparison.</Text>
         </div>
-        <Badge color="grape" variant="light">
-          {reports.length}
-        </Badge>
+        <Group gap="xs">
+          <Badge color="grape" variant="light">
+            {filteredReports.length}/{reports.length}
+          </Badge>
+          {totalPages > 1 && (
+            <Badge color="gray" variant="light">
+              Page {page} of {totalPages}
+            </Badge>
+          )}
+        </Group>
       </Group>
 
       {!reports.length ? (
         <Text c="dimmed">No critic reports yet. Run BookForge Critic to create one.</Text>
       ) : (
-        <Accordion variant="separated">
-          {reports.map((report) => {
-            const content = report.content || {};
-            const score = extractCriticScore(content);
-            return (
-              <Accordion.Item key={report.id} value={report.id}>
-                <Accordion.Control>
-                  <Group justify="space-between" pr="md">
-                    <Stack gap={2}>
-                      <Group gap="xs">
-                        <Badge color="grape" variant="light">
-                          {formatReportType(report.report_type)}
-                        </Badge>
-                        {typeof score === "number" && <Badge color="teal">Score {score}</Badge>}
+        <Stack>
+          <Select
+            label="Report filter"
+            value={filter}
+            onChange={updateFilter}
+            data={reportTypeOptions}
+            allowDeselect={false}
+            maw={360}
+          />
+          {visibleReports.length ? (
+            <Accordion variant="separated">
+              {visibleReports.map((report) => {
+                const content = report.content || {};
+                const score = extractCriticScore(content);
+                return (
+                  <Accordion.Item key={report.id} value={report.id}>
+                    <Accordion.Control>
+                      <Group justify="space-between" pr="md">
+                        <Stack gap={2}>
+                          <Group gap="xs">
+                            <Badge color="grape" variant="light">
+                              {formatReportType(report.report_type)}
+                            </Badge>
+                            {typeof score === "number" && <Badge color="teal">Score {score}</Badge>}
+                          </Group>
+                          <Text size="sm" c="dimmed">
+                            {new Date(report.created_at).toLocaleString()}
+                          </Text>
+                        </Stack>
                       </Group>
-                      <Text size="sm" c="dimmed">
-                        {new Date(report.created_at).toLocaleString()}
-                      </Text>
-                    </Stack>
-                  </Group>
-                </Accordion.Control>
-                <Accordion.Panel>
-                  <Stack>
-                    <Text>{summarizeCriticContent(content)}</Text>
-                    <Group>
-                      <RecheckCriticButton bookId={bookId} reportType={report.report_type} />
-                    </Group>
-                    <FindingsToggle content={content} />
-                    <FullJsonToggle content={content} />
-                  </Stack>
-                </Accordion.Panel>
-              </Accordion.Item>
-            );
-          })}
-        </Accordion>
+                    </Accordion.Control>
+                    <Accordion.Panel>
+                      <Stack>
+                        <Text>{summarizeCriticContent(content)}</Text>
+                        {report.report_type.startsWith("critic:") && (
+                          <Group>
+                            <RecheckCriticButton bookId={bookId} reportType={report.report_type} />
+                          </Group>
+                        )}
+                        <FindingsToggle content={content} />
+                        <FullJsonToggle content={content} />
+                      </Stack>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                );
+              })}
+            </Accordion>
+          ) : (
+            <Text c="dimmed">No reports match this filter.</Text>
+          )}
+          {totalPages > 1 && <Pagination value={page} onChange={setPage} total={totalPages} size="sm" />}
+        </Stack>
       )}
     </Paper>
   );
@@ -118,6 +157,32 @@ function FindingsToggle({ content }: { content: Record<string, unknown> }) {
 
 function formatReportType(type: string) {
   return type.replace(/^critic:/, "").replace(/_/g, " ");
+}
+
+function getReportTypeOptions(reports: CriticReport[]) {
+  const typeOptions = Array.from(new Set(reports.map((report) => report.report_type))).map((type) => ({
+    value: `type:${type}`,
+    label: formatReportType(type),
+  }));
+
+  return [
+    { value: "all", label: "All reports" },
+    { value: "critic", label: "Critic reports" },
+    { value: "rewrite", label: "Rewrite activity" },
+    { value: "continuity", label: "Continuity ledger" },
+    ...typeOptions,
+  ];
+}
+
+function filterReports(reports: CriticReport[], filter: string) {
+  if (filter === "critic") return reports.filter((report) => report.report_type.startsWith("critic"));
+  if (filter === "rewrite") return reports.filter((report) => report.report_type.startsWith("rewrite"));
+  if (filter === "continuity") return reports.filter((report) => report.report_type === "continuity_ledger");
+  if (filter.startsWith("type:")) {
+    const type = filter.slice("type:".length);
+    return reports.filter((report) => report.report_type === type);
+  }
+  return reports;
 }
 
 function stringValue(value: unknown) {

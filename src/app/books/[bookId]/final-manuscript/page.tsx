@@ -96,9 +96,9 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
       .from("coherence_reports")
       .select("report_type,content,created_at")
       .eq("book_id", bookId)
-      .like("report_type", "critic:%")
+      .or("report_type.like.critic:%,report_type.like.critic_post:%,report_type.eq.humanized_guidance")
       .order("created_at", { ascending: false })
-      .limit(14),
+      .limit(30),
     supabase
       .from("revision_jobs")
       .select("id,status,created_at")

@@ -60,6 +60,15 @@ type RevisionInstructionRow = {
   scope: string | null;
 };
 
+type BookMetadataRow = {
+  title: string;
+  author_name: string | null;
+  genre: string | null;
+  target_audience: string | null;
+  point_of_view: string | null;
+  tense: string | null;
+};
+
 const emptyBible = {
   summary: "",
   genre: "",
@@ -99,6 +108,7 @@ const matterTypes = [
 
 export function BookInputsManager({
   bookId,
+  book,
   bible,
   authorNotes,
   characters,
@@ -107,6 +117,7 @@ export function BookInputsManager({
   revisionInstructions,
 }: {
   bookId: string;
+  book: BookMetadataRow;
   bible: BookBibleRow;
   authorNotes: AuthorNotesRow;
   characters: CharacterRow[];
@@ -125,6 +136,7 @@ export function BookInputsManager({
         </div>
         <Tabs defaultValue="chapter">
           <Tabs.List>
+            <Tabs.Tab value="metadata">Metadata</Tabs.Tab>
             <Tabs.Tab value="chapter">Add Chapter</Tabs.Tab>
             <Tabs.Tab value="bible">Manuscript Blueprint</Tabs.Tab>
             <Tabs.Tab value="notes">Author Notes</Tabs.Tab>
@@ -134,6 +146,9 @@ export function BookInputsManager({
             <Tabs.Tab value="matter">Front / Back Matter</Tabs.Tab>
           </Tabs.List>
 
+          <Tabs.Panel value="metadata" pt="lg">
+            <BookMetadataForm bookId={bookId} book={book} />
+          </Tabs.Panel>
           <Tabs.Panel value="chapter" pt="lg">
             <ManualChapterForm bookId={bookId} />
           </Tabs.Panel>
@@ -158,6 +173,89 @@ export function BookInputsManager({
         </Tabs>
       </Stack>
     </Paper>
+  );
+}
+
+function BookMetadataForm({ bookId, book }: { bookId: string; book: BookMetadataRow }) {
+  const router = useRouter();
+  const [metadata, setMetadata] = useState({
+    title: book.title || "",
+    author_name: book.author_name || "",
+    genre: book.genre || "",
+    target_audience: book.target_audience || "",
+    point_of_view: book.point_of_view || "",
+    tense: book.tense || "",
+  });
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function save() {
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const supabase = createClient();
+      const { error: saveError } = await supabase
+        .from("books")
+        .update({
+          ...metadata,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", bookId);
+      if (saveError) throw saveError;
+      setMessage("Book metadata saved.");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save book metadata.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Stack>
+      <InputNotice text="These fields appear in dashboards and exports. Author name is the formal byline used in publishable files." />
+      {message && <Alert color="green">{message}</Alert>}
+      {error && <Alert color="red">{error}</Alert>}
+      <SimpleGrid cols={{ base: 1, md: 2 }}>
+        <TextInput
+          label="Title"
+          value={metadata.title}
+          onChange={(event) => setMetadata({ ...metadata, title: event.currentTarget.value })}
+        />
+        <TextInput
+          label="Author name"
+          value={metadata.author_name}
+          onChange={(event) => setMetadata({ ...metadata, author_name: event.currentTarget.value })}
+        />
+        <TextInput
+          label="Genre"
+          value={metadata.genre}
+          onChange={(event) => setMetadata({ ...metadata, genre: event.currentTarget.value })}
+        />
+        <TextInput
+          label="Target audience"
+          value={metadata.target_audience}
+          onChange={(event) => setMetadata({ ...metadata, target_audience: event.currentTarget.value })}
+        />
+        <TextInput
+          label="Point of view"
+          value={metadata.point_of_view}
+          onChange={(event) => setMetadata({ ...metadata, point_of_view: event.currentTarget.value })}
+        />
+        <TextInput
+          label="Tense"
+          value={metadata.tense}
+          onChange={(event) => setMetadata({ ...metadata, tense: event.currentTarget.value })}
+        />
+      </SimpleGrid>
+      <Group justify="flex-end">
+        <Button color="grape" loading={loading} onClick={save}>
+          Save Metadata
+        </Button>
+      </Group>
+    </Stack>
   );
 }
 

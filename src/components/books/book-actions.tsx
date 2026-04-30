@@ -11,7 +11,7 @@ import { criticLenses } from "@/lib/critic/prompts";
 import { fetchJson } from "@/lib/http/fetch-json";
 import type { CriticLens } from "@/lib/types";
 
-type AiDashboardTask = "book-bible" | "critic" | "chapter-summaries" | "generate-draft";
+type AiDashboardTask = "book-bible" | "critic" | "critic-all" | "chapter-summaries" | "generate-draft";
 
 type PendingTask = {
   path: string;
@@ -72,11 +72,15 @@ export function BookActions({
     try {
       const status = await getModelStatus();
       const modelKey =
-        task === "critic" ? "reasoningModel" : task === "generate-draft" ? "primaryRewriteModel" : "extractionModel";
+        task === "critic" || task === "critic-all"
+          ? "reasoningModel"
+          : task === "generate-draft"
+            ? "primaryRewriteModel"
+            : "extractionModel";
       const configured = status.configuredModels.find((item) => item.key === modelKey);
       const selectedModel = configured?.model || "";
       const plan = estimateAiCallPlan({
-        task: task === "critic" ? "critic" : "book-bible",
+        task: task === "critic" || task === "critic-all" ? "critic" : "book-bible",
         selectedModel,
         qualityProfile: status.qualityProfile,
         contextWindowTokens: status.contextWindowTokens,
@@ -86,7 +90,9 @@ export function BookActions({
         paragraphCount,
       });
       const estimatedUnits =
-        task === "generate-draft"
+        task === "critic-all"
+          ? 7
+          : task === "generate-draft"
           ? Math.min(Math.max(plannedChapterCount, 1), 3)
           : task === "chapter-summaries"
           ? Math.max(chapterCount, 1)
@@ -96,7 +102,9 @@ export function BookActions({
               ? sceneCount
               : Math.max(chapterCount, 1);
       const expectedAiCalls =
-        task === "generate-draft"
+        task === "critic-all"
+          ? 7
+          : task === "generate-draft"
           ? Math.min(Math.max(plannedChapterCount, 1), 3)
           : task === "chapter-summaries"
             ? Math.max(chapterCount, 1)
@@ -115,6 +123,11 @@ export function BookActions({
               "BookForge will make one focused extraction call per chapter so these summaries are reliable reusable context.",
             ]
           : []),
+        ...(task === "critic-all"
+          ? [
+              "BookForge will run all seven baseline Critic lenses. This is the fastest way to clear rewrite-planning Critic coverage.",
+            ]
+          : []),
         ...(task === "generate-draft"
           ? [
               "BookForge will generate only a small batch of planned chapter shells in this run. Continue running batches until all planned chapters have prose.",
@@ -127,19 +140,23 @@ export function BookActions({
           ? `/api/books/${bookId}/analyze`
           : task === "chapter-summaries"
             ? `/api/books/${bookId}/chapters/summarize`
+            : task === "critic-all"
+              ? `/api/books/${bookId}/critic/all`
             : task === "generate-draft"
               ? `/api/books/${bookId}/generate-draft`
               : `/api/books/${bookId}/critic`;
 
       setPendingTask({
         path: taskPath,
-        body: task === "critic" ? { lens } : undefined,
+        body: task === "critic" ? { lens } : task === "critic-all" ? { stage: "baseline" } : undefined,
         preflight: {
           taskName:
             task === "book-bible"
               ? "Generate Manuscript Blueprint"
               : task === "chapter-summaries"
                 ? "Generate Chapter Summaries"
+                : task === "critic-all"
+                  ? "Run all BookForge Critic lenses"
                 : task === "generate-draft"
                   ? "Generate Planned Draft"
                 : `BookForge Critic: ${criticLenses[lens].label}`,
@@ -148,11 +165,17 @@ export function BookActions({
               ? "Analyze manuscript structure and extract reusable book context for future revisions."
               : task === "chapter-summaries"
                 ? "Summarize every chapter for future Manuscript Blueprint, Critic, and revision context."
+                : task === "critic-all"
+                  ? "Evaluate the book through every baseline Critic lens required for rewrite planning."
                 : task === "generate-draft"
                   ? "Write prose for planned AI-created chapter shells using the accepted Creation Wizard architecture."
                 : "Evaluate the book through the selected critic lens without rewriting manuscript text.",
           requiredModelType:
-            task === "critic" ? "Reasoning model" : task === "generate-draft" ? "Primary rewrite model" : "Extraction model",
+            task === "critic" || task === "critic-all"
+              ? "Reasoning model"
+              : task === "generate-draft"
+                ? "Primary rewrite model"
+                : "Extraction model",
           selectedModel,
           lmStudioConnected: status.connected,
           modelAvailable: Boolean(configured?.available),
@@ -347,6 +370,14 @@ export function BookActions({
           >
             Run Selected Critic Lens
           </Button>
+          <Button
+            fullWidth
+            color="grape"
+            loading={loading === "preflight:critic-all" || loading === `/api/books/${bookId}/critic/all`}
+            onClick={() => openPreflight("critic-all")}
+          >
+            Run All Critic Lenses
+          </Button>
         </ActionPanel>
 
         <ActionPanel
@@ -451,6 +482,11 @@ function formatResultMessage(path: string, result: { content?: Record<string, un
     return calls
       ? `Manuscript Blueprint saved. Processed with ${calls} AI call(s) using ${plan?.unitStrategy || "planned"} chunking.`
       : "Manuscript Blueprint saved.";
+  }
+
+  if (path.includes("/critic/all")) {
+    const completed = result.content?.completed;
+    return `BookForge Critic batch saved${typeof completed === "number" ? `: ${completed}/7 lenses completed.` : "."}`;
   }
 
   if (path.includes("/critic")) {

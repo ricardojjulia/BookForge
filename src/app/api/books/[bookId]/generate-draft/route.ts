@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { buildCreationDraftChapterPrompt } from "@/lib/creation/draft-prompt";
-import { createLmStudioClient } from "@/lib/lmstudio/client";
+import { createLmStudioClient, testLmStudioConnection } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
+import { getDraftModelCandidates, selectLoadedLmStudioModel } from "@/lib/lmstudio/model-selection";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { parseChapterScenes } from "@/lib/manuscript/parser";
 import { createClient } from "@/lib/supabase/server";
@@ -104,7 +105,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
 
     const settings = await getUserLmStudioSettings(user.id);
     const client = createLmStudioClient(settings);
-    const modelSelection = selectDraftGenerationModel(settings);
+    const modelSelection = selectLoadedLmStudioModel({
+      candidates: getDraftModelCandidates(settings),
+      availableModels: await getAvailableModels(settings.baseUrl),
+    });
     const model = modelSelection.model;
     const generated: Array<{ chapterNumber: number; title: string | null; paragraphCount: number }> = [];
 
@@ -119,6 +123,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
           model,
           modelSource: modelSelection.source,
           configuredModelFallbackOrder: modelSelection.configuredModels,
+          availableModels: modelSelection.availableModels,
+          usedLoadedFallback: modelSelection.usedLoadedFallback,
           generationKind: "planned_chapter_draft",
         },
         created_by: user.id,
@@ -288,6 +294,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         })
         .eq("id", creationProject.id);
 
+      await supabase
+        .from("books")
+        .update({
+          status: remaining > 0 ? "generating" : "created",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", bookId)
+        .in("status", ["planned", "draft", "generating"]);
+
       return NextResponse.json({
         content: {
           generated: generated.length,
@@ -317,49 +332,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
   }
 }
 
-function selectDraftGenerationModel(settings: Awaited<ReturnType<typeof getUserLmStudioSettings>>) {
-  if (settings.primaryRewriteModel) {
-    return {
-      model: settings.primaryRewriteModel,
-      source: "Primary rewrite model",
-      configuredModels: [
-        `Primary rewrite model: ${settings.primaryRewriteModel}`,
-        settings.reasoningModel ? `Reasoning model: ${settings.reasoningModel}` : "",
-        settings.extractionModel ? `Extraction model: ${settings.extractionModel}` : "",
-      ],
-    };
+async function getAvailableModels(baseUrl: string) {
+  try {
+    return (await testLmStudioConnection({ baseUrl })).models;
+  } catch {
+    return [];
   }
-  if (settings.reasoningModel) {
-    return {
-      model: settings.reasoningModel,
-      source: "Reasoning model fallback because no primary rewrite model is configured",
-      configuredModels: [
-        "Primary rewrite model: not configured",
-        `Reasoning model: ${settings.reasoningModel}`,
-        settings.extractionModel ? `Extraction model: ${settings.extractionModel}` : "",
-      ],
-    };
-  }
-  if (settings.extractionModel) {
-    return {
-      model: settings.extractionModel,
-      source: "Extraction model fallback because no primary rewrite or reasoning model is configured",
-      configuredModels: [
-        "Primary rewrite model: not configured",
-        "Reasoning model: not configured",
-        `Extraction model: ${settings.extractionModel}`,
-      ],
-    };
-  }
-  return {
-    model: "local-model",
-    source: "Default fallback because no task-specific model is configured",
-    configuredModels: [
-      "Primary rewrite model: not configured",
-      "Reasoning model: not configured",
-      "Extraction model: not configured",
-    ],
-  };
 }
 
 function flattenArchitectureChapters(architecture: unknown): ArchitectureChapter[] {

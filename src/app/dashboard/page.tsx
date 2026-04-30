@@ -1,6 +1,7 @@
 import { Alert, Badge, Button, Container, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { DeleteBookButton } from "@/components/books/delete-book-button";
 import { AppShell } from "@/components/layout/app-shell";
+import { getBookAuthorDisplay } from "@/lib/books/status";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -95,7 +96,7 @@ export default async function DashboardPage() {
                   </Badge>
                 </Group>
                 <Title order={3}>{book.title}</Title>
-                <Text c="dimmed">{book.author_name || "Unknown author"}</Text>
+                <Text c="dimmed">{getBookAuthorDisplay(book)}</Text>
                 <Group mt="sm">
                   <Button component="a" href={`/books/${book.id}`} variant="light" color="grape">
                     Continue Editing

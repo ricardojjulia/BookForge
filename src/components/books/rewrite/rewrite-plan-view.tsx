@@ -40,30 +40,37 @@ export function RewritePlanView({
         )}
       </Paper>
 
-      <SimpleGrid cols={{ base: 1, lg: 2 }}>
-        <ListPanel title="Global Guardrails" items={arrayValue(plan.globalGuardrails)} />
-        <ObjectPanel title="Coherence Contract" value={objectValue(plan.coherenceContract)} />
-      </SimpleGrid>
+      <Paper withBorder radius="md" p="xl" bg="white">
+        <details>
+          <summary style={{ cursor: "pointer", fontWeight: 800 }}>Plan Details</summary>
+          <Stack mt="md">
+            <SimpleGrid cols={{ base: 1, lg: 2 }}>
+              <ListPanel title="Global Guardrails" items={arrayValue(plan.globalGuardrails)} />
+              <ObjectPanel title="Coherence Contract" value={objectValue(plan.coherenceContract)} />
+            </SimpleGrid>
 
-      <SimpleGrid cols={{ base: 1, lg: 2 }}>
-        <ObjectPanel
-          title="Required Context Packet Per Call"
-          value={objectValue(plan.contextPacketRequiredForEveryRewriteCall)}
-        />
-        <ObjectPanel title="Continuity Ledger" value={objectValue(plan.continuityLedger)} />
-      </SimpleGrid>
+            <SimpleGrid cols={{ base: 1, lg: 2 }}>
+              <ObjectPanel
+                title="Required Context Packet Per Call"
+                value={objectValue(plan.contextPacketRequiredForEveryRewriteCall)}
+              />
+              <ObjectPanel title="Continuity Ledger" value={objectValue(plan.continuityLedger)} />
+            </SimpleGrid>
 
-      <RewriteModelPanel selection={objectValue(plan.rewriteModelSelection)} />
-      <ObjectPanel title="Execution Strategy" value={objectValue(plan.executionStrategy)} />
-      <ListPanel title="Unit Rewrite Protocol" items={arrayValue(plan.unitRewriteProtocol)} />
-      <PhasePanel phases={arrayValue(plan.phases)} />
-      <ChapterDirectivePanel directives={arrayValue(plan.chapterRewriteDirectives)} />
-      <SimpleGrid cols={{ base: 1, lg: 2 }}>
-        <ListPanel title="Drift Checks" items={arrayValue(plan.driftChecks)} />
-        <ListPanel title="Between-Phase Validation" items={arrayValue(plan.betweenPhaseValidation)} />
-      </SimpleGrid>
-      <ListPanel title="Post-Rewrite Critic Passes" items={arrayValue(plan.postRewriteCriticPasses)} />
-      <ListPanel title="Acceptance Criteria" items={arrayValue(plan.acceptanceCriteria)} />
+            <RewriteModelPanel selection={objectValue(plan.rewriteModelSelection)} />
+            <ObjectPanel title="Execution Strategy" value={objectValue(plan.executionStrategy)} />
+            <ListPanel title="Unit Rewrite Protocol" items={arrayValue(plan.unitRewriteProtocol)} />
+            <PhasePanel phases={arrayValue(plan.phases)} />
+            <ChapterDirectivePanel directives={arrayValue(plan.chapterRewriteDirectives)} />
+            <SimpleGrid cols={{ base: 1, lg: 2 }}>
+              <ListPanel title="Drift Checks" items={arrayValue(plan.driftChecks)} />
+              <ListPanel title="Between-Phase Validation" items={arrayValue(plan.betweenPhaseValidation)} />
+            </SimpleGrid>
+            <ListPanel title="Post-Rewrite Critic Passes" items={arrayValue(plan.postRewriteCriticPasses)} />
+            <ListPanel title="Acceptance Criteria" items={arrayValue(plan.acceptanceCriteria)} />
+          </Stack>
+        </details>
+      </Paper>
 
       <Paper withBorder radius="md" p="xl" bg="white">
         <details>
@@ -224,6 +231,7 @@ function stringValue(value: unknown) {
 
 function readableValue(value: unknown): string {
   if (typeof value === "string" || typeof value === "number") return String(value);
+  if (typeof value === "boolean") return value ? "Required" : "Not required";
   if (Array.isArray(value)) return value.map(readableValue).join(", ");
   if (value && typeof value === "object") {
     const object = value as Record<string, unknown>;

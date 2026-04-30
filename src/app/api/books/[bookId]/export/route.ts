@@ -8,6 +8,7 @@ import {
   type FinalManuscriptSourceMode,
   type LatestDraftByParagraph,
 } from "@/lib/export/markdown";
+import { markBookExported } from "@/lib/books/status";
 import { createClient } from "@/lib/supabase/server";
 
 const schema = z.object({
@@ -224,6 +225,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       })
       .eq("id", exportRow.id);
     if (updateError) throw updateError;
+
+    await markBookExported(supabase, bookId);
 
     const { data: signedUrl } = await supabase.storage.from("exports").createSignedUrl(storagePath, 60 * 10);
 

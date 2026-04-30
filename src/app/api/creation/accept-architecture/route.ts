@@ -102,7 +102,7 @@ export async function POST(request: Request) {
         author_name: "",
         genre: project.genre,
         target_audience: project.target_audience,
-        status: "draft",
+        status: "planned",
       })
       .select("id")
       .single();

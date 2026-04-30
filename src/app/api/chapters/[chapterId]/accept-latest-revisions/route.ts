@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { markBookRevising } from "@/lib/books/status";
 import { createClient } from "@/lib/supabase/server";
 
 type ParagraphRow = {
@@ -101,6 +102,7 @@ export async function PATCH(_request: Request, context: { params: Promise<{ chap
           note: "Latest non-rejected drafts in this chapter became active paragraph text. Locked paragraphs were skipped.",
         },
       });
+      await markBookRevising(supabase, bookId);
     }
 
     return NextResponse.json({

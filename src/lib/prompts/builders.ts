@@ -153,6 +153,7 @@ ${input.text.slice(0, 30000)}`;
 export function buildFullBookRewriteUnitPrompt(input: {
   manuscriptBlueprint: unknown;
   rewritePlan: unknown;
+  contextPacket?: unknown;
   chapterTitle: string;
   chapterSummary?: string | null;
   previousChapterSummary?: string | null;
@@ -173,6 +174,9 @@ ${JSON.stringify(input.manuscriptBlueprint || {}, null, 2)}
 
 REWRITE ARCHITECT PLAN:
 ${JSON.stringify(input.rewritePlan || {}, null, 2)}
+
+REQUIRED CONTEXT PACKET FOR THIS CALL:
+${JSON.stringify(input.contextPacket || {}, null, 2)}
 
 REWRITE STRATEGY:
 ${input.rewriteStrategy ? formatRewriteStrategy(input.rewriteStrategy) : "Use the Rewrite Architect plan with balanced humanized literary polish."}
@@ -223,6 +227,8 @@ Rules:
 - Preserve the author's language when the manuscript is not in English.
 - Improve prose, clarity, rhythm, emotional force, and specificity only when it does not damage coherence.
 - Follow the selected rewrite strategy and its limits for expansion, voice preservation, readability, literary intensity, theological/worldview emphasis, and continuity strictness.
+- Treat the required context packet as binding. Preserve accepted prior revisions, locked passages, continuity facts, Critic priorities, and chapter directives.
+- If a packet field is marked unavailable, do not invent it. Preserve the original text and flag uncertainty in continuityWarnings.
 - If improving the paragraph would require changing a fact or continuity, preserve the original and put the concern in continuityWarnings.
 - Keep paragraph breaks out of revisedText unless the original paragraph genuinely needs a split.`;
 }

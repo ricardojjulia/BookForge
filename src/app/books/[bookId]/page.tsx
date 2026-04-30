@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Container, Group, Paper, SimpleGrid, Table, Text, Title } from "@mantine/core";
+import { Alert, Badge, Button, Container, Group, Paper, Progress, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { AppShell } from "@/components/layout/app-shell";
 import { BookActions } from "@/components/books/book-actions";
@@ -17,7 +17,8 @@ import { HumanizedGuidancePanel } from "@/components/books/reports/humanized-gui
 import { PostRunQualityGate } from "@/components/books/rewrite/post-run-quality-gate";
 import { SceneEditorPanel } from "@/components/books/scene-editor-panel";
 import { StructureAuditPanel } from "@/components/books/structure-audit-panel";
-import { getRewriteReadiness } from "@/lib/rewrite/readiness";
+import { getBookAuthorDisplay } from "@/lib/books/status";
+import { getRewriteReadiness, type RewriteReadiness } from "@/lib/rewrite/readiness";
 import type { RewriteWorkflowRow } from "@/lib/rewrite/workflows";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -50,6 +51,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
     { data: revisionInstructions },
     { data: reports },
     { count: acceptedParagraphs },
+    { count: pendingDrafts },
     { data: paragraphRows },
     { data: sceneRows },
     { data: latestRewriteJob },
@@ -99,6 +101,12 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         .order("created_at", { ascending: false })
         .limit(80),
       supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId).not("accepted_text", "is", null),
+      supabase
+        .from("revision_versions")
+        .select("id", { count: "exact", head: true })
+        .eq("book_id", bookId)
+        .eq("accepted", false)
+        .eq("rejected", false),
       supabase
         .from("paragraphs")
         .select("id,chapter_id,scene_id,paragraph_number,original_text,is_locked")
@@ -175,6 +183,23 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           chapter.original_text || "",
         ),
     ).length || 0;
+  const acceptedPercent = paragraphs ? Math.round(((acceptedParagraphs || 0) / paragraphs) * 100) : 0;
+  const postCriticCount = (reports || []).filter((report) => String(report.report_type).startsWith("critic_post:")).length;
+  const commandCenter = getBookCommandCenter({
+    bookId,
+    status: book.status,
+    hasBlueprint: Boolean(bible),
+    hasRewritePlan: Boolean(rewritePlan),
+    rewriteWorkflowStarted: Boolean(rewriteWorkflow && rewriteWorkflow.mode !== "chooser"),
+    rewriteReadiness: dashboardReadiness,
+    paragraphCount: paragraphs || 0,
+    acceptedParagraphCount: acceptedParagraphs || 0,
+    pendingDraftCount: pendingDrafts || 0,
+    plannedChapterCount,
+    hasLatestRewriteJob: Boolean(latestRewriteJob),
+    hasDriftReport: Boolean(latestDriftReport),
+    postCriticCount,
+  });
 
   return (
     <AppShell>
@@ -189,7 +214,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
             </Group>
             <Title>{book.title}</Title>
             <Text c="dimmed">
-              {book.author_name || "Unknown author"} · {book.point_of_view || "POV unset"} · {book.tense || "tense unset"}
+              {getBookAuthorDisplay(book)} · {book.point_of_view || "POV unset"} · {book.tense || "tense unset"}
             </Text>
           </div>
           <DeleteBookButton bookId={bookId} bookTitle={book.title} redirectTo="/dashboard" size="md" />
@@ -201,6 +226,20 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           <Metric label="Manuscript Blueprint" value={bible ? "Ready" : "Not generated"} />
           <Metric label="Critic reports" value={reports?.length || 0} />
         </SimpleGrid>
+
+        <WorkflowCommandCenter
+          stage={commandCenter.stage}
+          stageColor={commandCenter.stageColor}
+          guidance={commandCenter.guidance}
+          actionLabel={commandCenter.actionLabel}
+          actionHref={commandCenter.actionHref}
+          acceptedPercent={acceptedPercent}
+          acceptedParagraphs={acceptedParagraphs || 0}
+          pendingDrafts={pendingDrafts || 0}
+          totalParagraphs={paragraphs || 0}
+          postCriticCount={postCriticCount}
+          hasDriftReport={Boolean(latestDriftReport)}
+        />
 
         <CriticScoreboard reports={reports || []} />
 
@@ -228,7 +267,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           </Paper>
         )}
 
-        <Paper withBorder radius="md" p="xl" bg="white" mt="xl">
+        <Paper id="studio-actions" withBorder radius="md" p="xl" bg="white" mt="xl">
           <Group justify="space-between" mb="lg" align="flex-start">
             <div>
               <Title order={2}>Studio Actions</Title>
@@ -296,6 +335,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         <div style={{ marginTop: 24 }}>
           <BookInputsManager
             bookId={bookId}
+            book={book}
             bible={bible}
             authorNotes={authorNotes}
             characters={characters || []}
@@ -344,6 +384,195 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
       </Container>
     </AppShell>
   );
+}
+
+function WorkflowCommandCenter({
+  stage,
+  stageColor,
+  guidance,
+  actionLabel,
+  actionHref,
+  acceptedPercent,
+  acceptedParagraphs,
+  pendingDrafts,
+  totalParagraphs,
+  postCriticCount,
+  hasDriftReport,
+}: {
+  stage: string;
+  stageColor: string;
+  guidance: string;
+  actionLabel: string;
+  actionHref: string;
+  acceptedPercent: number;
+  acceptedParagraphs: number;
+  pendingDrafts: number;
+  totalParagraphs: number;
+  postCriticCount: number;
+  hasDriftReport: boolean;
+}) {
+  return (
+    <Paper withBorder radius="md" p="lg" bg="#fffdf8" mb="xl">
+      <Stack>
+        <Group justify="space-between" align="flex-start">
+          <div>
+            <Group gap="xs" mb={6}>
+              <Badge color={stageColor} variant="light">
+                {stage}
+              </Badge>
+              <Badge color={hasDriftReport ? "green" : "yellow"} variant="light">
+                Drift {hasDriftReport ? "checked" : "needed"}
+              </Badge>
+              <Badge color={postCriticCount >= 7 ? "green" : "yellow"} variant="light">
+                Post-Critic {postCriticCount}/7
+              </Badge>
+            </Group>
+            <Title order={3}>Production Command Center</Title>
+            <Text c="dimmed" size="sm">
+              {guidance}
+            </Text>
+          </div>
+          <Link href={actionHref} style={{ textDecoration: "none" }}>
+            <Button color="grape">{actionLabel}</Button>
+          </Link>
+        </Group>
+
+        <div>
+          <Group justify="space-between" mb={4}>
+            <Text size="sm" fw={800}>
+              Accepted manuscript coverage
+            </Text>
+            <Text size="sm" c="dimmed">
+              {acceptedParagraphs.toLocaleString()} / {totalParagraphs.toLocaleString()} paragraphs
+            </Text>
+          </Group>
+          <Progress value={acceptedPercent} color={acceptedPercent >= 90 ? "green" : acceptedPercent >= 50 ? "yellow" : "grape"} radius="xl" />
+          <Text size="xs" c="dimmed" mt={4}>
+            {acceptedPercent}% accepted · {pendingDrafts.toLocaleString()} pending draft revision(s)
+          </Text>
+        </div>
+      </Stack>
+    </Paper>
+  );
+}
+
+function getBookCommandCenter(input: {
+  bookId: string;
+  status: string | null;
+  hasBlueprint: boolean;
+  hasRewritePlan: boolean;
+  rewriteWorkflowStarted: boolean;
+  rewriteReadiness: RewriteReadiness | null;
+  paragraphCount: number;
+  acceptedParagraphCount: number;
+  pendingDraftCount: number;
+  plannedChapterCount: number;
+  hasLatestRewriteJob: boolean;
+  hasDriftReport: boolean;
+  postCriticCount: number;
+}) {
+  if (input.status === "exported") {
+    return {
+      stage: "Exported",
+      stageColor: "green",
+      guidance: "A final file has been exported. You can still revise, rerun quality checks, or create another export.",
+      actionLabel: "Open Final Builder",
+      actionHref: `/books/${input.bookId}/final-manuscript`,
+    };
+  }
+
+  if (input.plannedChapterCount > 0 || ["planned", "generating"].includes(String(input.status || ""))) {
+    return {
+      stage: input.status === "generating" ? "Generating draft" : "Architecture planned",
+      stageColor: "blue",
+      guidance: `${input.plannedChapterCount.toLocaleString()} planned chapter shell(s) still need manuscript text before revision work can really begin.`,
+      actionLabel: "Generate Draft Chapters",
+      actionHref: `/books/${input.bookId}#studio-actions`,
+    };
+  }
+
+  if (!input.hasBlueprint) {
+    return {
+      stage: "Setup",
+      stageColor: "yellow",
+      guidance: "Generate the Manuscript Blueprint so rewrite, Critic, and export decisions share the same context.",
+      actionLabel: "Generate Blueprint",
+      actionHref: `/books/${input.bookId}`,
+    };
+  }
+
+  if (!input.hasRewritePlan || !input.rewriteWorkflowStarted) {
+    return {
+      stage: "Planning",
+      stageColor: "grape",
+      guidance: "Open Rewrite Architect, evaluate the model, generate the rewrite plan, and run a controlled sample batch.",
+      actionLabel: "Open Rewrite Architect",
+      actionHref: `/books/${input.bookId}/rewrite-plan`,
+    };
+  }
+
+  const pendingAction = input.rewriteReadiness?.items.find((item) => item.status === "blocked" && item.href) ||
+    input.rewriteReadiness?.items.find((item) => item.status === "recommended" && item.href);
+  if (pendingAction?.href && pendingAction.actionLabel) {
+    const actionHref =
+      pendingAction.href === `/books/${input.bookId}` ? `/books/${input.bookId}#studio-actions` : pendingAction.href;
+    return {
+      stage: input.rewriteReadiness?.overallStatus === "blocked" ? "Blocked" : "Recommended",
+      stageColor: input.rewriteReadiness?.overallStatus === "blocked" ? "red" : "yellow",
+      guidance: `${pendingAction.label}: ${pendingAction.detail}`,
+      actionLabel: pendingAction.actionLabel,
+      actionHref,
+    };
+  }
+
+  if (input.pendingDraftCount > 0) {
+    return {
+      stage: "Review",
+      stageColor: "teal",
+      guidance: `${input.pendingDraftCount.toLocaleString()} draft revision(s) are waiting for accept/reject decisions.`,
+      actionLabel: "Review Drafts",
+      actionHref: `/books/${input.bookId}/revisions`,
+    };
+  }
+
+  const acceptedPercent = input.paragraphCount ? Math.round((input.acceptedParagraphCount / input.paragraphCount) * 100) : 0;
+  if (acceptedPercent >= 80 && (!input.hasDriftReport || input.postCriticCount < 7)) {
+    return {
+      stage: "Quality check",
+      stageColor: "yellow",
+      guidance: "Accepted coverage is strong enough to run final drift and post-rewrite Critic checks.",
+      actionLabel: "Open Final Builder",
+      actionHref: `/books/${input.bookId}/final-manuscript`,
+    };
+  }
+
+  if (acceptedPercent >= 90 && input.hasDriftReport && input.postCriticCount >= 7) {
+    return {
+      stage: "Export ready",
+      stageColor: "green",
+      guidance: "Final checks are in place. Preview the accepted manuscript assembly and export the publishable file.",
+      actionLabel: "Build Final Manuscript",
+      actionHref: `/books/${input.bookId}/final-manuscript`,
+    };
+  }
+
+  if (input.hasLatestRewriteJob) {
+    return {
+      stage: "Rewrite in progress",
+      stageColor: "grape",
+      guidance: "Continue the guided rewrite workflow, run the next safe batch when ready, and keep accepting reviewed drafts.",
+      actionLabel: "Continue Rewrite",
+      actionHref: `/books/${input.bookId}/rewrite-plan`,
+    };
+  }
+
+  return {
+    stage: "Manuscript ready",
+    stageColor: "teal",
+    guidance: "The manuscript is structured and ready for analysis, Critic passes, or a guided rewrite workflow.",
+    actionLabel: "Open Studio Actions",
+    actionHref: `/books/${input.bookId}#studio-actions`,
+  };
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) {

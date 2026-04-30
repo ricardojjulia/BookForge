@@ -7,6 +7,7 @@ import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { buildFullBookRewriteUnitPrompt } from "@/lib/prompts/builders";
+import { buildRewriteContextPacket } from "@/lib/rewrite/context-packet";
 import { applyRewritePlanDefaults } from "@/lib/rewrite/plan-defaults";
 import { clampStrategySettings, getRewriteStrategy, rewriteStrategies } from "@/lib/rewrite/strategies";
 import { createClient } from "@/lib/supabase/server";
@@ -59,6 +60,7 @@ type ParagraphRow = {
   chapter_id?: string;
   paragraph_number: number;
   original_text: string;
+  accepted_text?: string | null;
   is_locked: boolean | null;
   scene_id: string | null;
 };
@@ -67,6 +69,19 @@ type ExistingRevisionRow = {
   paragraph_id: string | null;
   accepted: boolean | null;
   rejected: boolean | null;
+};
+
+type AcceptedRevisionContextRow = {
+  paragraph_id: string | null;
+  revised_text: string;
+  revision_notes: string | null;
+  continuity_warnings: unknown;
+  created_at: string | null;
+};
+
+type LockedPassageContextRow = {
+  paragraph_id: string | null;
+  reason: string | null;
 };
 
 type RetryJobSettings = {
@@ -103,6 +118,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       { data: continuityLedger },
       { data: chapters, error: chaptersError },
       { data: existingRevisions, error: existingError },
+      { data: criticReports, error: criticReportsError },
+      { data: acceptedRevisionRows, error: acceptedRevisionRowsError },
+      { data: lockedPassageRows, error: lockedPassageRowsError },
     ] = await Promise.all([
       supabase.from("book_bibles").select("content").eq("book_id", bookId).maybeSingle(),
       supabase
@@ -131,11 +149,33 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         .select("paragraph_id,accepted,rejected")
         .eq("book_id", bookId)
         .not("paragraph_id", "is", null),
+      supabase
+        .from("coherence_reports")
+        .select("report_type,content,created_at")
+        .eq("book_id", bookId)
+        .like("report_type", "critic:%")
+        .order("created_at", { ascending: false })
+        .limit(14),
+      supabase
+        .from("revision_versions")
+        .select("paragraph_id,revised_text,revision_notes,continuity_warnings,created_at")
+        .eq("book_id", bookId)
+        .eq("accepted", true)
+        .not("paragraph_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(500),
+      supabase
+        .from("locked_passages")
+        .select("paragraph_id,reason")
+        .eq("book_id", bookId),
     ]);
 
     if (planError) throw planError;
     if (chaptersError) throw chaptersError;
     if (existingError) throw existingError;
+    if (criticReportsError) throw criticReportsError;
+    if (acceptedRevisionRowsError) throw acceptedRevisionRowsError;
+    if (lockedPassageRowsError) throw lockedPassageRowsError;
     if (!rewritePlan?.content) {
       return NextResponse.json({ error: "Generate a Rewrite Architect plan before executing the rewrite." }, { status: 400 });
     }
@@ -208,7 +248,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             estimatedSecondsPerUnit: estimateSecondsPerRewriteUnit(model),
           }),
         },
-        prompt_snapshot: "Full-book rewrite executor: paragraph units with Manuscript Blueprint, Rewrite Architect plan, adjacent chapter summaries, and local paragraph context.",
+        prompt_snapshot:
+          "Full-book rewrite executor: paragraph units with Manuscript Blueprint, Rewrite Architect plan, materialized context packet, adjacent chapter summaries, accepted prior revisions, locked passages, Critic priorities, and local paragraph context.",
         created_by: user.id,
         started_at: startedAt,
       })
@@ -266,7 +307,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       }
       const { data: paragraphs, error: paragraphsError } = await supabase
         .from("paragraphs")
-        .select("id,paragraph_number,original_text,is_locked,scene_id")
+        .select("id,paragraph_number,original_text,accepted_text,is_locked,scene_id")
         .eq("chapter_id", chapter.id)
         .order("paragraph_number");
       if (paragraphsError) throw paragraphsError;
@@ -347,9 +388,28 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       });
 
       try {
+        const contextPacket = buildRewriteContextPacket({
+          manuscriptBlueprint: bible?.content,
+          rewritePlan: normalizedRewritePlan,
+          chapter,
+          previousChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex - 1]?.summary,
+          nextChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex + 1]?.summary,
+          paragraph,
+          rows,
+          paragraphIndex,
+          criticReports: (criticReports || []) as Array<{
+            report_type: string;
+            content: Record<string, unknown> | null;
+            created_at?: string | null;
+          }>,
+          lockedPassages: (lockedPassageRows || []) as LockedPassageContextRow[],
+          acceptedRevisions: (acceptedRevisionRows || []) as AcceptedRevisionContextRow[],
+          continuityLedger: (continuityLedger?.content as Record<string, unknown> | null) || null,
+        });
         const prompt = buildFullBookRewriteUnitPrompt({
           manuscriptBlueprint: bible?.content,
           rewritePlan: normalizedRewritePlan,
+          contextPacket,
           chapterTitle: chapter.title || `Chapter ${chapter.chapter_number}`,
           chapterSummary: chapter.summary,
           previousChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex - 1]?.summary,

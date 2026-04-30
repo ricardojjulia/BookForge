@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { markBookRevising } from "@/lib/books/status";
 import { createClient } from "@/lib/supabase/server";
 
 const schema = z.object({
@@ -95,6 +96,7 @@ export async function PATCH(request: Request) {
         note: "Batch accepted rewrites became active paragraph text. Preserve this state in future rewrite context.",
       },
     });
+    await markBookRevising(supabase, versions[0].book_id);
 
     return NextResponse.json({ content: { updated: versions.length, action: body.action } });
   } catch (error) {
