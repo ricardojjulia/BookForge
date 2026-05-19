@@ -46,6 +46,19 @@ export type CriticLens =
   | "theology_worldview"
   | "revision_priorities";
 
+export type LlmProvider = "lmstudio" | "openai" | "anthropic" | "google";
+
+export type StandardLlmSettings = {
+  provider: LlmProvider;
+  apiKey?: string;
+  /** OpenAI / Anthropic / Google model name, e.g. "gpt-4o", "claude-3-5-sonnet-20241022", "gemini-1.5-pro" */
+  model?: string;
+  /** Only used for OpenAI-compatible custom endpoints */
+  baseUrl?: string;
+  temperature?: number;
+  maxOutputTokens?: number;
+};
+
 export type LmStudioSettings = {
   baseUrl: string;
   apiKey?: string;
