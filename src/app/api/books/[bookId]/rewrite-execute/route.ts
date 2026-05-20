@@ -29,7 +29,7 @@ const schema = z.object({
     "clarity_readability",
     "downsize_abridge",
     "emotional_depth",
-    "theology_worldview",
+    "contemporary_view",
     "creative_enhancement",
     "custom",
   ]).default("humanized_literary"),
@@ -438,7 +438,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           top_p: settings.topP,
           max_tokens: 1800,
           messages: [{ role: "user", content: prompt }],
-          response_format: { type: "text" },
+          
         });
 
         const parsed = parseRewriteResponse(completion.choices[0]?.message.content || "{}");

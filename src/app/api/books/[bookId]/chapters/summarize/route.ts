@@ -172,7 +172,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           top_p: settings.topP,
           max_tokens: 1800,
           messages: [{ role: "user", content: prompt }],
-          response_format: { type: "text" },
+          
         });
 
         const raw = completion.choices[0]?.message.content || "{}";

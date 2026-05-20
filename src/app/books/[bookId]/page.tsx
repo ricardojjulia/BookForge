@@ -17,6 +17,7 @@ import { CriticReportsPanel } from "@/components/books/reports/critic-reports-pa
 import { CriticScoreboard } from "@/components/books/reports/critic-scoreboard";
 import { DriftReportsPanel } from "@/components/books/reports/drift-reports-panel";
 import { HumanizedGuidancePanel } from "@/components/books/reports/humanized-guidance-panel";
+import { AutoReviewWizard } from "@/components/books/auto-review/auto-review-wizard";
 import { PostRunQualityGate } from "@/components/books/rewrite/post-run-quality-gate";
 import { SceneEditorPanel } from "@/components/books/scene-editor-panel";
 import { StructureAuditPanel } from "@/components/books/structure-audit-panel";
@@ -306,6 +307,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
                 Abridged Edition
               </Button>
             </Link>
+            <AutoReviewWizard bookId={bookId} bookTitle={book.title} />
           </Group>
           <BookActions
             bookId={bookId}
@@ -343,6 +345,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           }
           acceptedParagraphs={acceptedParagraphs || 0}
           totalParagraphs={paragraphs || 0}
+          pendingDraftCount={pendingDrafts || 0}
         />
 
         <DriftReportsPanel reports={reports || []} />

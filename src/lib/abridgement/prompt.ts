@@ -20,7 +20,7 @@ Goal: suggest how to reduce this book by about ${input.targetReductionPercent}% 
 
 Important:
 - Do not rewrite prose here.
-- Do not silently remove important facts, theology/worldview, emotional meaning, character permanence, or continuity.
+- Do not silently remove important facts, contemporary view, emotional meaning, character permanence, or continuity.
 - Prefer suggestions that reduce repetition, duplicated emotional beats, over-explanation, redundant scene material, and chapters that repeat the same function.
 - The author must approve every suggestion. Your job is to propose, not delete.
 - Chapter merge suggestions are advisory. Paragraph/chapter cut suggestions can be approved for abridged export.

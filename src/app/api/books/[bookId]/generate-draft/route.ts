@@ -194,7 +194,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
             top_p: settings.topP,
             max_tokens: Math.min(Math.max(settings.maxOutputTokens, 2048), 12000),
             messages: [{ role: "user", content: prompt }],
-            response_format: { type: "text" },
+            
           })
           .catch((error) => {
             throw new Error(

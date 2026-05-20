@@ -163,6 +163,7 @@ export function SettingsForm({ userId, initial, onSaved }: { userId: string; ini
           {
             user_id: userId,
             ...settings,
+            llm_api_key: settings.llm_api_key.trim(),
             updated_at: new Date().toISOString(),
           },
           { onConflict: "user_id" },
@@ -433,9 +434,9 @@ export function SettingsForm({ userId, initial, onSaved }: { userId: string; ini
                   onChange={(value) => {
                     const provider = (value as LlmProvider) || "lmstudio";
                     update("llm_provider", provider);
-                    // Pre-fill model with first default if blank
+                    // Always reset model to first default when switching providers
                     const meta = PROVIDER_META.find((p) => p.id === provider);
-                    if (!settings.llm_model && meta?.defaultModels[0]) {
+                    if (meta?.defaultModels[0]) {
                       update("llm_model", meta.defaultModels[0]);
                     }
                   }}

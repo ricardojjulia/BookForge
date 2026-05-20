@@ -59,6 +59,18 @@ export async function GET() {
       ...runtimeLimits.planning.warnings,
     ];
 
+    const std = settings.standardSettings;
+    const executionMode = settings.executionMode;
+    const cloudProvider = std
+      ? {
+          provider: std.provider,
+          model: std.model || null,
+          executionMode,
+          usedForPlanning: executionMode === "cloud" || executionMode === "auto",
+          usedForRewrite: executionMode === "cloud",
+        }
+      : null;
+
     return NextResponse.json({
       connected,
       baseUrl: settings.baseUrl,
@@ -74,6 +86,8 @@ export async function GET() {
       rewriteModelSuitability,
       configuredRewriteModel,
       configuredRewriteModelSuitability,
+      cloudProvider,
+      executionMode,
       warnings,
       error,
     });

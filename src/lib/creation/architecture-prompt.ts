@@ -32,7 +32,7 @@ ${input.targetPages} pages, approximately ${input.estimatedWords} words, around 
 Tone:
 ${input.tone || "Author has not specified tone yet."}
 
-Worldview / theological / forbidden boundaries:
+Contemporary View / forbidden boundaries:
 ${input.boundaries || "No special boundaries provided."}
 
 Approved concept:

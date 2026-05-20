@@ -309,6 +309,7 @@ export async function selectAndPrepareActiveModel(
       loadedContextTokens: null,
       warnings: [],
       nativeModelManagementAvailable: false,
+      isCloud: true,
     };
     const cloudModelSelection: ActiveModelPlan["modelSelection"] = {
       model,

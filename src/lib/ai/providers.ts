@@ -45,9 +45,9 @@ export const PROVIDER_META: ProviderMeta[] = [
     id: "anthropic",
     label: "Anthropic",
     defaultModels: [
-      "claude-3-5-sonnet-20241022",
-      "claude-3-5-haiku-20241022",
-      "claude-3-opus-20240229",
+      "claude-sonnet-4-6",
+      "claude-opus-4-7",
+      "claude-haiku-4-5-20251001",
     ],
     requiresApiKey: true,
   },
@@ -78,14 +78,17 @@ export function createProviderClient(settings: StandardLlmSettings): OpenAI {
         baseURL: settings.baseUrl,
       });
 
-    case "anthropic":
+    case "anthropic": {
+      const anthropicKey = (settings.apiKey || process.env.ANTHROPIC_API_KEY || "").trim();
       return new OpenAI({
-        apiKey: settings.apiKey || process.env.ANTHROPIC_API_KEY || "",
+        apiKey: anthropicKey,
         baseURL: settings.baseUrl || "https://api.anthropic.com/v1",
         defaultHeaders: {
           "anthropic-version": "2023-06-01",
+          "x-api-key": anthropicKey,
         },
       });
+    }
 
     case "google":
       return new OpenAI({

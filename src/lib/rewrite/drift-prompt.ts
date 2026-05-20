@@ -51,7 +51,7 @@ Return:
   "timelineDrift": [],
   "characterDrift": [],
   "motifDrift": [],
-  "theologyWorldviewDrift": [],
+  "contemporaryViewDrift": [],
   "overExpansionWarnings": [],
   "recommendedActions": []
 }
