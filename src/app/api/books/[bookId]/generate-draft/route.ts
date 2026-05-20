@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { buildCreationDraftChapterPrompt } from "@/lib/creation/draft-prompt";
 import { mergeJobSettings, updateRevisionJobProgress } from "@/lib/ai/job-state";
@@ -350,6 +351,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         })
         .eq("id", bookId)
         .in("status", ["planned", "draft", "generating"]);
+
+      revalidatePath(`/books/${bookId}`);
 
       return NextResponse.json({
         content: {
