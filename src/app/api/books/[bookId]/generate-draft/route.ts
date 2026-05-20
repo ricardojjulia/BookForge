@@ -193,7 +193,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         const completion = await createManagedChatCompletion(client, preparedModel, {
             temperature: Math.min(Math.max(settings.temperature, 0.45), 0.8),
             top_p: settings.topP,
-            max_tokens: Math.min(Math.max(settings.maxOutputTokens, 2048), 12000),
+            max_tokens: Math.min(Math.max(settings.maxOutputTokens, 6000), 12000),
             messages: [{ role: "user", content: prompt }],
             
           })
