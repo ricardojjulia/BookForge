@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   Badge,
+  Box,
   Button,
   Card,
   Group,
@@ -11,7 +12,6 @@ import {
   Stack,
   Text,
   ThemeIcon,
-  Title,
 } from "@mantine/core";
 import { IconRocket, IconScissors, IconArrowUp } from "@tabler/icons-react";
 import { AutoReviewRunner } from "./auto-review-runner";
@@ -91,7 +91,7 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
       <Modal
         opened={open}
         onClose={reset}
-        title={<Title order={3}>Auto-Review Wizard</Title>}
+        title="Auto-Review Wizard"
         size={running ? "xl" : "lg"}
         centered
         closeOnClickOutside={!running}
@@ -136,13 +136,13 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
                     <ThemeIcon color={mode.color} variant="light" size="xl" radius="md">
                       {mode.icon}
                     </ThemeIcon>
-                    <div style={{ flex: 1 }}>
+                    <Box style={{ flex: 1 }}>
                       <Group gap="xs" mb={2}>
                         <Text fw={700}>{mode.label}</Text>
                         <Badge color={mode.color} variant="light" size="sm">{mode.tagline}</Badge>
                       </Group>
                       <Text size="sm" c="dimmed">{mode.detail}</Text>
-                    </div>
+                    </Box>
                   </Group>
                 </Card>
               ))}
