@@ -526,21 +526,21 @@ function getBookCommandCenter(input: {
 
   if (!input.hasBlueprint) {
     return {
-      stage: "Setup",
-      stageColor: "yellow",
-      guidance: "Generate the Manuscript Blueprint so rewrite, Critic, and export decisions share the same context.",
-      actionLabel: "Generate Blueprint",
-      actionHref: `/books/${input.bookId}`,
+      stage: "Draft ready",
+      stageColor: "blue",
+      guidance: "Your draft is ready. Run Auto-Review to analyze it, get critic feedback, and start improving — it generates the Blueprint automatically as its first step.",
+      actionLabel: "Run Auto-Review",
+      actionHref: `/books/${input.bookId}#studio-actions`,
     };
   }
 
   if (!input.hasRewritePlan || !input.rewriteWorkflowStarted) {
     return {
-      stage: "Planning",
+      stage: "Ready to rewrite",
       stageColor: "grape",
-      guidance: "Open Rewrite Architect, evaluate the model, generate the rewrite plan, and run a controlled sample batch.",
-      actionLabel: "Open Rewrite Architect",
-      actionHref: `/books/${input.bookId}/rewrite-plan`,
+      guidance: "Blueprint is in place. Run Auto-Review to generate a rewrite plan and begin improving the manuscript.",
+      actionLabel: "Run Auto-Review",
+      actionHref: `/books/${input.bookId}#studio-actions`,
     };
   }
 
