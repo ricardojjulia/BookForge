@@ -165,6 +165,9 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
   // Ref-tracked iteration so telemetry closures always see the current value
   // even when React state hasn't re-rendered yet.
   const iterationRef = useRef(0);
+  // Tracks the deepest stage that actually threw — used in the error banner so
+  // "Failed at stage: critics_check" can't mask a real failure inside a loop.
+  const actualFailedStageRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -316,8 +319,20 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
         if (!result.ok) throw new Error(String(result.data.error || `Post-critic ${lens} failed`));
 
       } else if (stageId === "critics_check") {
-        result = await callApi(`/api/books/${bookId}/auto-review/critics-check`);
-        if (!result.ok) throw new Error(String(result.data.error || "Critics check failed"));
+        // Retry up to 3 times — this is a lightweight GET and transient network
+        // hiccups (or a brief LM Studio restart) shouldn't abort the whole run.
+        let lastError = "Critics check failed";
+        result = { ok: false, data: {} };
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          result = await callApi(`/api/books/${bookId}/auto-review/critics-check`);
+          if (result.ok) break;
+          lastError = String(result.data.error || lastError);
+          if (attempt < 3) {
+            addLog(`Critics check attempt ${attempt} failed (${lastError}) — retrying in 5s…`);
+            await new Promise((r) => setTimeout(r, 5000));
+          }
+        }
+        if (!result.ok) throw new Error(lastError);
 
         const { allGreen, greenCount, total, avgScore, scores, baselineScores } = result.data as {
           allGreen: boolean;
@@ -358,7 +373,7 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
           );
           for (const loopStageId of loopStages) {
             const ok = await runStage(loopStageId);
-            if (!ok) return false;
+            if (!ok) return false; // actualFailedStageRef already set by the inner runStage
           }
           return true;
         }
@@ -417,6 +432,9 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
       const msg = e instanceof Error ? e.message : String(e);
       setStatus(stageId, "failed", msg);
       addLog(`✗ Failed: ${stageId} — ${msg}`);
+      // Record the deepest actual failing stage so the error banner shows the
+      // real culprit even when the failure bubbles up through critics_check.
+      if (!actualFailedStageRef.current) actualFailedStageRef.current = stageId;
 
       // Persist the error so the analytics page can surface failure reasons
       await fetch(`/api/books/${bookId}/auto-review`, {
@@ -469,12 +487,13 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
       for (const stage of stages) {
         const ok = await runStage(stage.id);
         if (!ok) {
+          const failedAt = actualFailedStageRef.current || stage.id;
           setFailed(true);
-          setErrorMsg(`Failed at stage: ${stage.id}`);
+          setErrorMsg(`Failed at stage: ${failedAt}`);
           await fetch(`/api/books/${bookId}/auto-review`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ jobId, failed: true, error: `Failed at stage: ${stage.id}` }),
+            body: JSON.stringify({ jobId, failed: true, error: `Failed at stage: ${failedAt}` }),
           });
           return;
         }
