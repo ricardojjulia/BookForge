@@ -73,4 +73,12 @@ export type LmStudioSettings = {
   topP: number;
   repeatPenalty: number;
   maxOutputTokens: number;
+  /** Non-null when the user has selected a cloud provider instead of LM Studio. */
+  standardSettings: StandardLlmSettings | null;
+  /**
+   * auto  – cloud for reasoning tasks (critic, planning), local for extraction/rewrite
+   * local – always LM Studio regardless of cloud configuration
+   * cloud – always cloud provider regardless of task type
+   */
+  executionMode: "auto" | "local" | "cloud";
 };

@@ -38,9 +38,19 @@ export function buildCriticPrompt(input: {
   rewriteStage?: "baseline" | "post_rewrite";
   acceptedRevisionContext?: Array<{ title: string; acceptedTextSample: string; acceptedParagraphs: number; totalParagraphs: number }>;
   lens: CriticLens;
+  promptCharBudget?: number;
 }) {
   const lens = criticLenses[input.lens];
   const stageLabel = input.rewriteStage === "post_rewrite" ? "POST-REWRITE EVALUATION" : "BASELINE EVALUATION";
+  const budget = splitCriticPromptBudget(
+    Math.min(input.promptCharBudget || 24000, 24000),
+    Boolean(input.acceptedRevisionContext?.length),
+  );
+  const bookBible = limitText(JSON.stringify(input.bookBible || {}, null, 2), budget.bookBible);
+  const chapterSummaries = limitChapterSummaries(input.chapterSummaries, budget.chapterSummaries);
+  const acceptedRevisionContext = input.acceptedRevisionContext?.length
+    ? limitAcceptedRevisionContext(input.acceptedRevisionContext, budget.acceptedRevisionContext)
+    : "";
 
   return `You are BookForge Critic, a direct but constructive book evaluator.
 
@@ -54,22 +64,15 @@ Book title:
 ${input.title}
 
 Manuscript Blueprint:
-${JSON.stringify(input.bookBible || {}, null, 2)}
+${bookBible}
 
 Chapter summaries:
-${input.chapterSummaries
-  .map((chapter, index) => `${index + 1}. ${chapter.title}: ${chapter.summary || "No summary yet."}`)
-  .join("\n")}
+${chapterSummaries}
 
 ${
-  input.acceptedRevisionContext?.length
+  acceptedRevisionContext
     ? `Accepted rewrite context:
-${input.acceptedRevisionContext
-  .map(
-    (chapter, index) =>
-      `${index + 1}. ${chapter.title} (${chapter.acceptedParagraphs}/${chapter.totalParagraphs} accepted paragraphs)\n${chapter.acceptedTextSample}`,
-  )
-  .join("\n\n")}`
+${acceptedRevisionContext}`
     : ""
 }
 
@@ -97,4 +100,55 @@ Rules:
 - Do not rewrite the manuscript.
 - Flag issues and suggest fixes.
 - Preserve author voice, theological meaning, and intended audience.`;
+}
+
+function splitCriticPromptBudget(totalBudget: number, hasAcceptedRevisionContext: boolean) {
+  const budget = Math.max(6000, totalBudget - 5000);
+  if (hasAcceptedRevisionContext) {
+    return {
+      bookBible: Math.floor(budget * 0.32),
+      chapterSummaries: Math.floor(budget * 0.38),
+      acceptedRevisionContext: Math.floor(budget * 0.3),
+    };
+  }
+
+  return {
+    bookBible: Math.floor(budget * 0.42),
+    chapterSummaries: Math.floor(budget * 0.58),
+    acceptedRevisionContext: 0,
+  };
+}
+
+function limitChapterSummaries(chapters: Array<{ title: string; summary: string | null }>, budget: number) {
+  const perChapter = Math.max(220, Math.floor(budget / Math.max(1, chapters.length)));
+  return limitText(
+    chapters
+      .map((chapter, index) => `${index + 1}. ${chapter.title}: ${limitText(chapter.summary || "No summary yet.", perChapter)}`)
+      .join("\n"),
+    budget,
+  );
+}
+
+function limitAcceptedRevisionContext(
+  chapters: Array<{ title: string; acceptedTextSample: string; acceptedParagraphs: number; totalParagraphs: number }>,
+  budget: number,
+) {
+  const perChapter = Math.max(180, Math.floor(budget / Math.max(1, chapters.length)));
+  return limitText(
+    chapters
+      .map(
+        (chapter, index) =>
+          `${index + 1}. ${chapter.title} (${chapter.acceptedParagraphs}/${chapter.totalParagraphs} accepted paragraphs)\n${limitText(
+            chapter.acceptedTextSample,
+            perChapter,
+          )}`,
+      )
+      .join("\n\n"),
+    budget,
+  );
+}
+
+function limitText(value: string, maxCharacters: number) {
+  if (value.length <= maxCharacters) return value;
+  return `${value.slice(0, Math.max(0, maxCharacters - 80)).trimEnd()}\n[Truncated to fit LM Studio context.]`;
 }

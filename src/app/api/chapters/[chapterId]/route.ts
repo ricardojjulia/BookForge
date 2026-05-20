@@ -19,6 +19,53 @@ function getErrorMessage(error: unknown) {
   return "Unable to update chapter.";
 }
 
+export async function DELETE(_: Request, context: { params: Promise<{ chapterId: string }> }) {
+  try {
+    const { chapterId } = await context.params;
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
+    const { data: chapter, error: fetchError } = await supabase
+      .from("chapters")
+      .select("id,book_id,books(owner_id)")
+      .eq("id", chapterId)
+      .single();
+    if (fetchError) throw fetchError;
+
+    const ownerRow = Array.isArray(chapter.books) ? chapter.books[0] : chapter.books;
+    if (!ownerRow || (ownerRow as { owner_id: string }).owner_id !== user.id) {
+      return NextResponse.json({ error: "Not authorised." }, { status: 403 });
+    }
+
+    const { error: deleteError } = await supabase.from("chapters").delete().eq("id", chapterId);
+    if (deleteError) throw deleteError;
+
+    const now = new Date().toISOString();
+    const { data: remaining, error: remainingError } = await supabase
+      .from("chapters")
+      .select("id")
+      .eq("book_id", chapter.book_id)
+      .order("chapter_number");
+    if (remainingError) throw remainingError;
+
+    for (const [index, item] of (remaining || []).entries()) {
+      const { error } = await supabase
+        .from("chapters")
+        .update({ chapter_number: index + 1, updated_at: now })
+        .eq("id", item.id);
+      if (error) throw error;
+    }
+
+    return NextResponse.json({ content: { deleted: true, chapterId } });
+  } catch (error) {
+    console.error("Delete chapter failed", error);
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+  }
+}
+
 export async function PATCH(request: Request, context: { params: Promise<{ chapterId: string }> }) {
   try {
     const { chapterId } = await context.params;

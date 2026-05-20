@@ -32,7 +32,7 @@ export default async function DashboardPage() {
   const [{ data: books }, { data: reports }] = await Promise.all([
     supabase
       .from("books")
-      .select("id,title,author_name,genre,status,created_at")
+      .select("id,title,author_name,genre,status,finished_export_id,created_at")
       .order("created_at", { ascending: false })
       .limit(12),
     supabase
@@ -41,6 +41,21 @@ export default async function DashboardPage() {
       .order("created_at", { ascending: false })
       .limit(6),
   ]);
+
+  const finishedExportIds = (books || [])
+    .map((b) => (b as { finished_export_id?: string | null }).finished_export_id)
+    .filter(Boolean) as string[];
+  const finishedExports = finishedExportIds.length
+    ? await Promise.all(
+        finishedExportIds.map(async (exportId) => {
+          const { data } = await supabase.from("exports").select("id,format,storage_path,book_id").eq("id", exportId).single();
+          if (!data?.storage_path) return { exportId, format: data?.format || "", signedUrl: null, bookId: data?.book_id || "" };
+          const { data: signed } = await supabase.storage.from("exports").createSignedUrl(data.storage_path, 60 * 10);
+          return { exportId, format: data.format, signedUrl: signed?.signedUrl || null, bookId: data.book_id };
+        }),
+      )
+    : [];
+  const finishedByBook = Object.fromEntries(finishedExports.map((fe) => [fe.bookId, fe]));
 
   return (
     <AppShell>
@@ -84,28 +99,51 @@ export default async function DashboardPage() {
         </Paper>
 
         <SimpleGrid cols={{ base: 1, md: 3 }}>
-          {books?.map((book) => (
-            <Paper key={book.id} withBorder radius="md" p="lg" bg="white">
-              <Stack gap="xs">
-                <Group justify="space-between">
-                  <Badge color="grape" variant="light">
-                    {book.status || "draft"}
-                  </Badge>
-                  <Badge color="teal" variant="outline">
-                    {book.genre || "Manuscript"}
-                  </Badge>
-                </Group>
-                <Title order={3}>{book.title}</Title>
-                <Text c="dimmed">{getBookAuthorDisplay(book)}</Text>
-                <Group mt="sm">
-                  <Button component="a" href={`/books/${book.id}`} variant="light" color="grape">
-                    Continue Editing
-                  </Button>
-                  <DeleteBookButton bookId={book.id} bookTitle={book.title} size="sm" />
-                </Group>
-              </Stack>
-            </Paper>
-          ))}
+          {books?.map((book) => {
+            const isFinished = book.status === "finished";
+            const finishedExport = finishedByBook[book.id];
+            return (
+              <Paper
+                key={book.id}
+                withBorder
+                radius="md"
+                p="lg"
+                bg={isFinished ? "#f0faf4" : "white"}
+                style={isFinished ? { borderColor: "var(--mantine-color-green-4)" } : undefined}
+              >
+                <Stack gap="xs">
+                  <Group justify="space-between">
+                    <Badge color={isFinished ? "green" : "grape"} variant={isFinished ? "filled" : "light"}>
+                      {isFinished ? "FINISHED" : (book.status || "draft")}
+                    </Badge>
+                    <Badge color="teal" variant="outline">
+                      {book.genre || "Manuscript"}
+                    </Badge>
+                  </Group>
+                  <Title order={3}>{book.title}</Title>
+                  <Text c="dimmed">{getBookAuthorDisplay(book)}</Text>
+                  {isFinished && finishedExport?.signedUrl && (
+                    <Button
+                      component="a"
+                      href={finishedExport.signedUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      color="green"
+                      leftSection={<span>↓</span>}
+                    >
+                      Download {finishedExport.format.toUpperCase()}
+                    </Button>
+                  )}
+                  <Group mt={isFinished ? "xs" : "sm"}>
+                    <Button component="a" href={`/books/${book.id}`} variant={isFinished ? "subtle" : "light"} color="grape">
+                      {isFinished ? "Continue editing" : "Continue Editing"}
+                    </Button>
+                    <DeleteBookButton bookId={book.id} bookTitle={book.title} size="sm" />
+                  </Group>
+                </Stack>
+              </Paper>
+            );
+          })}
         </SimpleGrid>
 
         {!books?.length && (

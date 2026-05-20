@@ -24,9 +24,28 @@ export function ChapterMetadataPanel({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const issues = useMemo(() => auditBookStructure(chapters, paragraphs), [chapters, paragraphs]);
   const selected = chapters.find((chapter) => chapter.id === selectedId) || chapters[0] || null;
   const selectedIssues = selected ? issues.filter((issue) => issue.chapterId === selected.id) : [];
+
+  async function deleteChapter() {
+    if (!selected) return;
+    setLoading(true);
+    setMessage("");
+    setError("");
+    try {
+      await fetchJson(`/api/chapters/${selected.id}`, { method: "DELETE" }, "Delete chapter");
+      setConfirmDelete(false);
+      const next = chapters.find((c) => c.id !== selected.id);
+      setSelectedId(next?.id || "");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete chapter.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function saveChapter(formData: FormData) {
     if (!selected) return;
@@ -102,7 +121,7 @@ export function ChapterMetadataPanel({
             <Select
               label="Chapter"
               value={selected?.id || ""}
-              onChange={(value) => setSelectedId(value || "")}
+              onChange={(value) => { setSelectedId(value || ""); setConfirmDelete(false); }}
               data={chapters.map((chapter) => ({
                 value: chapter.id,
                 label: `${chapter.chapter_number}. ${chapter.title || "Untitled"}`,
@@ -158,7 +177,30 @@ export function ChapterMetadataPanel({
                   autosize
                   minRows={3}
                 />
-                <Group justify="flex-end">
+                <Group justify="space-between">
+                  {confirmDelete ? (
+                    <Group gap="xs">
+                      <Text size="sm" c="red" fw={700}>
+                        Permanently delete this chapter?
+                      </Text>
+                      <Button size="xs" color="red" loading={loading} onClick={deleteChapter}>
+                        Yes, delete
+                      </Button>
+                      <Button size="xs" variant="subtle" color="dark" onClick={() => setConfirmDelete(false)}>
+                        Cancel
+                      </Button>
+                    </Group>
+                  ) : (
+                    <Button
+                      size="xs"
+                      variant="subtle"
+                      color="red"
+                      disabled={loading}
+                      onClick={() => setConfirmDelete(true)}
+                    >
+                      Delete chapter
+                    </Button>
+                  )}
                   <Button color="grape" loading={loading} type="submit">
                     Save Chapter Metadata
                   </Button>

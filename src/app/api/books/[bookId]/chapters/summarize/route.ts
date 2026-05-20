@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildJobProgress, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
 import { estimateAiCallPlan } from "@/lib/ai/call-planner";
-import { createLmStudioClient, testLmStudioConnection } from "@/lib/lmstudio/client";
+import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
-import { getExtractionModelCandidates, selectLoadedLmStudioModel } from "@/lib/lmstudio/model-selection";
+import { getExtractionModelCandidates } from "@/lib/lmstudio/model-selection";
+import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { buildChapterSummaryPrompt } from "@/lib/prompts/builders";
 import { createClient } from "@/lib/supabase/server";
@@ -76,19 +77,20 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     }
 
     const settings = await getUserLmStudioSettings(user.id);
-    const client = createLmStudioClient(settings);
-    const availableModels = await getAvailableModels(settings.baseUrl);
-    const modelSelection = selectLoadedLmStudioModel({
+    const modelPlan = await selectAndPrepareActiveModel(settings, {
+      task: "extraction",
       candidates: getExtractionModelCandidates(settings),
-      availableModels,
+      expectedCalls: chapterRows.length,
+      latencyPreference: settings.qualityProfile === "premium" ? "quality" : "balanced",
+      allowUnload: chapterRows.length >= 3,
     });
-    const model = modelSelection.model;
+    const { client, model, preparedModel, modelSelection } = modelPlan;
     const plan = estimateAiCallPlan({
       task: "book-bible",
       selectedModel: model,
       qualityProfile: settings.qualityProfile,
-      contextWindowTokens: settings.contextWindowTokens,
-      maxOutputTokens: settings.maxOutputTokens,
+      contextWindowTokens: preparedModel.runtimeLimits.configuredContextTokens,
+      maxOutputTokens: preparedModel.runtimeLimits.maxOutputTokens,
       chapterCount: chapterRows.length,
       sceneCount: scenes || 0,
       paragraphCount: paragraphs || 0,
@@ -103,6 +105,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         status: "running",
         settings: {
           model,
+          preparedModel,
           modelSource: modelSelection.source,
           configuredModelFallbackOrder: modelSelection.configuredModels,
           availableModels: modelSelection.availableModels,
@@ -132,6 +135,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     let jobSettings: unknown = {
       model,
+      preparedModel,
       modelSource: modelSelection.source,
       configuredModelFallbackOrder: modelSelection.configuredModels,
       availableModels: modelSelection.availableModels,
@@ -163,11 +167,10 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       try {
         const prompt = buildChapterSummaryPrompt({ title, text: chapter.original_text || "" });
 
-        const completion = await client.chat.completions.create({
-          model,
+        const completion = await createManagedChatCompletion(client, preparedModel, {
           temperature: Math.min(settings.temperature, 0.45),
           top_p: settings.topP,
-          max_tokens: Math.min(settings.maxOutputTokens, 1800),
+          max_tokens: 1800,
           messages: [{ role: "user", content: prompt }],
           response_format: { type: "text" },
         });
@@ -306,14 +309,6 @@ async function readJsonBody(request: Request) {
     return await request.json();
   } catch {
     return {};
-  }
-}
-
-async function getAvailableModels(baseUrl: string) {
-  try {
-    return (await testLmStudioConnection({ baseUrl })).models;
-  } catch {
-    return [];
   }
 }
 

@@ -170,13 +170,13 @@ export function buildFullBookRewriteUnitPrompt(input: {
 This is not an isolated rewrite. You must preserve whole-book context, continuity, character permanence, timeline logic, motifs, theology/worldview, emotional meaning, and author voice.
 
 MANUSCRIPT BLUEPRINT:
-${JSON.stringify(input.manuscriptBlueprint || {}, null, 2)}
+${compactJson(input.manuscriptBlueprint || {}, 7000)}
 
 REWRITE ARCHITECT PLAN:
-${JSON.stringify(input.rewritePlan || {}, null, 2)}
+${compactJson(input.rewritePlan || {}, 7000)}
 
 REQUIRED CONTEXT PACKET FOR THIS CALL:
-${JSON.stringify(input.contextPacket || {}, null, 2)}
+${compactJson(input.contextPacket || {}, 7000)}
 
 REWRITE STRATEGY:
 ${input.rewriteStrategy ? formatRewriteStrategy(input.rewriteStrategy) : "Use the Rewrite Architect plan with balanced humanized literary polish."}
@@ -188,19 +188,19 @@ CURRENT CHAPTER:
 ${input.chapterTitle}
 
 CURRENT CHAPTER SUMMARY:
-${input.chapterSummary || "Not available."}
+${truncateText(input.chapterSummary || "Not available.", 1800)}
 
 PREVIOUS CHAPTER SUMMARY:
-${input.previousChapterSummary || "Not available."}
+${truncateText(input.previousChapterSummary || "Not available.", 1200)}
 
 NEXT CHAPTER SUMMARY:
-${input.nextChapterSummary || "Not available."}
+${truncateText(input.nextChapterSummary || "Not available.", 1200)}
 
 LOCAL CONTEXT BEFORE THIS PARAGRAPH:
-${input.previousParagraph || "None."}
+${truncateText(input.previousParagraph || "None.", 1200)}
 
 LOCAL CONTEXT AFTER THIS PARAGRAPH:
-${input.nextParagraph || "None."}
+${truncateText(input.nextParagraph || "None.", 1200)}
 
 PARAGRAPH NUMBER:
 ${input.paragraphNumber}
@@ -252,4 +252,13 @@ function formatRewriteStrategy(strategy: RewriteStrategy) {
       ? `Compression mandate: aim to reduce this unit by about ${strategy.settings.targetReductionPercent}% while preserving core meaning. Do not remove important facts, emotional truth, worldview meaning, continuity, or author voice. Mention possible chapter consolidation in revisionNotes instead of changing chapter structure.`
       : "",
   ].join("\n");
+}
+
+function compactJson(value: unknown, maxChars: number) {
+  return truncateText(JSON.stringify(value, null, 2), maxChars);
+}
+
+function truncateText(value: string, maxChars: number) {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars).trimEnd()}\n...[truncated for local model context]`;
 }

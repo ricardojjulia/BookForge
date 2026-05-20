@@ -11,12 +11,13 @@ import { criticLenses } from "@/lib/critic/prompts";
 import { fetchJson } from "@/lib/http/fetch-json";
 import type { CriticLens } from "@/lib/types";
 
-type AiDashboardTask = "book-bible" | "critic" | "critic-all" | "chapter-summaries" | "generate-draft";
+type AiDashboardTask = "book-bible" | "critic" | "critic-all" | "chapter-summaries" | "generate-draft" | "auto-review";
 
 type PendingTask = {
   path: string;
   body?: unknown;
   preflight: AiTaskPreflightData;
+  kind?: "single" | "auto-review";
 };
 
 type ModelStatusResponse = {
@@ -25,9 +26,69 @@ type ModelStatusResponse = {
   contextWindowTokens: number;
   temperature: number;
   maxOutputTokens: number;
+  runtimeLimits?: Record<
+    string,
+    {
+      configuredContextTokens: number;
+      maxOutputTokens: number;
+      reservedTokens: number;
+      usableInputTokens: number;
+      promptCharBudget: number;
+      warnings: string[];
+    }
+  >;
   configuredModels: Array<{ key: string; label: string; model: string; available: boolean }>;
   warnings: string[];
 };
+
+type AutoRevisionResponse = {
+  content?: {
+    applied?: {
+      accepted?: number;
+      rejected?: number;
+      redo?: number;
+    };
+    decisions?: {
+      total?: number;
+      accept?: number;
+      reject?: number;
+      redo?: number;
+    };
+    nextStep?: string;
+  };
+};
+
+type AutoReviewCounts = {
+  accepted?: number;
+  accept?: number;
+  rejected?: number;
+  reject?: number;
+  redo?: number;
+};
+
+type AutoReviewStatusResponse = {
+  content?: {
+    hasBlueprint?: boolean;
+    hasChapterSummaries?: boolean;
+    hasBaselineCriticBatch?: boolean;
+    hasRewritePlan?: boolean;
+    hasAutoRevisionDecisions?: boolean;
+    hasPostRewriteCriticBatch?: boolean;
+    pendingRevisionCount?: number;
+    revisionCount?: number;
+  };
+};
+
+const autoReviewStrategies = [
+  "conservative_polish",
+  "humanized_literary",
+  "clarity_readability",
+  "emotional_depth",
+  "theology_worldview",
+  "creative_enhancement",
+] as const;
+
+const autoReviewTrustProfiles = ["careful", "balanced", "full_trust"] as const;
 
 export function BookActions({
   bookId,
@@ -72,25 +133,35 @@ export function BookActions({
     try {
       const status = await getModelStatus();
       const modelKey =
-        task === "critic" || task === "critic-all"
+        task === "critic" || task === "critic-all" || task === "auto-review"
           ? "reasoningModel"
           : task === "generate-draft"
             ? "primaryRewriteModel"
             : "extractionModel";
       const configured = status.configuredModels.find((item) => item.key === modelKey);
       const selectedModel = configured?.model || "";
+      const runtimeTask =
+        task === "auto-review" || task === "critic" || task === "critic-all"
+          ? "critic"
+          : task === "generate-draft"
+            ? "rewrite"
+            : "extraction";
+      const runtimeLimits = status.runtimeLimits?.[runtimeTask] || status.runtimeLimits?.planning;
       const plan = estimateAiCallPlan({
-        task: task === "critic" || task === "critic-all" ? "critic" : "book-bible",
+        task: task === "critic" || task === "critic-all" || task === "auto-review" ? "critic" : "book-bible",
         selectedModel,
         qualityProfile: status.qualityProfile,
-        contextWindowTokens: status.contextWindowTokens,
-        maxOutputTokens: status.maxOutputTokens,
+        contextWindowTokens: runtimeLimits?.configuredContextTokens || status.contextWindowTokens,
+        maxOutputTokens: runtimeLimits?.maxOutputTokens || status.maxOutputTokens,
         chapterCount,
         sceneCount,
         paragraphCount,
       });
+      const autoReviewRewriteUnits = Math.min(Math.max(paragraphCount, 1), 5000);
       const estimatedUnits =
-        task === "critic-all"
+        task === "auto-review"
+          ? 9
+          : task === "critic-all"
           ? 7
           : task === "generate-draft"
           ? Math.min(Math.max(plannedChapterCount, 1), 3)
@@ -102,7 +173,9 @@ export function BookActions({
               ? sceneCount
               : Math.max(chapterCount, 1);
       const expectedAiCalls =
-        task === "critic-all"
+        task === "auto-review"
+          ? 9
+          : task === "critic-all"
           ? 7
           : task === "generate-draft"
           ? Math.min(Math.max(plannedChapterCount, 1), 3)
@@ -111,6 +184,7 @@ export function BookActions({
             : plan.expectedCalls;
       const warnings = [
         ...status.warnings,
+        ...(runtimeLimits?.warnings || []),
         ...plan.warnings,
         ...(selectedModel ? [] : [`${configured?.label || "Required"} model is not configured.`]),
         ...(paragraphCount > 0 && task === "book-bible"
@@ -128,6 +202,13 @@ export function BookActions({
               "BookForge will run all seven baseline Critic lenses. This is the fastest way to clear rewrite-planning Critic coverage.",
             ]
           : []),
+        ...(task === "auto-review"
+          ? [
+              "Auto Review will run blueprint, chapter summaries, baseline Critic, rewrite planning, paragraph rewriting, random accept/reject/redo decisions, a redo pass when needed, and post-rewrite Critic.",
+              `The paragraph rewrite step can still process up to ${autoReviewRewriteUnits.toLocaleString()} paragraph unit(s) inside the rewrite job.`,
+              "The reviewer intentionally randomizes trust profile, rewrite strategy, distribution mode, and accept/reject/redo outcomes so the run can explore unknowns instead of deterministically approving every draft.",
+            ]
+          : []),
         ...(task === "generate-draft"
           ? [
               "BookForge will generate only a small batch of planned chapter shells in this run. Continue running batches until all planned chapters have prose.",
@@ -138,6 +219,8 @@ export function BookActions({
       const taskPath =
         task === "book-bible"
           ? `/api/books/${bookId}/analyze`
+          : task === "auto-review"
+            ? `/api/books/${bookId}/auto-review`
           : task === "chapter-summaries"
             ? `/api/books/${bookId}/chapters/summarize`
             : task === "critic-all"
@@ -153,6 +236,8 @@ export function BookActions({
           taskName:
             task === "book-bible"
               ? "Generate Manuscript Blueprint"
+              : task === "auto-review"
+                ? "Auto Review Full Book"
               : task === "chapter-summaries"
                 ? "Generate Chapter Summaries"
                 : task === "critic-all"
@@ -163,6 +248,8 @@ export function BookActions({
           taskDescription:
             task === "book-bible"
               ? "Analyze manuscript structure and extract reusable book context for future revisions."
+              : task === "auto-review"
+                ? "Run the full guided review workflow automatically, including randomized rewrite choices and random accept/reject/redo decisions for draft paragraph revisions."
               : task === "chapter-summaries"
                 ? "Summarize every chapter for future Manuscript Blueprint, Critic, and revision context."
                 : task === "critic-all"
@@ -171,7 +258,7 @@ export function BookActions({
                   ? "Write prose for planned AI-created chapter shells using the accepted Creation Wizard architecture."
                 : "Evaluate the book through the selected critic lens without rewriting manuscript text.",
           requiredModelType:
-            task === "critic" || task === "critic-all"
+            task === "critic" || task === "critic-all" || task === "auto-review"
               ? "Reasoning model"
               : task === "generate-draft"
                 ? "Primary rewrite model"
@@ -184,20 +271,44 @@ export function BookActions({
           qualityProfile: status.qualityProfile,
           contextSize: status.contextWindowTokens,
           temperature: status.temperature,
-          maxOutputTokens: status.maxOutputTokens,
-          planningMath: plan.math,
+          maxOutputTokens: runtimeLimits?.maxOutputTokens || status.maxOutputTokens,
+          planningMath:
+            task === "auto-review"
+              ? [
+                  "Auto Review is tracked as 9 workflow steps:",
+                  "1. Manuscript Blueprint",
+                  "2. Chapter summaries",
+                  "3. Baseline Critic lenses",
+                  "4. Rewrite Architect plan",
+                  "5. Paragraph rewrite job",
+                  "6. Random accept/reject/redo review",
+                  "7. Redo rewrite job when needed",
+                  "8. Random redo review when needed",
+                  "9. Post-rewrite Critic lenses",
+                  "",
+                  `Paragraph work still happens inside the rewrite job: up to ${autoReviewRewriteUnits.toLocaleString()} paragraph unit(s).`,
+                ].join("\n")
+              : plan.math,
           targetTokensPerCall: plan.targetTokensPerCall,
-          usableContextTokens: plan.usableContextTokens,
+          usableContextTokens: runtimeLimits?.usableInputTokens || plan.usableContextTokens,
           estimatedSecondsPerCall: plan.estimatedSecondsPerCall,
           estimatedTotalSeconds:
-            task === "chapter-summaries" || task === "generate-draft"
-              ? plan.estimatedSecondsPerCall * expectedAiCalls
-              : plan.estimatedTotalSeconds,
-          unitStrategy: task === "chapter-summaries" || task === "generate-draft" ? "chapters" : plan.unitStrategy,
+            task === "auto-review"
+              ? plan.estimatedSecondsPerCall * 9
+              : task === "chapter-summaries" || task === "generate-draft"
+                ? plan.estimatedSecondsPerCall * expectedAiCalls
+                : plan.estimatedTotalSeconds,
+          unitStrategy:
+            task === "auto-review"
+              ? "full workflow"
+              : task === "chapter-summaries" || task === "generate-draft"
+                ? "chapters"
+                : plan.unitStrategy,
           modelSizeB: plan.modelSizeB,
           quantization: plan.quantization,
           warnings,
         },
+        kind: task === "auto-review" ? "auto-review" : "single",
       });
     } catch (error) {
       setOutput(JSON.stringify({ error: error instanceof Error ? error.message : "Preflight failed." }, null, 2));
@@ -269,8 +380,166 @@ export function BookActions({
     }
   }
 
+  async function runAutoReview(preflight: AiTaskPreflightData | null) {
+    const totalUnits = 9;
+    const estimatedSecondsPerCall = preflight?.estimatedSecondsPerCall || 25;
+    const startedAt = Date.now();
+    let completedUnits = 0;
+
+    function setAutoQueue(currentUnit: string, status: AiJobQueueState["status"] = "running") {
+      setQueue({
+        currentTask: "Auto Review Full Book",
+        currentUnit,
+        totalUnits,
+        completedUnits,
+        successfulUnits: completedUnits,
+        failedUnits: 0,
+        skippedUnits: 0,
+        startedAt,
+        estimatedSecondsPerCall,
+        elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
+        currentCallElapsedSeconds: 0,
+        currentCallProgress: status === "complete" ? 1 : 0.2,
+        nextCallSeconds: status === "running" ? estimatedSecondsPerCall : 0,
+        estimatedSecondsRemaining: status === "running" ? Math.max(0, (totalUnits - completedUnits) * estimatedSecondsPerCall) : 0,
+        estimatedProgress: false,
+        status,
+      });
+    }
+
+    async function post<T = { content?: Record<string, unknown> }>(path: string, body: unknown, label: string) {
+      setAutoQueue(label);
+      const result = await fetchJson<T>(
+        path,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body || {}),
+        },
+        label,
+      );
+      completedUnits = Math.min(totalUnits, completedUnits + 1);
+      return result;
+    }
+
+    function skipCompleted(label: string) {
+      completedUnits = Math.min(totalUnits, completedUnits + 1);
+      setAutoQueue(`${label} already complete`);
+    }
+
+    setLoading("auto-review");
+    setOutput("");
+    setAutoQueue("Starting full workflow");
+
+    try {
+      const initialStatus = await fetchJson<AutoReviewStatusResponse>(
+        `/api/books/${bookId}/auto-review/status`,
+        { cache: "no-store" },
+        "Auto Review status check",
+      );
+      const status = initialStatus.content || {};
+
+      if (status.hasBlueprint) skipCompleted("Manuscript Blueprint");
+      else await post(`/api/books/${bookId}/analyze`, {}, "Generating Manuscript Blueprint");
+
+      if (status.hasChapterSummaries) skipCompleted("Chapter summaries");
+      else await post(`/api/books/${bookId}/chapters/summarize`, {}, "Generating chapter summaries");
+
+      if (status.hasBaselineCriticBatch) skipCompleted("Baseline Critic lenses");
+      else await post(`/api/books/${bookId}/critic/all`, { stage: "baseline" }, "Running baseline Critic lenses");
+
+      if (status.hasRewritePlan) skipCompleted("Rewrite Architect plan");
+      else await post(`/api/books/${bookId}/rewrite-plan`, {}, "Creating Rewrite Architect plan");
+
+      const firstStrategy = randomItem(autoReviewStrategies);
+      const firstTrustProfile = randomItem(autoReviewTrustProfiles);
+      if ((status.pendingRevisionCount || 0) > 0) {
+        skipCompleted("Paragraph rewrite job");
+      } else {
+        await post(
+          `/api/books/${bookId}/rewrite-execute`,
+          {
+            maxUnits: Math.min(Math.max(paragraphCount, 1), 5000),
+            strategyId: firstStrategy,
+            distributeAcrossChapters: Math.random() >= 0.35,
+            coverageMode: Math.random() >= 0.5 ? "uncovered_chapter_sample" : "normal",
+          },
+          `Rewriting paragraphs with ${firstStrategy.replaceAll("_", " ")}`,
+        );
+      }
+
+      const firstReview =
+        status.hasAutoRevisionDecisions && (status.pendingRevisionCount || 0) === 0
+          ? (skipCompleted("Random accept/reject/redo review"), null)
+          : await post<AutoRevisionResponse>(
+              `/api/books/${bookId}/auto-revision`,
+              {
+                action: "run",
+                trustProfile: firstTrustProfile,
+                maxDecisions: Math.min(Math.max(paragraphCount, 1), 5000),
+              },
+              `Randomly accepting, rejecting, or redoing drafts with ${firstTrustProfile.replaceAll("_", " ")} trust`,
+            );
+
+      const redoCount =
+        (firstReview?.content?.applied?.redo || firstReview?.content?.decisions?.redo || 0) +
+        (firstReview?.content?.applied?.rejected || firstReview?.content?.decisions?.reject || 0);
+
+      let secondReview: AutoRevisionResponse | null = null;
+      if (redoCount > 0) {
+        const redoStrategy = randomItem(autoReviewStrategies);
+        const redoTrustProfile = randomItem(autoReviewTrustProfiles);
+        await post(
+          `/api/books/${bookId}/rewrite-execute`,
+          {
+            maxUnits: Math.min(Math.max(redoCount, 1), 5000),
+            rewriteExistingDrafts: true,
+            strategyId: redoStrategy,
+            distributeAcrossChapters: Math.random() >= 0.35,
+            coverageMode: "normal",
+          },
+          `Redoing ${redoCount} rejected or redo paragraph draft(s)`,
+        );
+        secondReview = await post<AutoRevisionResponse>(
+          `/api/books/${bookId}/auto-revision`,
+          {
+            action: "run",
+            trustProfile: redoTrustProfile,
+            maxDecisions: Math.min(Math.max(redoCount, 1), 5000),
+          },
+          `Randomly reviewing redo drafts with ${redoTrustProfile.replaceAll("_", " ")} trust`,
+        );
+      } else {
+        skipCompleted("Redo rewrite job");
+        skipCompleted("Random redo review");
+      }
+
+      if (status.hasPostRewriteCriticBatch) skipCompleted("Post-rewrite Critic lenses");
+      else await post(`/api/books/${bookId}/critic/all`, { stage: "post_rewrite" }, "Running post-rewrite Critic lenses");
+
+      completedUnits = totalUnits;
+      setAutoQueue("Complete", "complete");
+      setOutput(formatAutoReviewMessage(firstReview, secondReview));
+      router.refresh();
+    } catch (error) {
+      setOutput(JSON.stringify({ error: error instanceof Error ? error.message : "Auto Review failed." }, null, 2));
+      setQueue((current) => ({
+        ...current,
+        failedUnits: Math.max(1, current.failedUnits),
+        completedUnits: Math.min(current.totalUnits, current.completedUnits + 1),
+        elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
+        currentCallProgress: 0,
+        nextCallSeconds: null,
+        estimatedProgress: false,
+        status: "cancelled",
+      }));
+    } finally {
+      setLoading(null);
+    }
+  }
+
   useEffect(() => {
-    if (queue.status !== "running" || !queue.startedAt || !queue.estimatedSecondsPerCall) {
+    if (queue.status !== "running" || !queue.startedAt || !queue.estimatedSecondsPerCall || !queue.estimatedProgress) {
       return;
     }
 
@@ -329,6 +598,14 @@ export function BookActions({
           title="Prepare Context"
           description="Build reusable manuscript context before revision."
         >
+          <Button
+            color="red"
+            fullWidth
+            loading={loading === "preflight:auto-review" || loading === "auto-review"}
+            onClick={() => openPreflight("auto-review")}
+          >
+            Auto Review Full Book
+          </Button>
           <Button
             color="grape"
             fullWidth
@@ -423,7 +700,7 @@ export function BookActions({
         }
       />
       {output && (
-        <Alert color={output.startsWith("Error:") ? "red" : "green"} title="Latest result">
+        <Alert color={output.startsWith("Error:") || output.includes('"error"') ? "red" : "green"} title="Latest result">
           {output}
         </Alert>
       )}
@@ -436,7 +713,11 @@ export function BookActions({
           if (!pendingTask) return;
           const task = pendingTask;
           setPendingTask(null);
-          void run(task.path, task.body || {}, task.preflight);
+          if (task.kind === "auto-review") {
+            void runAutoReview(task.preflight);
+          } else {
+            void run(task.path, task.body || {}, task.preflight);
+          }
         }}
       />
     </Stack>
@@ -470,6 +751,33 @@ function ActionPanel({
 function unitLabel(totalUnits: number, current = 1) {
   if (totalUnits <= 1) return "Single model call";
   return `Estimated call ${current} of ${totalUnits}`;
+}
+
+function randomItem<T>(items: readonly T[]) {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
+function formatAutoReviewMessage(firstReview: AutoRevisionResponse | null, secondReview: AutoRevisionResponse | null) {
+  const first: AutoReviewCounts | undefined = firstReview?.content?.applied || firstReview?.content?.decisions;
+  const second: AutoReviewCounts | undefined = secondReview?.content?.applied || secondReview?.content?.decisions;
+  const parts = [
+    "Auto Review completed. Blueprint, summaries, baseline Critic, rewrite plan, paragraph rewrite, random revision decisions, and post-rewrite Critic were saved.",
+  ];
+
+  if (first) {
+    parts.push(
+      `First review: ${first.accepted ?? first.accept ?? 0} accepted, ${first.rejected ?? first.reject ?? 0} rejected, ${first.redo ?? 0} redo.`,
+    );
+  }
+  if (second) {
+    parts.push(
+      `Redo review: ${second.accepted ?? second.accept ?? 0} accepted, ${second.rejected ?? second.reject ?? 0} rejected, ${second.redo ?? 0} redo.`,
+    );
+  }
+  const nextStep = secondReview?.content?.nextStep || firstReview?.content?.nextStep;
+  if (nextStep) parts.push(nextStep);
+
+  return parts.join(" ");
 }
 
 function formatResultMessage(path: string, result: { content?: Record<string, unknown> }) {

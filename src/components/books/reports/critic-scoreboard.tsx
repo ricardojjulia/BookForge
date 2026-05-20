@@ -39,7 +39,8 @@ export function CriticScoreboard({ reports }: { reports: CriticReport[] }) {
         {(Object.keys(criticLenses) as CriticLens[]).map((lens) => {
           const report = latestByLens.get(lens);
           const score = extractCriticScore(report?.content);
-          const evaluated = typeof score === "number";
+          const analyzed = Boolean(report);
+          const scored = typeof score === "number";
 
           return (
             <Paper key={lens} withBorder radius="md" p="md" bg="#fbfaf8">
@@ -50,13 +51,13 @@ export function CriticScoreboard({ reports }: { reports: CriticReport[] }) {
                   roundCaps
                   sections={[
                     {
-                      value: evaluated ? score : 100,
-                      color: evaluated ? scoreColor(score) : "gray.3",
+                      value: scored ? score : 100,
+                      color: scored ? scoreColor(score) : analyzed ? "grape" : "gray.3",
                     },
                   ]}
                   label={
                     <Text ta="center" fw={900} size="sm">
-                      {evaluated ? score : "--"}
+                      {scored ? score : "--"}
                     </Text>
                   }
                 />
@@ -68,8 +69,8 @@ export function CriticScoreboard({ reports }: { reports: CriticReport[] }) {
                     {criticLenses[lens].instruction}
                   </Text>
                   <Group gap="xs">
-                    <Badge size="sm" color={evaluated ? scoreColor(score) : "grape"} variant="light">
-                      {evaluated ? "Evaluated" : "Not analyzed yet"}
+                    <Badge size="sm" color={scored ? scoreColor(score) : analyzed ? "grape" : "gray"} variant="light">
+                      {scored ? "Evaluated" : analyzed ? "Analyzed, no score" : "Not analyzed yet"}
                     </Badge>
                     {report && (
                       <Text size="xs" c="dimmed">
@@ -90,13 +91,17 @@ export function CriticScoreboard({ reports }: { reports: CriticReport[] }) {
 function getLatestReportByLens(reports: CriticReport[]) {
   const map = new Map<CriticLens, CriticReport>();
 
-  for (const report of reports) {
-    const lens = report.report_type.replace(/^critic:/, "") as CriticLens;
+  for (const report of [...reports].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))) {
+    const lens = getLensFromReportType(report.report_type);
     if (!(lens in criticLenses) || map.has(lens)) continue;
     map.set(lens, report);
   }
 
   return map;
+}
+
+function getLensFromReportType(reportType: string) {
+  return reportType.replace(/^critic_post:/, "").replace(/^critic:/, "") as CriticLens;
 }
 
 function scoreColor(score: number) {

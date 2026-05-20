@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# local upload/cache artifacts
+/.tmp.driveupload/
+
 # production
 /build
 

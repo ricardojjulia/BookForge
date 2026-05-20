@@ -27,7 +27,9 @@ import { PROVIDER_META } from "@/lib/ai/providers";
 import type { LlmProvider } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
 
-type Settings = {
+type ExecutionMode = "auto" | "local" | "cloud";
+
+export type Settings = {
   // LM Studio
   lmstudio_base_url: string;
   primary_rewrite_model: string;
@@ -48,6 +50,8 @@ type Settings = {
   llm_base_url: string;
   llm_temperature: number;
   llm_max_output_tokens: number;
+  // Execution routing
+  execution_mode: ExecutionMode;
 };
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -72,7 +76,7 @@ function profileLabel(profile: QualityProfile) {
   return "Balanced Mode";
 }
 
-export function SettingsForm({ userId, initial }: { userId: string; initial?: Partial<Settings> }) {
+export function SettingsForm({ userId, initial, onSaved }: { userId: string; initial?: Partial<Settings>; onSaved?: () => void }) {
   const [settings, setSettings] = useState<Settings>({
     lmstudio_base_url: initial?.lmstudio_base_url || "http://localhost:1234/v1",
     primary_rewrite_model: initial?.primary_rewrite_model || "",
@@ -92,6 +96,7 @@ export function SettingsForm({ userId, initial }: { userId: string; initial?: Pa
     llm_base_url: initial?.llm_base_url || "",
     llm_temperature: Number(initial?.llm_temperature ?? 0.7),
     llm_max_output_tokens: Number(initial?.llm_max_output_tokens ?? 4096),
+    execution_mode: (initial?.execution_mode as ExecutionMode) || "auto",
   });
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -164,6 +169,7 @@ export function SettingsForm({ userId, initial }: { userId: string; initial?: Pa
         );
       if (saveError) throw saveError;
       setStatus("Settings saved.");
+      onSaved?.();
     } catch (err) {
       setError(getErrorMessage(err, "Unable to save settings."));
     } finally {
@@ -228,6 +234,33 @@ export function SettingsForm({ userId, initial }: { userId: string; initial?: Pa
         <Title order={2}>AI Settings</Title>
         {status && <Alert color="green">{status}</Alert>}
         {error && <Alert color="red">{error}</Alert>}
+
+        <Paper withBorder radius="sm" p="md" bg="#f8f7ff">
+          <Stack gap="xs">
+            <Select
+              label="Execution mode"
+              description={
+                settings.execution_mode === "auto"
+                  ? "Critic and Planning tasks use your cloud provider for stronger reasoning. Summaries, Blueprint, and Rewrite use LM Studio to keep costs low."
+                  : settings.execution_mode === "cloud"
+                    ? "All AI tasks are sent to your configured cloud provider. LM Studio is not used for execution."
+                    : "All AI tasks run through LM Studio. The cloud provider is ignored for execution."
+              }
+              data={[
+                { value: "auto", label: "Auto — optimize by task type (recommended)" },
+                { value: "local", label: "LM Studio only" },
+                { value: "cloud", label: "Cloud provider only" },
+              ]}
+              value={settings.execution_mode}
+              onChange={(value) => update("execution_mode", (value as ExecutionMode) || "auto")}
+            />
+            {settings.execution_mode !== "local" && settings.llm_provider === "lmstudio" && (
+              <Alert color="yellow" variant="light" p="xs">
+                <Text size="xs">No cloud provider configured. Set one on the Cloud Provider tab before using cloud or auto mode.</Text>
+              </Alert>
+            )}
+          </Stack>
+        </Paper>
 
         <Tabs defaultValue="lmstudio">
           <Tabs.List>

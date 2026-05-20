@@ -4,6 +4,7 @@ import { AppShell } from "@/components/layout/app-shell";
 import { ChapterAcceptanceWorkflow, type ChapterFinalReadiness } from "@/components/books/export/chapter-acceptance-workflow";
 import { FinalQualityGate } from "@/components/books/export/final-quality-gate";
 import { FinalManuscriptBuilder } from "@/components/books/export/final-manuscript-builder";
+import { MarkFinishedButton } from "@/components/books/export/mark-finished-button";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -66,7 +67,7 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
     { data: latestRewriteJob },
     { data: exports },
   ] = await Promise.all([
-    supabase.from("books").select("title").eq("id", bookId).single(),
+    supabase.from("books").select("title,status,finished_export_id").eq("id", bookId).single(),
     supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId),
     supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId).not("accepted_text", "is", null),
     supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId).eq("is_locked", true),
@@ -159,7 +160,14 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
       <Container size="xl">
         <Group justify="space-between" mb="xl" align="flex-start">
           <div>
-            <Title>Final Manuscript Builder</Title>
+            <Group gap="sm" mb={4}>
+              <Title>Final Manuscript Builder</Title>
+              {(book as { status?: string }).status === "finished" && (
+                <Badge color="green" variant="filled" size="lg">
+                  FINISHED
+                </Badge>
+              )}
+            </Group>
             <Text c="dimmed">{book.title}</Text>
           </div>
           <Group>
@@ -214,6 +222,7 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
                   <th>Status</th>
                   <th>Created</th>
                   <th>Download</th>
+                  <th>Finished version</th>
                 </tr>
               </thead>
               <tbody>
@@ -254,6 +263,17 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
                         <Text size="sm" c="dimmed">
                           Not available
                         </Text>
+                      )}
+                    </td>
+                    <td>
+                      {row.status === "completed" ? (
+                        <MarkFinishedButton
+                          bookId={bookId}
+                          exportId={row.id}
+                          isCurrentFinished={(book as { finished_export_id?: string | null }).finished_export_id === row.id}
+                        />
+                      ) : (
+                        <Text size="xs" c="dimmed">—</Text>
                       )}
                     </td>
                   </tr>

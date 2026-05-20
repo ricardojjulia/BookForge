@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { buildCreationDraftChapterPrompt } from "@/lib/creation/draft-prompt";
-import { createLmStudioClient, testLmStudioConnection } from "@/lib/lmstudio/client";
+import { mergeJobSettings, updateRevisionJobProgress } from "@/lib/ai/job-state";
+import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
-import { getDraftModelCandidates, selectLoadedLmStudioModel } from "@/lib/lmstudio/model-selection";
+import { getDraftModelCandidates } from "@/lib/lmstudio/model-selection";
+import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { parseChapterScenes } from "@/lib/manuscript/parser";
 import { createClient } from "@/lib/supabase/server";
@@ -104,13 +106,38 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     }
 
     const settings = await getUserLmStudioSettings(user.id);
-    const client = createLmStudioClient(settings);
-    const modelSelection = selectLoadedLmStudioModel({
+    const modelPlan = await selectAndPrepareActiveModel(settings, {
+      task: "rewrite",
       candidates: getDraftModelCandidates(settings),
-      availableModels: await getAvailableModels(settings.baseUrl),
+      expectedCalls: plannedChapters.length,
+      latencyPreference: settings.qualityProfile === "premium" ? "quality" : settings.qualityProfile === "fast" ? "fast" : "balanced",
+      allowUnload: plannedChapters.length >= 3,
     });
-    const model = modelSelection.model;
+    const { client, model, preparedModel, modelSelection } = modelPlan;
     const generated: Array<{ chapterNumber: number; title: string | null; paragraphCount: number }> = [];
+
+    const initialJobSettings = mergeJobSettings(
+      {
+        limit,
+        model,
+        modelSource: modelSelection.source,
+        configuredModelFallbackOrder: modelSelection.configuredModels,
+        availableModels: modelSelection.availableModels,
+        usedLoadedFallback: modelSelection.usedLoadedFallback,
+        generationKind: "planned_chapter_draft",
+      },
+      {
+        taskName: "Creation Draft Generation",
+        currentUnit: "Starting…",
+        totalUnits: plannedChapters.length,
+        attempted: 0,
+        successful: 0,
+        failed: 0,
+        skipped: 0,
+        startedAt: new Date().toISOString(),
+        lastHeartbeatAt: new Date().toISOString(),
+      },
+    );
 
     const { data: job, error: jobError } = await supabase
       .from("revision_jobs")
@@ -118,15 +145,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         book_id: bookId,
         mode: "creation_draft_generation",
         status: "running",
-        settings: {
-          limit,
-          model,
-          modelSource: modelSelection.source,
-          configuredModelFallbackOrder: modelSelection.configuredModels,
-          availableModels: modelSelection.availableModels,
-          usedLoadedFallback: modelSelection.usedLoadedFallback,
-          generationKind: "planned_chapter_draft",
-        },
+        settings: initialJobSettings,
         created_by: user.id,
         started_at: new Date().toISOString(),
       })
@@ -134,8 +153,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       .single();
     if (jobError) throw jobError;
 
+    let currentJobSettings: unknown = initialJobSettings;
+    let successCount = 0;
+
     try {
       for (const chapter of plannedChapters) {
+        const chapterLabel = `Chapter ${chapter.chapter_number}${chapter.title ? `: ${chapter.title}` : ""}`;
+        currentJobSettings = await updateRevisionJobProgress(supabase, job.id, currentJobSettings, {
+          currentUnit: chapterLabel,
+          attempted: successCount,
+          successful: successCount,
+          totalUnits: plannedChapters.length,
+        });
+
         const architectureChapter =
           architectureChapters.find((item) => item.chapterNumber === chapter.chapter_number) || {
             chapterNumber: chapter.chapter_number,
@@ -159,12 +189,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
           nextChapterSummary: summarizeArchitectureChapter(nextChapter),
         });
 
-        const completion = await client.chat.completions
-          .create({
-            model,
+        const completion = await createManagedChatCompletion(client, preparedModel, {
             temperature: Math.min(Math.max(settings.temperature, 0.45), 0.8),
             top_p: settings.topP,
-            max_tokens: Math.min(Math.max(settings.maxOutputTokens, 2048), 6000),
+            max_tokens: Math.min(Math.max(settings.maxOutputTokens, 2048), 12000),
             messages: [{ role: "user", content: prompt }],
             response_format: { type: "text" },
           })
@@ -179,21 +207,32 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
             );
           });
 
-        const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "", (raw) => ({
+        const rawContent = completion.choices[0]?.message.content || "";
+        const parsed = parseModelJsonOrFallback(rawContent, (raw) => ({
           chapterText: raw,
           chapterSummary: "",
           continuityNotes: [],
           generationNotes: ["The model returned prose instead of JSON; BookForge preserved it as chapter text."],
         })) as {
           chapterText?: unknown;
+          chapter_text?: unknown;
+          text?: unknown;
+          content?: unknown;
           chapterSummary?: unknown;
           continuityNotes?: unknown;
           generationNotes?: unknown;
         };
 
-        const chapterText = cleanGeneratedChapterText(String(parsed.chapterText || ""), chapter.title || "");
-        if (chapterText.split(/\s+/).filter(Boolean).length < 80) {
-          throw new Error(`Chapter ${chapter.chapter_number} generation returned too little text.`);
+        const rawChapterText = String(
+          parsed.chapterText || parsed.chapter_text || parsed.text || parsed.content || "",
+        );
+        const chapterText = cleanGeneratedChapterText(rawChapterText, chapter.title || "");
+        const wordCount = chapterText.split(/\s+/).filter(Boolean).length;
+        if (wordCount < 80) {
+          const snippet = rawContent.slice(0, 300).replace(/\n/g, " ");
+          throw new Error(
+            `Chapter ${chapter.chapter_number} generation returned too little text (${wordCount} words). Raw response snippet: "${snippet}"`,
+          );
         }
 
         await supabase.from("paragraphs").delete().eq("chapter_id", chapter.id);
@@ -256,6 +295,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
           },
         });
 
+        successCount++;
         generated.push({
           chapterNumber: chapter.chapter_number,
           title: chapter.title,
@@ -264,20 +304,28 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       }
 
       const remaining = Math.max(0, (chapters || []).filter((chapter) => chapter.status === "planned").length - generated.length);
+      currentJobSettings = await updateRevisionJobProgress(supabase, job.id, currentJobSettings, {
+        currentUnit: `${generated.length} chapter${generated.length === 1 ? "" : "s"} generated`,
+        attempted: successCount,
+        successful: successCount,
+        totalUnits: plannedChapters.length,
+        completedAt: new Date().toISOString(),
+      });
       await supabase
         .from("revision_jobs")
         .update({
           status: "completed",
           completed_at: new Date().toISOString(),
-          settings: {
-            limit,
-            model,
-            modelSource: modelSelection.source,
-            configuredModelFallbackOrder: modelSelection.configuredModels,
-            generationKind: "planned_chapter_draft",
-            generated,
-            remaining,
-          },
+          settings: mergeJobSettings(currentJobSettings, {
+            taskName: "Creation Draft Generation",
+            currentUnit: `${generated.length} chapter${generated.length === 1 ? "" : "s"} generated`,
+            totalUnits: plannedChapters.length,
+            attempted: successCount,
+            successful: successCount,
+            failed: 0,
+            skipped: 0,
+            completedAt: new Date().toISOString(),
+          }),
         })
         .eq("id", job.id);
 
@@ -329,14 +377,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
   } catch (error) {
     console.error("Creation draft generation failed", error);
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
-  }
-}
-
-async function getAvailableModels(baseUrl: string) {
-  try {
-    return (await testLmStudioConnection({ baseUrl })).models;
-  } catch {
-    return [];
   }
 }
 

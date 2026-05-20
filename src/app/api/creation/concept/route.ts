@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildCreationConceptPrompt } from "@/lib/creation/concept-prompt";
-import { createLmStudioClient } from "@/lib/lmstudio/client";
+import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
+import { getReasoningModelCandidates } from "@/lib/lmstudio/model-selection";
+import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { createClient } from "@/lib/supabase/server";
 
@@ -56,10 +58,14 @@ export async function POST(request: Request) {
     });
 
     const settings = await getUserLmStudioSettings(user.id);
-    const client = createLmStudioClient(settings);
-    const model = settings.reasoningModel || settings.primaryRewriteModel || settings.extractionModel || "local-model";
-    const completion = await client.chat.completions.create({
-      model,
+    const modelPlan = await selectAndPrepareActiveModel(settings, {
+      task: "planning",
+      candidates: getReasoningModelCandidates(settings),
+      expectedCalls: 1,
+      latencyPreference: "quality",
+    });
+    const { client, preparedModel, modelSelection } = modelPlan;
+    const completion = await createManagedChatCompletion(client, preparedModel, {
       temperature: Math.min(settings.temperature, 0.65),
       top_p: settings.topP,
       max_tokens: Math.min(settings.maxOutputTokens, 3500),
@@ -85,6 +91,9 @@ export async function POST(request: Request) {
         reason: "Fallback concept created from raw model response.",
       },
     })) as Record<string, unknown>;
+    content.lmStudioRuntimeLimits = preparedModel.runtimeLimits;
+    content.lmStudioWarnings = preparedModel.warnings;
+    content.modelSelection = modelSelection;
 
     const project = await upsertCreationProject(supabase, user.id, body);
     const { data: version, error: versionError } = await supabase

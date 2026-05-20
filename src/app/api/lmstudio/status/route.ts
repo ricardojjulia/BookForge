@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getConfiguredTaskModels, isModelAvailable } from "@/lib/ai/model-status";
 import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
 import { testLmStudioConnection } from "@/lib/lmstudio/client";
+import { getLmStudioRuntimeLimits } from "@/lib/lmstudio/runtime-limits";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { createClient } from "@/lib/supabase/server";
 
@@ -37,6 +38,12 @@ export async function GET() {
       qualityProfile: settings.qualityProfile,
       contextWindowTokens: settings.contextWindowTokens,
     });
+    const runtimeLimits = {
+      planning: getLmStudioRuntimeLimits(settings, "planning"),
+      rewrite: getLmStudioRuntimeLimits(settings, "rewrite"),
+      critic: getLmStudioRuntimeLimits(settings, "critic"),
+      extraction: getLmStudioRuntimeLimits(settings, "extraction"),
+    };
     const configuredRewriteModelSuitability =
       rewriteModelSuitability.candidates.find((candidate) => candidate.model === settings.primaryRewriteModel) || null;
     const configuredRewriteModel = {
@@ -49,6 +56,7 @@ export async function GET() {
         .filter((item) => item.model && !item.available)
         .map((item) => `${item.label} model is configured but unavailable in LM Studio: ${item.model}`),
       ...(rewriteModelSuitability.warning ? [rewriteModelSuitability.warning] : []),
+      ...runtimeLimits.planning.warnings,
     ];
 
     return NextResponse.json({
@@ -60,6 +68,7 @@ export async function GET() {
       topP: settings.topP,
       repeatPenalty: settings.repeatPenalty,
       maxOutputTokens: settings.maxOutputTokens,
+      runtimeLimits,
       availableModels,
       configuredModels,
       rewriteModelSuitability,

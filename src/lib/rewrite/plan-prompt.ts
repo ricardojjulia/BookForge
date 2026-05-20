@@ -10,10 +10,12 @@ type RewritePlanPromptInput = {
   rewriteModelSelection?: unknown;
   chapters: Array<{ chapter_number: number; title: string | null; summary: string | null }>;
   criticReports: Array<{ report_type: string; created_at: string; content: Record<string, unknown> | null }>;
+  promptCharBudget?: number;
 };
 
 export function buildRewritePlanPrompt(input: RewritePlanPromptInput) {
   const latestCritics = getLatestCritics(input.criticReports);
+  const budget = splitPromptBudget(input.promptCharBudget || 32000);
 
   return `You are BookForge Rewrite Architect.
 
@@ -31,18 +33,18 @@ TARGET AUDIENCE:
 ${input.targetAudience || "Not specified"}
 
 MANUSCRIPT BLUEPRINT:
-${JSON.stringify(input.manuscriptBlueprint || {}, null, 2)}
+${compactJson(input.manuscriptBlueprint || {}, budget.blueprint)}
 
 CHAPTER MAP:
 ${input.chapters
-  .map((chapter) => `${chapter.chapter_number}. ${chapter.title || "Untitled"}: ${chapter.summary || "No summary yet."}`)
+  .map((chapter) => `${chapter.chapter_number}. ${chapter.title || "Untitled"}: ${truncateText(chapter.summary || "No summary yet.", budget.chapterSummary)}`)
   .join("\n")}
 
 LATEST CRITIC SCORES AND FINDINGS:
-${JSON.stringify(latestCritics, null, 2)}
+${compactJson(latestCritics, budget.critics)}
 
 LM STUDIO REWRITE MODEL SELECTION:
-${JSON.stringify(input.rewriteModelSelection || {}, null, 2)}
+${compactJson(input.rewriteModelSelection || {}, budget.modelSelection)}
 
 Return only valid JSON. Do not use markdown fences. Do not include comments.
 
@@ -163,14 +165,59 @@ function getLatestCritics(reports: RewritePlanPromptInput["criticReports"]) {
   for (const report of reports) {
     const lens = report.report_type.replace(/^critic:/, "") as CriticLens;
     if (!(lens in criticLenses) || map.has(lens)) continue;
+    const content = report.content || {};
     map.set(lens, {
       lens,
       label: criticLenses[lens].label,
       score: extractCriticScore(report.content),
-      content: report.content,
+      executiveSummary: stringValue(content.executiveSummary),
+      strengths: compactArray(content.strengths, 4),
+      risks: compactArray(content.risks, 5),
+      highestLeverageFixes: compactArray(content.highestLeverageFixes, 6),
+      continuityFlags: compactArray(content.continuityFlags, 5),
+      nextRevisionPlan: compactArray(content.nextRevisionPlan, 5),
       createdAt: report.created_at,
     });
   }
 
   return Array.from(map.values());
+}
+
+function compactJson(value: unknown, maxChars: number) {
+  return truncateText(JSON.stringify(value, null, 2), maxChars);
+}
+
+function truncateText(value: unknown, maxChars: number) {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars).trimEnd()}\n...[truncated for local model context]`;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? truncateText(value, 1400) : "";
+}
+
+function compactArray(value: unknown, maxItems: number) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, maxItems).map((item) => {
+    if (typeof item === "string") return truncateText(item, 900);
+    if (!item || typeof item !== "object") return item;
+
+    const record = item as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(record)
+        .slice(0, 8)
+        .map(([key, itemValue]) => [key, typeof itemValue === "string" ? truncateText(itemValue, 700) : itemValue]),
+    );
+  });
+}
+
+function splitPromptBudget(total: number) {
+  const safeTotal = Math.max(10000, total);
+  return {
+    blueprint: Math.max(3000, Math.floor(safeTotal * 0.28)),
+    critics: Math.max(4000, Math.floor(safeTotal * 0.34)),
+    modelSelection: Math.max(1200, Math.floor(safeTotal * 0.08)),
+    chapterSummary: safeTotal < 22000 ? 420 : 700,
+  };
 }

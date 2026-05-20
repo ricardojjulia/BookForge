@@ -29,17 +29,21 @@ export type PdfOptions = {
 
 export async function buildFinalManuscriptPdf(input: BuildMarkdownInput, options: PdfOptions = {}) {
   const fontSize = Math.max(9, Math.min(14, options.fontSize || 11.5));
+  const metadata: Record<string, string> = {
+    Title: input.book.title || "Untitled Book",
+    Creator: "BookForge AI",
+    Producer: "BookForge AI",
+  };
+  if (input.book.author_name?.trim()) {
+    metadata.Author = input.book.author_name.trim();
+  }
+
   const doc = new PDFDocument({
     autoFirstPage: false,
     size: options.pageSize || "LETTER",
     margins: { top: 72, right: 72, bottom: 72, left: 72 },
     bufferPages: true,
-    info: {
-      Title: input.book.title || "Untitled Book",
-      Author: input.book.author_name || undefined,
-      Creator: "BookForge AI",
-      Producer: "BookForge AI",
-    },
+    info: metadata,
   });
 
   const chunks: Buffer[] = [];

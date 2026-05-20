@@ -51,7 +51,7 @@ export async function POST(request: Request) {
     if (projectError) throw projectError;
 
     if (file instanceof File && file.size > 0) {
-      originalFilePath = `${user.id}/${project.id}/${Date.now()}-${file.name}`;
+      originalFilePath = `${user.id}/${project.id}/${Date.now()}-${sanitizeStorageFileName(file.name)}`;
       const { error: uploadError } = await supabase.storage
         .from("manuscripts")
         .upload(originalFilePath, file, { upsert: false });
@@ -134,4 +134,16 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
+}
+
+function sanitizeStorageFileName(fileName: string) {
+  const fallback = "manuscript";
+  const normalized = fileName
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+
+  return normalized || fallback;
 }

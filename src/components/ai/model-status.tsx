@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import {
   Alert,
   Badge,
@@ -37,7 +37,9 @@ type ModelStatusPayload = {
   error: string | null;
 };
 
-export function ModelStatus() {
+export type ModelStatusHandle = { refresh: () => void };
+
+export const ModelStatus = forwardRef<ModelStatusHandle>(function ModelStatus(_, ref) {
   const [status, setStatus] = useState<ModelStatusPayload | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -65,6 +67,8 @@ export function ModelStatus() {
     setStatus(result);
     setLoading(false);
   }
+
+  useImperativeHandle(ref, () => ({ refresh: load }));
 
   useEffect(() => {
     let active = true;
@@ -175,7 +179,7 @@ export function ModelStatus() {
       </Stack>
     </Paper>
   );
-}
+});
 
 function StatusMetric({ label, value, ok }: { label: string; value: string | number; ok?: boolean }) {
   return (

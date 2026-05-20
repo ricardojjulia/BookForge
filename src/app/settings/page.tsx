@@ -1,9 +1,8 @@
 import { Alert, Container } from "@mantine/core";
-import { ModelStatus } from "@/components/ai/model-status";
 import { AppShell } from "@/components/layout/app-shell";
-import { SettingsForm } from "@/components/settings/settings-form";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
+import { SettingsPageClient } from "./settings-page-client";
 
 export const dynamic = "force-dynamic";
 
@@ -37,10 +36,7 @@ export default async function SettingsPage() {
   return (
     <AppShell>
       <Container size="lg">
-        <SettingsForm userId={user.id} initial={data || undefined} />
-        <div style={{ marginTop: 24 }}>
-          <ModelStatus />
-        </div>
+        <SettingsPageClient userId={user.id} initial={data || undefined} />
       </Container>
     </AppShell>
   );

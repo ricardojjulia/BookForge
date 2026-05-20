@@ -2,8 +2,10 @@ import { estimateAiCallPlan } from "@/lib/ai/call-planner";
 import { buildCriticPrompt } from "@/lib/critic/prompts";
 import { extractCriticScore } from "@/lib/critic/score";
 import { summarizeCriticContent } from "@/lib/critic/summary";
-import { createLmStudioClient } from "@/lib/lmstudio/client";
+import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
+import { getReasoningModelCandidates } from "@/lib/lmstudio/model-selection";
+import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import type { CriticLens } from "@/lib/types";
 
@@ -58,15 +60,20 @@ export async function runCriticLens(input: {
   if (chaptersError) throw chaptersError;
 
   const settings = await getUserLmStudioSettings(input.userId);
-  const client = createLmStudioClient(settings);
-  const model = settings.reasoningModel || settings.primaryRewriteModel || "local-model";
+  const modelPlan = await selectAndPrepareActiveModel(settings, {
+    task: "critic",
+    candidates: getReasoningModelCandidates(settings),
+    expectedCalls: 1,
+    latencyPreference: settings.qualityProfile === "fast" ? "fast" : "quality",
+  });
+  const { client, model, preparedModel, modelSelection } = modelPlan;
   const chapterRows = (chapters || []) as ChapterRow[];
   const plan = estimateAiCallPlan({
     task: "critic",
     selectedModel: model,
     qualityProfile: settings.qualityProfile,
-    contextWindowTokens: settings.contextWindowTokens,
-    maxOutputTokens: settings.maxOutputTokens,
+    contextWindowTokens: preparedModel.runtimeLimits.configuredContextTokens,
+    maxOutputTokens: preparedModel.runtimeLimits.maxOutputTokens,
     chapterCount: chapterRows.length,
     sceneCount: scenes || 0,
     paragraphCount: paragraphs || 0,
@@ -85,13 +92,12 @@ export async function runCriticLens(input: {
         : undefined,
     rewriteStage: stage,
     lens: input.lens,
+    promptCharBudget: preparedModel.runtimeLimits.promptCharBudget,
   });
 
-  const completion = await client.chat.completions.create({
-    model,
+  const completion = await createManagedChatCompletion(client, preparedModel, {
     temperature: 0.3,
     top_p: settings.topP,
-    max_tokens: settings.maxOutputTokens,
     messages: [{ role: "user", content: prompt }],
     response_format: { type: "text" },
   });
@@ -124,6 +130,9 @@ export async function runCriticLens(input: {
       ...plan,
       expectedCalls: 1,
       actualCalls: 1,
+      lmStudioRuntimeLimits: preparedModel.runtimeLimits,
+      lmStudioWarnings: preparedModel.warnings,
+      modelSelection,
     },
   };
 

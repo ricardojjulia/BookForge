@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
 import { buildHumanizeGuidancePrompt } from "@/lib/humanize/guidance-prompt";
-import { createLmStudioClient, testLmStudioConnection } from "@/lib/lmstudio/client";
+import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
+import { getReasoningModelCandidates } from "@/lib/lmstudio/model-selection";
+import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { createClient } from "@/lib/supabase/server";
 
@@ -45,14 +47,19 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
     if (reportsError) throw reportsError;
 
     const settings = await getUserLmStudioSettings(user.id);
-    const available = await getAvailableModels(settings.baseUrl);
-    const fit = selectBestRewriteModel(available, {
+    const modelPlan = await selectAndPrepareActiveModel(settings, {
+      task: "planning",
+      candidates: getReasoningModelCandidates(settings),
+      expectedCalls: 1,
+      latencyPreference: "quality",
+    });
+    const fit = selectBestRewriteModel(modelPlan.availableModels, {
       qualityProfile: settings.qualityProfile,
       contextWindowTokens: settings.contextWindowTokens,
     });
-    const selectedModel = fit.best?.model || settings.primaryRewriteModel || settings.reasoningModel || "local-model";
+    const selectedModel = modelPlan.model;
     const selectedFit = fit.candidates.find((candidate) => candidate.model === selectedModel) || fit.best;
-    const client = createLmStudioClient(settings);
+    const { client, preparedModel, modelSelection } = modelPlan;
 
     const criticReports = (reports || [])
       .filter((report) => String(report.report_type).startsWith("critic:"))
@@ -63,11 +70,10 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
       .map((report) => ({ content: report.content as Record<string, unknown> | null }))
       .slice(0, 3);
 
-    const completion = await client.chat.completions.create({
-      model: selectedModel,
+    const completion = await createManagedChatCompletion(client, preparedModel, {
       temperature: Math.min(settings.temperature, 0.45),
       top_p: settings.topP,
-      max_tokens: Math.min(settings.maxOutputTokens, 3000),
+      max_tokens: 3000,
       messages: [{ role: "user", content: buildHumanizeGuidancePrompt({ criticReports, driftReports }) }],
       response_format: { type: "text" },
     });
@@ -91,6 +97,9 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
         selectedModel,
         fitLabel: selectedFit?.label || "unknown",
         reasons: selectedFit?.reasons || [],
+        lmStudioRuntimeLimits: preparedModel.runtimeLimits,
+        lmStudioWarnings: preparedModel.warnings,
+        modelSelection,
       },
     };
 
@@ -105,13 +114,5 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
   } catch (error) {
     console.error("Humanize guidance failed", error);
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
-  }
-}
-
-async function getAvailableModels(baseUrl: string) {
-  try {
-    return (await testLmStudioConnection({ baseUrl })).models;
-  } catch {
-    return [];
   }
 }

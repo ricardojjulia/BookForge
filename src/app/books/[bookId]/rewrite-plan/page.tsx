@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Container, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { Alert, Button, Container, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { AppShell } from "@/components/layout/app-shell";
 import { RewriteExecutionPanel } from "@/components/books/rewrite/rewrite-execution-panel";
@@ -6,6 +6,7 @@ import { RewriteModelEvaluator } from "@/components/books/rewrite/rewrite-model-
 import { RewritePlanActions } from "@/components/books/rewrite/rewrite-plan-actions";
 import { RewritePlanView } from "@/components/books/rewrite/rewrite-plan-view";
 import { ResetRewriteButton } from "@/components/books/rewrite/reset-rewrite-button";
+import { ReadinessStatusGrid } from "@/components/books/rewrite/readiness-status-grid";
 import { criticLenses } from "@/lib/critic/prompts";
 import { getRewriteCampaignStats, type RewriteCampaignRow } from "@/lib/rewrite/campaigns";
 import { getRewriteReadiness } from "@/lib/rewrite/readiness";
@@ -186,12 +187,16 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
           <ResetRewriteButton bookId={bookId} />
         </Group>
 
-        <SimpleGrid cols={{ base: 1, md: 4 }} mb="xl">
-          <StatusCard label="Chapter summaries" value={`${summarized}/${chapterCount}`} ready={chapterCount > 0 && summarized === chapterCount} />
-          <StatusCard label="Manuscript Blueprint" value={bible ? "Ready" : "Missing"} ready={Boolean(bible)} />
-          <StatusCard label="Critic lenses" value={`${criticCoverage.done}/7`} ready={criticCoverage.done === 7} />
-          <StatusCard label="Rewrite plan" value={rewritePlan ? "Saved" : "Not generated"} ready={Boolean(rewritePlan)} />
-        </SimpleGrid>
+        <div id="readiness-status">
+          <ReadinessStatusGrid
+            bookId={bookId}
+            summarized={summarized}
+            chapterCount={chapterCount}
+            hasBlueprint={Boolean(bible)}
+            criticDone={criticCoverage.done}
+            hasRewritePlan={Boolean(rewritePlan)}
+          />
+        </div>
 
         <RewriteModelEvaluator bookId={bookId} />
 
@@ -204,8 +209,22 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
             </Text>
             {criticCoverage.missing.length > 0 && (
               <Alert color="yellow">
-                Missing critic lenses: {criticCoverage.missing.map((lens) => criticLenses[lens].label).join(", ")}.
-                You can generate a plan now, but the strongest plan comes after all seven lenses have been run.
+                <Group justify="space-between" align="flex-start" wrap="nowrap">
+                  <Text size="sm">
+                    Missing critic lenses: {criticCoverage.missing.map((lens) => criticLenses[lens].label).join(", ")}.
+                    You can generate a plan now, but the strongest plan comes after all seven lenses have been run.
+                  </Text>
+                  <Button
+                    component="a"
+                    href="#readiness-status"
+                    size="xs"
+                    variant="filled"
+                    color="yellow"
+                    style={{ whiteSpace: "nowrap", flexShrink: 0 }}
+                  >
+                    Run missing critics ↑
+                  </Button>
+                </Group>
               </Alert>
             )}
             <RewritePlanActions bookId={bookId} latestPlan={(rewritePlan?.content as Record<string, unknown> | null) || null} />
@@ -266,21 +285,6 @@ function getRewriteCoverage(
   });
 }
 
-function StatusCard({ label, value, ready }: { label: string; value: string; ready: boolean }) {
-  return (
-    <Paper withBorder radius="md" p="lg" bg="white">
-      <Group justify="space-between">
-        <Text size="sm" c="dimmed">
-          {label}
-        </Text>
-        <Badge color={ready ? "green" : "yellow"} variant="light">
-          {ready ? "ready" : "needs work"}
-        </Badge>
-      </Group>
-      <Title order={2}>{value}</Title>
-    </Paper>
-  );
-}
 
 function getSavedModelEvaluation(metadata: Record<string, unknown> | null) {
   const value = metadata?.modelEvaluation;

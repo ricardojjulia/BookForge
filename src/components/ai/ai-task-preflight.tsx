@@ -74,7 +74,7 @@ export function AiTaskPreflight({
             <PreflightField label="Quality profile" value={data.qualityProfile} />
             <PreflightField label="Context size" value={`${data.contextSize.toLocaleString()} tokens`} />
             <PreflightField
-              label="Usable context after reserves"
+              label="Usable input after reserves"
               value={`${(data.usableContextTokens || data.contextSize).toLocaleString()} tokens`}
             />
             <PreflightField

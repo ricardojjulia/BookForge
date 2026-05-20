@@ -37,6 +37,8 @@ export function AiJobQueue({
 }) {
   const progress = job.totalUnits ? Math.round((job.completedUnits / job.totalUnits) * 100) : 0;
   const currentCall = getCurrentCall(job);
+  const unitLabel = job.estimatedProgress ? "call" : "step";
+  const unitLabelTitle = job.estimatedProgress ? "Call" : "Step";
 
   return (
     <Paper withBorder radius="md" p="xl" bg="white">
@@ -56,13 +58,13 @@ export function AiJobQueue({
 
         <SimpleGrid cols={{ base: 1, md: 3 }}>
           <QueueField label="Elapsed" value={formatDuration(job.elapsedSeconds || 0)} />
-          <QueueField label="Current call elapsed" value={formatDuration(job.currentCallElapsedSeconds || 0)} />
-          <QueueField label="Current call progress" value={`${Math.round((job.currentCallProgress || 0) * 100)}%`} />
+          <QueueField label={`Current ${unitLabel} elapsed`} value={formatDuration(job.currentCallElapsedSeconds || 0)} />
+          <QueueField label={`Current ${unitLabel} progress`} value={`${Math.round((job.currentCallProgress || 0) * 100)}%`} />
         </SimpleGrid>
 
         <SimpleGrid cols={{ base: 1, md: 2 }}>
           <QueueField
-            label="Next estimated call"
+            label={`Next estimated ${unitLabel}`}
             value={
               job.status === "running" && job.nextCallSeconds != null
                 ? formatDuration(job.nextCallSeconds)
@@ -76,7 +78,7 @@ export function AiJobQueue({
             value={
               job.status === "running"
                 ? job.totalUnits <= 1
-                  ? "Single call"
+                  ? `Single ${unitLabel}`
                   : job.estimatedSecondsRemaining == null
                     ? "Calibrating"
                     : formatDuration(job.estimatedSecondsRemaining)
@@ -105,6 +107,8 @@ export function AiJobQueue({
           currentCallProgress={job.currentCallProgress || 0}
           estimatedProgress={Boolean(job.estimatedProgress)}
           status={job.status}
+          unitLabel={unitLabel}
+          unitLabelTitle={unitLabelTitle}
         />
 
         <SimpleGrid cols={{ base: 2, md: 4 }}>
@@ -143,6 +147,8 @@ function AiCallGraph({
   currentCallProgress,
   estimatedProgress,
   status,
+  unitLabel,
+  unitLabelTitle,
 }: {
   totalCalls: number;
   completedCalls: number;
@@ -153,6 +159,8 @@ function AiCallGraph({
   currentCallProgress: number;
   estimatedProgress: boolean;
   status: AiJobQueueState["status"];
+  unitLabel: string;
+  unitLabelTitle: string;
 }) {
   const visibleCalls = buildVisibleCalls(totalCalls || 0, currentCall);
   const radius = 54;
@@ -204,7 +212,7 @@ function AiCallGraph({
             )}
             <Stack gap={0} align="center" justify="center" style={{ position: "absolute", inset: 0 }}>
               <Text size="xs" c="rgba(255,255,255,0.68)" tt="uppercase" fw={700}>
-                Current Call
+                Current {unitLabelTitle}
               </Text>
               <Text fz={34} fw={900} lh={1}>
                 {totalCalls ? currentCall : 0}
@@ -220,10 +228,12 @@ function AiCallGraph({
           <Group justify="space-between">
             <div>
               <Title order={3} c="white">
-                AI Call Map
+                {estimatedProgress ? "AI Call Map" : "Workflow Step Map"}
               </Title>
               <Text c="rgba(255,255,255,0.68)" size="sm">
-                Smaller calls keep local models faster and reduce context failures.
+                {estimatedProgress
+                  ? "Smaller calls keep local models faster and reduce context failures."
+                  : "Auto Review is tracked by top-level workflow steps; paragraph units run inside the rewrite job."}
               </Text>
               <Text c="rgba(255,255,255,0.82)" size="sm" fw={700} mt={4}>
                 {status === "running" && estimatedProgress
@@ -232,15 +242,17 @@ function AiCallGraph({
                     : estimatedSecondsRemaining == null
                       ? "ETA calibrating after the first two calls"
                       : `Estimated time left: ${formatDuration(estimatedSecondsRemaining)}`
+                  : status === "running"
+                    ? `${unitLabelTitle} ${currentCall} of ${totalCalls || 0} running`
                   : status === "complete"
-                    ? "All planned calls complete"
+                    ? `All planned ${unitLabel}s complete`
                   : "Waiting for a task"}
               </Text>
               {status === "running" && (
                 <div style={{ marginTop: 12 }}>
                   <Group justify="space-between" mb={4}>
                     <Text size="xs" c="rgba(255,255,255,0.58)" fw={700}>
-                      Current call progress
+                      Current {unitLabel} progress
                     </Text>
                     <Text size="xs" c="rgba(255,255,255,0.72)">
                       {Math.round(currentCallProgress * 100)}%

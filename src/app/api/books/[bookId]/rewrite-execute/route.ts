@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildJobProgress, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
 import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
-import { createLmStudioClient, testLmStudioConnection } from "@/lib/lmstudio/client";
+import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
+import { getDraftModelCandidates } from "@/lib/lmstudio/model-selection";
+import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { buildFullBookRewriteUnitPrompt } from "@/lib/prompts/builders";
 import { buildRewriteContextPacket } from "@/lib/rewrite/context-packet";
@@ -197,13 +199,19 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       latestContinuityLedger: continuityLedger?.content || null,
     };
     const settings = await getUserLmStudioSettings(user.id);
-    const availableModels = await getAvailableModels(settings.baseUrl);
+    const expectedCalls = body.maxUnits || Number(rewritePlan.content?.totalParagraphs || 12);
+    const modelPlan = await selectAndPrepareActiveModel(settings, {
+      task: "rewrite",
+      candidates: getDraftModelCandidates(settings),
+      expectedCalls,
+      latencyPreference: settings.qualityProfile === "premium" ? "quality" : settings.qualityProfile === "fast" ? "fast" : "balanced",
+      allowUnload: true,
+    });
+    const { client, model, preparedModel, modelSelection, availableModels } = modelPlan;
     const rewriteSelection = selectBestRewriteModel(availableModels, {
       qualityProfile: settings.qualityProfile,
       contextWindowTokens: settings.contextWindowTokens,
     });
-    const model = rewriteSelection.best?.model || settings.primaryRewriteModel || "local-model";
-    const client = createLmStudioClient(settings);
     const selectedStrategy = getRewriteStrategy(body.strategyId);
     const rewriteStrategy = {
       ...selectedStrategy,
@@ -225,6 +233,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         status: "running",
         settings: {
           model,
+          preparedModel,
+          modelSelection,
           campaignId: body.campaignId || null,
           rewriteModelSelection: rewriteSelection,
           maxUnits: body.maxUnits || null,
@@ -422,11 +432,10 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           text: paragraph.original_text,
         });
 
-        const completion = await client.chat.completions.create({
-          model,
+        const completion = await createManagedChatCompletion(client, preparedModel, {
           temperature: Math.min(settings.temperature, 0.55),
           top_p: settings.topP,
-          max_tokens: Math.min(settings.maxOutputTokens, 1800),
+          max_tokens: 1800,
           messages: [{ role: "user", content: prompt }],
           response_format: { type: "text" },
         });
@@ -674,14 +683,6 @@ async function readJsonBody(request: Request) {
     return await request.json();
   } catch {
     return {};
-  }
-}
-
-async function getAvailableModels(baseUrl: string) {
-  try {
-    return (await testLmStudioConnection({ baseUrl })).models;
-  } catch {
-    return [];
   }
 }
 

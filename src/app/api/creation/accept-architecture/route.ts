@@ -2,12 +2,24 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 
+function coerceToNumber(val: unknown): unknown {
+  if (typeof val === "number") return val;
+  if (typeof val === "string") {
+    const match = val.match(/\d+/);
+    return match ? Number(match[0]) : undefined;
+  }
+  return val;
+}
+
+const coercedNumber = z.preprocess(coerceToNumber, z.number().nonnegative().optional());
+const coercedInt = z.preprocess(coerceToNumber, z.number().int().nonnegative().optional());
+
 const chapterSchema = z.object({
-  chapterNumber: z.number().int().positive().optional(),
+  chapterNumber: coercedInt,
   title: z.string().optional(),
   purpose: z.string().optional(),
-  targetWords: z.number().int().nonnegative().optional(),
-  targetPages: z.number().nonnegative().optional(),
+  targetWords: coercedInt,
+  targetPages: coercedNumber,
   emotionalMovement: z.string().optional(),
   keyBeats: z.array(z.unknown()).optional(),
   charactersOrConcepts: z.array(z.unknown()).optional(),
@@ -20,7 +32,7 @@ const architectureSchema = z.object({
   parts: z
     .array(
       z.object({
-        partNumber: z.number().int().positive().optional(),
+        partNumber: coercedInt,
         title: z.string().optional(),
         purpose: z.string().optional(),
         chapters: z.array(chapterSchema).optional(),

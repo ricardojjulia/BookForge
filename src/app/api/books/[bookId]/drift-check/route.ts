@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createLmStudioClient } from "@/lib/lmstudio/client";
+import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
+import { getReasoningModelCandidates } from "@/lib/lmstudio/model-selection";
+import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { buildRewriteDriftPrompt } from "@/lib/rewrite/drift-prompt";
 import { createClient } from "@/lib/supabase/server";
@@ -90,13 +92,17 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     }
 
     const settings = await getUserLmStudioSettings(user.id);
-    const client = createLmStudioClient(settings);
-    const model = settings.reasoningModel || settings.primaryRewriteModel || "local-model";
-    const completion = await client.chat.completions.create({
-      model,
+    const modelPlan = await selectAndPrepareActiveModel(settings, {
+      task: "critic",
+      candidates: getReasoningModelCandidates(settings),
+      expectedCalls: 1,
+      latencyPreference: "quality",
+    });
+    const { client, preparedModel, modelSelection } = modelPlan;
+    const completion = await createManagedChatCompletion(client, preparedModel, {
       temperature: 0.2,
       top_p: settings.topP,
-      max_tokens: Math.min(settings.maxOutputTokens, 3000),
+      max_tokens: 3000,
       messages: [
         {
           role: "user",
@@ -129,6 +135,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       revisionJobId,
       checkedAt: new Date().toISOString(),
       sampleCount: revisionSamples.length,
+      modelSelection,
     };
 
     const { data: report, error: insertError } = await supabase

@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { estimateAiCallPlan } from "@/lib/ai/call-planner";
 import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
-import { createLmStudioClient, testLmStudioConnection } from "@/lib/lmstudio/client";
+import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
-import { getReasoningModelCandidates, selectLoadedLmStudioModel } from "@/lib/lmstudio/model-selection";
+import { getReasoningModelCandidates } from "@/lib/lmstudio/model-selection";
+import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { applyRewritePlanDefaults } from "@/lib/rewrite/plan-defaults";
 import { buildRewritePlanPrompt } from "@/lib/rewrite/plan-prompt";
@@ -60,18 +61,13 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
     if (reportsError) throw reportsError;
 
     const settings = await getUserLmStudioSettings(user.id);
-    const client = createLmStudioClient(settings);
-    let availableModels: string[] = [];
-    try {
-      availableModels = (await testLmStudioConnection({ baseUrl: settings.baseUrl })).models;
-    } catch {
-      availableModels = [];
-    }
-    const modelSelection = selectLoadedLmStudioModel({
+    const modelPlan = await selectAndPrepareActiveModel(settings, {
+      task: "planning",
       candidates: getReasoningModelCandidates(settings),
-      availableModels,
+      expectedCalls: 1,
+      latencyPreference: "quality",
     });
-    const model = modelSelection.model;
+    const { client, model, preparedModel, modelSelection, availableModels } = modelPlan;
     const rewriteModelSelection = selectBestRewriteModel(availableModels, {
       qualityProfile: settings.qualityProfile,
       contextWindowTokens: settings.contextWindowTokens,
@@ -80,8 +76,8 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
       task: "critic",
       selectedModel: model,
       qualityProfile: settings.qualityProfile,
-      contextWindowTokens: settings.contextWindowTokens,
-      maxOutputTokens: settings.maxOutputTokens,
+      contextWindowTokens: preparedModel.runtimeLimits.configuredContextTokens,
+      maxOutputTokens: preparedModel.runtimeLimits.maxOutputTokens,
       chapterCount: chapters?.length || 0,
       sceneCount: scenes || 0,
       paragraphCount: paragraphs || 0,
@@ -95,13 +91,12 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
       rewriteModelSelection,
       chapters: chapters || [],
       criticReports: reports || [],
+      promptCharBudget: preparedModel.runtimeLimits.promptCharBudget,
     });
 
-    const completion = await client.chat.completions.create({
-      model,
+    const completion = await createManagedChatCompletion(client, preparedModel, {
       temperature: Math.min(settings.temperature, 0.35),
       top_p: settings.topP,
-      max_tokens: settings.maxOutputTokens,
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "text" },
     });
@@ -129,6 +124,8 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
         sourceCriticReports: reports?.length || 0,
         rewriteModelSelection,
         plannerModelSelection: modelSelection,
+        lmStudioRuntimeLimits: preparedModel.runtimeLimits,
+        lmStudioWarnings: preparedModel.warnings,
         generatedAt: new Date().toISOString(),
       },
       { chapters: chapters || [] },

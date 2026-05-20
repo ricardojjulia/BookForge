@@ -63,10 +63,11 @@ Rules:
 - Use paragraph breaks.
 - Keep the language consistent with the requested language.
 
-Return only valid JSON:
+Return ONLY valid JSON. The "chapterText" field MUST contain the complete manuscript prose for the chapter — multiple paragraphs of fully written book text, NOT a description, NOT a placeholder, NOT an empty string. Write the chapter now and place it in "chapterText".
+
 {
-  "chapterText": "",
-  "chapterSummary": "",
+  "chapterText": "<full manuscript prose for this chapter goes here>",
+  "chapterSummary": "<one sentence summary of what happens in this chapter>",
   "continuityNotes": [],
   "generationNotes": []
 }`;

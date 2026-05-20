@@ -4,8 +4,15 @@ export function extractCriticScore(content: Record<string, unknown> | null | und
     content.score ??
       content.overallScore ??
       content.overall_score ??
+      content.finalScore ??
+      content.final_score ??
+      content.totalScore ??
+      content.total_score ??
       content.rating ??
-      content.grade,
+      content.grade ??
+      content.scoreBreakdown ??
+      content.score_breakdown ??
+      content.scores,
   );
 }
 
@@ -33,7 +40,12 @@ export function normalizeScore(value: unknown): number | null {
 }
 
 function normalizeNumericScore(value: unknown) {
-  const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  const numeric =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.match(/-?\d+(\.\d+)?/)?.[0] ?? NaN)
+        : NaN;
   if (!Number.isFinite(numeric)) return null;
   if (numeric <= 10) return Math.round(numeric * 10);
   return Math.round(Math.max(0, Math.min(100, numeric)));

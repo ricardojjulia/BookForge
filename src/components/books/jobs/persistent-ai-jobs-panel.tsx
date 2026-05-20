@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Badge, Button, Group, Paper, Progress, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { useRouter } from "next/navigation";
 import { getJobProgressDisplay } from "@/lib/ai/job-state";
 import { fetchJson } from "@/lib/http/fetch-json";
 
@@ -39,9 +40,12 @@ type JobsResponse = {
 };
 
 export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
+  const router = useRouter();
   const [jobs, setJobs] = useState<PersistedAiJob[]>([]);
   const [error, setError] = useState("");
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
+  const previousStatuses = useRef(new Map<string, string | null>());
+  const refreshedCompletedJobs = useRef(new Set<string>());
   const activeJob = useMemo(
     () => jobs.find((job) => ["running", "paused", "queued"].includes(job.status || "")) || jobs[0],
     [jobs],
@@ -50,12 +54,31 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
   const loadJobs = useCallback(async () => {
     try {
       const result = await fetchJson<JobsResponse>(`/api/books/${bookId}/jobs`, { cache: "no-store" }, "Load AI jobs");
-      setJobs(result.content?.jobs || []);
+      const nextJobs = result.content?.jobs || [];
+      const shouldRefresh = nextJobs.some((job) => {
+        const previous = previousStatuses.current.get(job.id);
+        const newlyCompleted = previous && previous !== "completed" && job.status === "completed";
+        const recentlyCompleted =
+          !previous &&
+          job.status === "completed" &&
+          Boolean(job.completed_at) &&
+          Date.now() - new Date(job.completed_at || "").getTime() < 120000;
+        return (newlyCompleted || recentlyCompleted) && !refreshedCompletedJobs.current.has(job.id);
+      });
+
+      nextJobs.forEach((job) => previousStatuses.current.set(job.id, job.status));
+      setJobs(nextJobs);
+      if (shouldRefresh) {
+        nextJobs
+          .filter((job) => job.status === "completed")
+          .forEach((job) => refreshedCompletedJobs.current.add(job.id));
+        router.refresh();
+      }
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load persistent AI jobs.");
     }
-  }, [bookId]);
+  }, [bookId, router]);
 
   async function controlJob(jobId: string, action: "pause" | "resume" | "cancel" | "mark_failed") {
     setLoadingAction(`${action}:${jobId}`);

@@ -6,6 +6,8 @@ export type ModelRecommendation = {
   alternatives: string[];
 };
 
+export type QualityProfile = "fast" | "balanced" | "premium";
+
 type Candidate = {
   model: string;
   score: number;
@@ -21,11 +23,18 @@ const taskLabels: Record<ModelRecommendation["task"], string> = {
 };
 
 export function buildBalancedRecommendations(availableModels: string[]): ModelRecommendation[] {
+  return buildModelRecommendations(availableModels, "balanced");
+}
+
+export function buildModelRecommendations(
+  availableModels: string[],
+  profile: QualityProfile = "balanced",
+): ModelRecommendation[] {
   const uniqueModels = Array.from(new Set(availableModels)).filter(Boolean);
 
   return (Object.keys(taskLabels) as ModelRecommendation["task"][]).map((task) => {
     const candidates = uniqueModels
-      .map((model) => scoreModelForTask(model, task))
+      .map((model) => scoreModelForTask(model, task, profile))
       .filter((candidate) => candidate.score > 0)
       .sort((a, b) => b.score - a.score || a.model.localeCompare(b.model));
 
@@ -40,7 +49,7 @@ export function buildBalancedRecommendations(availableModels: string[]): ModelRe
   });
 }
 
-function scoreModelForTask(model: string, task: ModelRecommendation["task"]): Candidate {
+function scoreModelForTask(model: string, task: ModelRecommendation["task"], profile: QualityProfile): Candidate {
   const name = model.toLowerCase();
   let score = 0;
   const reasons: string[] = [];
@@ -66,30 +75,76 @@ function scoreModelForTask(model: string, task: ModelRecommendation["task"]): Ca
   }
 
   if (/instruct|chat|it\b|assistant/.test(name)) add(30, "instruction-tuned model detected");
-  if (/qwen/.test(name)) add(18, "Qwen models are strong balanced local rewrite models");
+  if (/qwen/.test(name)) add(18, "Qwen models are strong local rewrite models");
   if (/llama|mistral|mixtral|gemma|yi/.test(name)) add(10, "general instruction model detected");
   if (/gguf|q[34568][_-]?k|q\d/.test(name)) add(8, "local quantized model detected");
 
   if (task === "primary_rewrite_model") {
-    if (size >= 30 && size <= 40) add(70, "32B-class model fits Balanced Mode rewriting");
-    else if (size >= 13 && size < 30) add(42, "14B-class model is usable for faster rewriting");
-    else if (size >= 60) add(38, "70B-class model is high quality but heavier than Balanced Mode");
+    addSizeFit(profile, size, {
+      fast: [
+        [7, 15, 72, "7B-14B model fits Fast Mode rewriting"],
+        [15, 30, 50, "mid-size model is usable for Fast Mode rewriting"],
+        [30, 45, 24, "32B-class model is higher quality but slower for Fast Mode"],
+        [60, Infinity, 10, "large model is high quality but heavy for Fast Mode"],
+      ],
+      balanced: [
+        [30, 45, 70, "32B-class model fits Balanced Mode rewriting"],
+        [13, 30, 42, "14B-class model is usable for faster rewriting"],
+        [60, Infinity, 38, "70B-class model is high quality but heavier than Balanced Mode"],
+      ],
+      premium: [
+        [60, Infinity, 86, "large model fits Premium Mode rewriting"],
+        [30, 45, 68, "32B-class model is a strong Premium Mode fallback"],
+        [13, 30, 32, "mid-size model is usable when larger models are unavailable"],
+      ],
+    });
     if (/reason|r1|deepseek/.test(name)) add(-35, "reasoning models are better reserved for critique/planning");
     return result();
   }
 
   if (task === "reasoning_model") {
     if (/deepseek|r1|reason|thinking/.test(name)) add(80, "reasoning model detected");
-    if (size >= 30 && size <= 40) add(55, "32B-class model fits Balanced Mode reasoning");
-    else if (size >= 13 && size < 30) add(30, "14B-class reasoning fallback detected");
-    else if (size >= 60) add(36, "larger reasoning model detected");
+    addSizeFit(profile, size, {
+      fast: [
+        [7, 15, 54, "7B-14B model keeps Fast Mode reasoning responsive"],
+        [15, 30, 42, "mid-size reasoning fallback detected"],
+        [30, 45, 30, "32B-class model is strong but slower for Fast Mode"],
+        [60, Infinity, 12, "large reasoning model detected"],
+      ],
+      balanced: [
+        [30, 45, 55, "32B-class model fits Balanced Mode reasoning"],
+        [13, 30, 30, "14B-class reasoning fallback detected"],
+        [60, Infinity, 36, "larger reasoning model detected"],
+      ],
+      premium: [
+        [60, Infinity, 74, "large model fits Premium Mode reasoning"],
+        [30, 45, 62, "32B-class reasoning model is a strong Premium Mode fallback"],
+        [13, 30, 24, "mid-size reasoning fallback detected"],
+      ],
+    });
     return result();
   }
 
   if (task === "extraction_model") {
-    if (size >= 13 && size < 30) add(70, "14B-class model fits extraction and summarization");
-    else if (size >= 7 && size < 13) add(55, "7B-class model is acceptable for fast extraction");
-    else if (size >= 30 && size <= 40) add(42, "32B-class model is strong but heavier for extraction");
+    addSizeFit(profile, size, {
+      fast: [
+        [7, 15, 78, "7B-14B model fits Fast Mode extraction"],
+        [15, 30, 50, "mid-size model is usable for extraction"],
+        [30, 45, 22, "32B-class model is strong but slower for Fast Mode extraction"],
+        [60, Infinity, 8, "large model is usually unnecessary for extraction"],
+      ],
+      balanced: [
+        [13, 30, 70, "14B-class model fits extraction and summarization"],
+        [7, 13, 55, "7B-class model is acceptable for fast extraction"],
+        [30, 45, 42, "32B-class model is strong but heavier for extraction"],
+      ],
+      premium: [
+        [30, 45, 62, "32B-class model gives stronger Premium Mode extraction"],
+        [13, 30, 58, "14B-class model remains efficient for extraction"],
+        [60, Infinity, 34, "large model is high quality but usually unnecessary for extraction"],
+        [7, 13, 24, "7B-class model is a fast fallback for extraction"],
+      ],
+    });
     if (/instruct|chat|it\b/.test(name)) add(22, "instruction model works well for structured extraction");
     if (/reason|r1|deepseek/.test(name)) add(-20, "reasoning model is usually unnecessary for extraction");
     return result();
@@ -108,6 +163,19 @@ function scoreModelForTask(model: string, task: ModelRecommendation["task"]): Ca
       score,
       reason: reasons.slice(0, 2).join("; ") || "Detected as the best available fit.",
     };
+  }
+
+  function addSizeFit(
+    selectedProfile: QualityProfile,
+    modelSize: number,
+    rangesByProfile: Record<QualityProfile, Array<[number, number, number, string]>>,
+  ) {
+    for (const [min, max, points, reason] of rangesByProfile[selectedProfile]) {
+      if (modelSize >= min && modelSize < max) {
+        add(points, reason);
+        return;
+      }
+    }
   }
 }
 
