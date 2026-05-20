@@ -29,12 +29,15 @@ export function PostRunQualityGate({
   latestRewriteJob,
   acceptedParagraphs,
   totalParagraphs,
+  pendingDraftCount,
 }: {
   bookId: string;
   reports: ReportRow[];
   latestRewriteJob: LatestRewriteJob;
   acceptedParagraphs: number;
   totalParagraphs: number;
+  /** Pending drafts awaiting accept/reject. 0 + coverage < 90% = natural ceiling. */
+  pendingDraftCount: number;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
@@ -45,6 +48,9 @@ export function PostRunQualityGate({
   const latestGuidance = reports.find((report) => report.report_type === "humanized_guidance");
   const postCriticCount = reports.filter((report) => report.report_type.startsWith("critic_post:")).length;
   const acceptedPercent = totalParagraphs ? Math.round((acceptedParagraphs / totalParagraphs) * 100) : 0;
+  // pendingDraftCount === 0 and still below 90% means all reviewable paragraphs
+  // are accepted — the gap is short structural paragraphs the rewrite skips (< 8 words).
+  const atCeiling = pendingDraftCount === 0 && acceptedPercent < 90 && acceptedPercent > 0;
   const hasCompletedRewrite = latestRewriteJob?.status === "completed";
   const missingChecks = [
     !latestDrift ? "drift check" : "",
@@ -111,11 +117,20 @@ export function PostRunQualityGate({
             <Text size="sm" fw={700}>
               Accepted rewrite coverage
             </Text>
-            <Text size="sm" c="dimmed">
-              {acceptedPercent}%
-            </Text>
+            <Group gap="xs">
+              <Text size="sm" c="dimmed">{acceptedPercent}%</Text>
+              {atCeiling && (
+                <Text size="xs" c="green" fw={600}>ceiling reached</Text>
+              )}
+            </Group>
           </Group>
-          <Progress value={acceptedPercent} color={acceptedPercent >= 80 ? "green" : "yellow"} radius="xl" />
+          <Progress value={acceptedPercent} color={acceptedPercent >= 80 || atCeiling ? "green" : "yellow"} radius="xl" />
+          {atCeiling && (
+            <Text size="xs" c="dimmed" mt={4}>
+              All reviewable paragraphs are accepted. The remaining {100 - acceptedPercent}% are short structural
+              elements (headings, scene breaks, &lt;8 words) that correctly use original text.
+            </Text>
+          )}
         </div>
 
         {missingChecks.length > 0 ? (

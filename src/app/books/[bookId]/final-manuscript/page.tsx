@@ -194,6 +194,7 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
           acceptedParagraphs={acceptedParagraphs || 0}
           totalParagraphs={totalParagraphs || 0}
           lockedParagraphs={lockedParagraphs || 0}
+          pendingDraftCount={pendingDrafts || 0}
         />
 
         <FinalReadinessPanel readiness={finalReadiness} />

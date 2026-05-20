@@ -345,6 +345,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           }
           acceptedParagraphs={acceptedParagraphs || 0}
           totalParagraphs={paragraphs || 0}
+          pendingDraftCount={pendingDrafts || 0}
         />
 
         <DriftReportsPanel reports={reports || []} />
