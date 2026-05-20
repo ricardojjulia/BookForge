@@ -176,6 +176,7 @@ export function ImportManuscriptForm() {
                 "text/markdown": [".md"],
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
                 "application/epub+zip": [".epub"],
+                "application/pdf": [".pdf"],
                 "application/octet-stream": [".kpf", ".kcb"],
               }}
               maxFiles={1}
@@ -186,7 +187,7 @@ export function ImportManuscriptForm() {
                 <div>
                   <Text fw={700}>{file ? file.name : "Drop manuscript file here"}</Text>
                   <Text size="sm" c="dimmed">
-                    Supported formats: DOCX, EPUB, KPF, KCB, Markdown, TXT
+                    Supported formats: DOCX, EPUB, PDF, KPF, KCB, Markdown, TXT
                   </Text>
                 </div>
               </Group>
