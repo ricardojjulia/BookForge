@@ -22,6 +22,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     const { data: book } = await supabase.from("books").select("id,title").eq("id", bookId).single();
     if (!book) return NextResponse.json({ error: "Book not found." }, { status: 404 });
 
+    // Snapshot manuscript size at job-creation time so analytics can correlate
+    // run duration with book size independently of future edits.
+    const [{ count: chapterCount }, { count: paragraphCount }] = await Promise.all([
+      supabase.from("chapters").select("id", { count: "exact", head: true }).eq("book_id", bookId),
+      supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId),
+    ]);
+    const bookStats = { chapters: chapterCount ?? 0, paragraphs: paragraphCount ?? 0 };
+
     // Cancel any previous running job for this book
     await supabase
       .from("auto_review_jobs")
@@ -38,6 +46,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         status: "running",
         current_stage: "analyze",
         config: { reviewStrategy: body.reviewStrategy || "all" },
+        book_stats: bookStats,
       })
       .select("id")
       .single();

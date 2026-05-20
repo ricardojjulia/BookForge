@@ -1,5 +1,17 @@
 "use client";
 
+/**
+ * AutoReviewRunner
+ *
+ * Client-side orchestrator for the Auto-Review Wizard. Runs all 23 stages
+ * sequentially — analyze → baseline critics → rewrite → post critics → export —
+ * and loops the rewrite+critic cycle until all 7 critics score ≥ 70 (max 3 loops).
+ *
+ * Telemetry: every stage completion is persisted to auto_review_jobs.log as a
+ * structured TelemetryEntry (see type below). The analytics page reads these to
+ * derive per-stage durations and score progression across iterations.
+ */
+
 import { useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -24,16 +36,36 @@ import {
 } from "@tabler/icons-react";
 
 type Mode = "full_review" | "make_shorter" | "make_longer";
-
 type StageStatus = "pending" | "running" | "done" | "failed" | "skipped";
 
-type Stage = {
-  id: string;
-  label: string;
-  group: string;
-};
-
+type Stage = { id: string; label: string; group: string };
 type StageState = Stage & { status: StageStatus; detail?: string };
+
+/**
+ * Structured telemetry entry persisted to auto_review_jobs.log.
+ * The analytics dashboard parses these to compute timing, score progression,
+ * and model info without re-running any queries against the live tables.
+ *
+ * Fields:
+ *   type           – entry kind; drives how analytics interprets the record
+ *   stage          – stage ID (e.g. 'analyze', 'critic_baseline:story_structure')
+ *   iteration      – 0-based rewrite loop index
+ *   message        – human-readable text displayed in the runner terminal
+ *   durationMs     – wall-clock time for the stage (stage_complete only)
+ *   scores         – { [lens]: score } post-rewrite critic scores (critics_check only)
+ *   baselineScores – { [lens]: score } baseline scores (first critics_check only)
+ *   metadata       – arbitrary extra context (model name, batch counts, etc.)
+ */
+type TelemetryEntry = {
+  type: "stage_complete" | "stage_error" | "info";
+  stage?: string;
+  iteration: number;
+  message: string;
+  durationMs?: number;
+  scores?: Record<string, number | null>;
+  baselineScores?: Record<string, number | null>;
+  metadata?: Record<string, unknown>;
+};
 
 const CRITIC_LENSES = [
   "story_structure",
@@ -79,6 +111,7 @@ function buildStages(): Stage[] {
   ];
 }
 
+/** Rewrite strategy config keyed by wizard mode. */
 const STRATEGY_BY_MODE: Record<Mode, { strategyId: string; strategySettings: Record<string, unknown> }> = {
   full_review: {
     strategyId: "humanized_literary",
@@ -94,8 +127,18 @@ const STRATEGY_BY_MODE: Record<Mode, { strategyId: string; strategySettings: Rec
   },
 };
 
+/** Maximum rewrite+critic cycles before forcing export regardless of scores. */
 const MAX_ITERATIONS = 3;
+/** Paragraphs per rewrite batch call. Tuned for LM Studio context windows. */
 const REWRITE_BATCH_SIZE = 40;
+
+/** Formats milliseconds as a human-readable duration string (e.g. "2m 14s"). */
+function fmtDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
 
 type Props = {
   bookId: string;
@@ -119,6 +162,10 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
   const runningRef = useRef(false);
   const logRef = useRef<HTMLDivElement | null>(null);
 
+  // Ref-tracked iteration so telemetry closures always see the current value
+  // even when React state hasn't re-rendered yet.
+  const iterationRef = useRef(0);
+
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [log]);
@@ -129,6 +176,7 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
     );
   }
 
+  /** Appends a line to the terminal-style log panel. */
   function addLog(msg: string) {
     setLog((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
   }
@@ -144,17 +192,40 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
     return { ok: true, data };
   }
 
-  async function advanceJob(stage: string, logEntry?: Record<string, unknown>) {
+  /**
+   * Persists a structured telemetry entry to auto_review_jobs.log via PATCH.
+   * Always includes iteration and wall-clock duration so the analytics page can
+   * build per-stage timing breakdowns without any additional queries.
+   */
+  async function advanceJob(stage: string, extra?: Partial<TelemetryEntry>) {
+    const entry: TelemetryEntry = {
+      type: "stage_complete",
+      stage,
+      iteration: iterationRef.current,
+      message: extra?.message ?? `${stage} completed`,
+      ...extra,
+    };
     await fetch(`/api/books/${bookId}/auto-review`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId, stage, logEntry }),
+      body: JSON.stringify({ jobId, stage, logEntry: entry }),
     });
   }
 
+  /**
+   * Runs a single stage end-to-end:
+   *  1. Sets UI status to "running"
+   *  2. Calls the relevant API route
+   *  3. On success: persists a stage_complete telemetry entry with durationMs
+   *  4. On failure: persists a stage_error entry and returns false
+   *
+   * The startMs timestamp is recorded before any async work so durationMs
+   * reflects true wall-clock time including network round-trips.
+   */
   async function runStage(stageId: string): Promise<boolean> {
     setStatus(stageId, "running");
     addLog(`Starting: ${stageId}`);
+    const startMs = Date.now(); // wall-clock start for telemetry
 
     try {
       let result: { ok: boolean; data: Record<string, unknown> };
@@ -182,7 +253,8 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
         let totalUnitsProcessed = 0;
         let batchNumber = 0;
 
-        // Keep batching until nothing is left or we hit a reasonable cap
+        // Batch until no paragraphs remain or we hit the safety cap.
+        // Each batch persists partial progress so a crash mid-rewrite is recoverable.
         for (let i = 0; i < 200; i++) {
           batchResult = await callApi(`/api/books/${bookId}/rewrite-execute`, {
             maxUnits: REWRITE_BATCH_SIZE,
@@ -199,10 +271,19 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
           addLog(`Rewrite batch ${batchNumber}: ${unitsInBatch} paragraph(s) processed`);
           setStatus(stageId, "running", `Batch ${batchNumber} · ${totalUnitsProcessed} total`);
 
-          // Stop when the batch produced no new work (nothing left to rewrite)
-          if (unitsInBatch === 0) break;
+          if (unitsInBatch === 0) break; // nothing left to rewrite
         }
         result = batchResult;
+
+        // Record total paragraphs rewritten for analytics
+        setStatus(stageId, "done", `${totalUnitsProcessed} paragraphs rewritten`);
+        await advanceJob(stageId, {
+          durationMs: Date.now() - startMs,
+          message: `Rewrite complete — ${totalUnitsProcessed} paragraphs in ${batchNumber} batch(es)`,
+          metadata: { batchCount: batchNumber, totalUnitsProcessed },
+        });
+        addLog(`✓ Done: ${stageId} · ${totalUnitsProcessed} paragraphs (${fmtDuration(Date.now() - startMs)})`);
+        return true;
 
       } else if (stageId === "auto_accept") {
         result = await callApi(`/api/books/${bookId}/auto-revision`, {
@@ -215,6 +296,14 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
         const applied = content?.applied as Record<string, number> | undefined;
         if (applied) {
           addLog(`Auto-accepted: ${applied.accepted} · rejected: ${applied.rejected} · redo: ${applied.redo}`);
+          setStatus(stageId, "done", `${applied.accepted} accepted`);
+          await advanceJob(stageId, {
+            durationMs: Date.now() - startMs,
+            message: `Auto-accepted ${applied.accepted} drafts`,
+            metadata: { accepted: applied.accepted, rejected: applied.rejected, redo: applied.redo },
+          });
+          addLog(`✓ Done: ${stageId} (${fmtDuration(Date.now() - startMs)})`);
+          return true;
         }
 
       } else if (stageId === "drift_check") {
@@ -229,34 +318,44 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
       } else if (stageId === "critics_check") {
         result = await callApi(`/api/books/${bookId}/auto-review/critics-check`);
         if (!result.ok) throw new Error(String(result.data.error || "Critics check failed"));
-        const { allGreen, greenCount, total, avgScore } = result.data as {
+
+        const { allGreen, greenCount, total, avgScore, scores, baselineScores } = result.data as {
           allGreen: boolean;
           greenCount: number;
           total: number;
           avgScore: number | null;
+          scores: Record<string, number | null>;
+          baselineScores: Record<string, number | null>;
         };
         addLog(
-          `Quality gate: ${greenCount}/${total} critics green · avg score ${avgScore ?? "N/A"} — ${allGreen ? "ALL GREEN ✓" : "need another cycle"}`,
+          `Quality gate: ${greenCount}/${total} critics green · avg ${avgScore ?? "N/A"} — ${allGreen ? "ALL GREEN ✓" : "need another cycle"}`,
         );
 
-        if (!allGreen && iteration < MAX_ITERATIONS - 1) {
-          // Loop: reset post-critic + execute stages, bump iteration
-          const nextIteration = iteration + 1;
+        if (!allGreen && iterationRef.current < MAX_ITERATIONS - 1) {
+          const nextIteration = iterationRef.current + 1;
+          // Keep ref and state in sync so the next advanceJob sees the right iteration
+          iterationRef.current = nextIteration;
           setIteration(nextIteration);
           addLog(`Starting rewrite iteration ${nextIteration + 1}…`);
 
-          // Mark critics_check as skipped for now, requeue the loop stages
           setStatus(stageId, "skipped", `Loop → iteration ${nextIteration + 1}`);
-          await advanceJob(stageId, { result: "loop", iteration: nextIteration });
+          await advanceJob(stageId, {
+            type: "info",
+            durationMs: Date.now() - startMs,
+            message: `Quality gate: ${greenCount}/${total} green — looping (iteration ${nextIteration + 1})`,
+            scores,
+            baselineScores,
+            metadata: { allGreen, greenCount, total, avgScore },
+          });
 
-          // Reset the rewrite+post-critic stages to pending for the next loop
-          const loopStages = ["rewrite_execute", "auto_accept", "drift_check",
-            ...CRITIC_LENSES.map((l) => `critic_post:${l}`), "critics_check"];
+          const loopStages = [
+            "rewrite_execute", "auto_accept", "drift_check",
+            ...CRITIC_LENSES.map((l) => `critic_post:${l}`),
+            "critics_check",
+          ];
           setStageStates((prev) =>
             prev.map((s) => loopStages.includes(s.id) ? { ...s, status: "pending", detail: undefined } : s),
           );
-
-          // Re-run the loop
           for (const loopStageId of loopStages) {
             const ok = await runStage(loopStageId);
             if (!ok) return false;
@@ -264,14 +363,21 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
           return true;
         }
 
-        if (allGreen) {
-          setStatus(stageId, "done", `${greenCount}/${total} green · avg ${avgScore}`);
-        } else {
-          // Max iterations reached, continue anyway
-          setStatus(stageId, "done", `${greenCount}/${total} green after ${MAX_ITERATIONS} cycles`);
-          addLog(`Max iterations (${MAX_ITERATIONS}) reached — proceeding to export.`);
-        }
-        await advanceJob(stageId, { allGreen, greenCount, total, avgScore, iteration });
+        // Final quality gate result — log scores for analytics score-progression chart
+        const detail = allGreen
+          ? `${greenCount}/${total} green · avg ${avgScore}`
+          : `${greenCount}/${total} green after ${MAX_ITERATIONS} cycles`;
+        setStatus(stageId, "done", detail);
+        if (!allGreen) addLog(`Max iterations (${MAX_ITERATIONS}) reached — proceeding to export.`);
+
+        await advanceJob(stageId, {
+          durationMs: Date.now() - startMs,
+          message: `Quality gate final: ${greenCount}/${total} green, avg score ${avgScore}`,
+          scores,
+          baselineScores,
+          metadata: { allGreen, greenCount, total, avgScore },
+        });
+        addLog(`✓ Done: ${stageId} (${fmtDuration(Date.now() - startMs)})`);
         return true;
 
       } else if (stageId === "export") {
@@ -298,15 +404,35 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
         return true;
       }
 
+      const durationMs = Date.now() - startMs;
       setStatus(stageId, "done");
-      await advanceJob(stageId);
-      addLog(`✓ Done: ${stageId}`);
+      await advanceJob(stageId, {
+        durationMs,
+        message: `${stageId} completed in ${fmtDuration(durationMs)}`,
+      });
+      addLog(`✓ Done: ${stageId} (${fmtDuration(durationMs)})`);
       return true;
 
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setStatus(stageId, "failed", msg);
       addLog(`✗ Failed: ${stageId} — ${msg}`);
+
+      // Persist the error so the analytics page can surface failure reasons
+      await fetch(`/api/books/${bookId}/auto-review`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jobId, stage: stageId,
+          logEntry: {
+            type: "stage_error",
+            stage: stageId,
+            iteration: iterationRef.current,
+            message: `${stageId} failed: ${msg}`,
+            durationMs: Date.now() - startMs,
+          } satisfies TelemetryEntry,
+        }),
+      });
       return false;
     }
   }
@@ -316,21 +442,50 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
     runningRef.current = true;
 
     (async () => {
+      // Capture the active model at run start for telemetry.
+      // Non-blocking — if LM Studio isn't reachable we just record "unknown".
+      const modelRes = await callApi(`/api/lmstudio/status`).catch(() => null);
+      const model =
+        (modelRes?.data?.configuredRewriteModel as { model?: string } | null)?.model ||
+        (modelRes?.data?.availableModels as string[] | null)?.[0] ||
+        null;
+      if (model) {
+        addLog(`Model: ${model}`);
+        await fetch(`/api/books/${bookId}/auto-review`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jobId,
+            logEntry: {
+              type: "info",
+              iteration: 0,
+              message: `Active model: ${model}`,
+              metadata: { model },
+            } satisfies TelemetryEntry,
+          }),
+        });
+      }
+
       for (const stage of stages) {
         const ok = await runStage(stage.id);
         if (!ok) {
           setFailed(true);
           setErrorMsg(`Failed at stage: ${stage.id}`);
-          await callApi(`/api/books/${bookId}/auto-review`, {
-            jobId,
-            failed: true,
-            error: `Failed at stage: ${stage.id}`,
+          await fetch(`/api/books/${bookId}/auto-review`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobId, failed: true, error: `Failed at stage: ${stage.id}` }),
           });
           return;
         }
       }
+
       setDone(true);
-      await callApi(`/api/books/${bookId}/auto-review`, { jobId, completed: true });
+      await fetch(`/api/books/${bookId}/auto-review`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId, completed: true }),
+      });
       addLog("🎉 All done! Your book is published.");
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -339,7 +494,6 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
   const doneCount = stageStates.filter((s) => s.status === "done" || s.status === "skipped").length;
   const progress = Math.round((doneCount / stages.length) * 100);
   const currentStage = stageStates.find((s) => s.status === "running");
-
   const groups = Array.from(new Set(stages.map((s) => s.group)));
 
   return (
@@ -364,14 +518,12 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
           All critics passed. Your book has been exported and marked as finished.
         </Alert>
       )}
-
       {failed && (
         <Alert color="red" icon={<IconX size={18} />} title="Workflow failed">
           {errorMsg}. Fix the issue (e.g., check LM Studio is running) and restart the wizard.
         </Alert>
       )}
 
-      {/* Stage list by group */}
       <ScrollArea h={340}>
         <Stack gap="xs">
           {groups.map((group) => (
@@ -383,7 +535,8 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
                   .map((s) => (
                     <Paper key={s.id} withBorder={false} py={4} px="sm" radius="sm"
                       style={{
-                        background: s.status === "running" ? "var(--mantine-color-grape-0)" :
+                        background:
+                          s.status === "running" ? "var(--mantine-color-grape-0)" :
                           s.status === "done" ? "var(--mantine-color-green-0)" :
                           s.status === "failed" ? "var(--mantine-color-red-0)" : "transparent",
                       }}
@@ -419,27 +572,33 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
         </Stack>
       </ScrollArea>
 
-      {/* Log */}
+      {/* Terminal-style log — shows human-readable messages including duration hints */}
       <Paper withBorder radius="sm" p="sm" bg="#0f0f0f" ff="monospace">
         <ScrollArea h={120}>
           <div ref={logRef}>
-          {log.map((line, i) => (
-            <Text key={i} size="xs" c="green.4">{line}</Text>
-          ))}
-          {!done && !failed && <Text size="xs" c="dimmed">…</Text>}
+            {log.map((line, i) => (
+              <Text key={i} size="xs" c="green.4">{line}</Text>
+            ))}
+            {!done && !failed && <Text size="xs" c="dimmed">…</Text>}
           </div>
         </ScrollArea>
       </Paper>
 
       {iteration > 0 && (
         <Group>
-          <Badge color="grape" variant="light">Rewrite cycle {iteration + 1} of {MAX_ITERATIONS}</Badge>
+          <Badge color="grape" variant="light">
+            Rewrite cycle {iteration + 1} of {MAX_ITERATIONS}
+          </Badge>
         </Group>
       )}
 
       <Group justify="flex-end">
         {(done || failed) && (
-          <Button color={done ? "green" : "gray"} onClick={onDone} leftSection={done ? <IconCheck size={16} /> : undefined}>
+          <Button
+            color={done ? "green" : "gray"}
+            onClick={onDone}
+            leftSection={done ? <IconCheck size={16} /> : undefined}
+          >
             {done ? "Close & Go to Book" : "Close"}
           </Button>
         )}
