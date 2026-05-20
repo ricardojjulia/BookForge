@@ -2,6 +2,8 @@ import { Alert, Badge, Button, Container, Group, Paper, Progress, SimpleGrid, St
 import Link from "next/link";
 import { AppShell } from "@/components/layout/app-shell";
 import { BookActions } from "@/components/books/book-actions";
+import { ManuscriptSearch } from "@/components/books/manuscript-search";
+import { VoiceCapturePanel } from "@/components/books/voice-capture-panel";
 import { ChapterSummaryReview } from "@/components/books/chapter-summary-review";
 import { ChapterSummaryViewer } from "@/components/books/chapter-summary-viewer";
 import { ChapterMetadataPanel } from "@/components/books/chapter-metadata-panel";
@@ -9,6 +11,7 @@ import { DeleteBookButton } from "@/components/books/delete-book-button";
 import { PersistentAiJobsPanel } from "@/components/books/jobs/persistent-ai-jobs-panel";
 import { BookInputsManager } from "@/components/books/inputs/book-inputs-manager";
 import { PassageLockManager } from "@/components/books/passage-lock-manager";
+import { CollaborationPanel } from "@/components/books/collaboration-panel";
 import { CriticComparisonPanel } from "@/components/books/reports/critic-comparison-panel";
 import { CriticReportsPanel } from "@/components/books/reports/critic-reports-panel";
 import { CriticScoreboard } from "@/components/books/reports/critic-scoreboard";
@@ -68,7 +71,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         .order("chapter_number"),
       supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId),
       supabase.from("scenes").select("id", { count: "exact", head: true }).eq("book_id", bookId),
-      supabase.from("book_bibles").select("content,updated_at").eq("book_id", bookId).maybeSingle(),
+      supabase.from("book_bibles").select("content,updated_at,voice_profile").eq("book_id", bookId).maybeSingle(),
       supabase
         .from("author_notes")
         .select("creative_instructions,voice_guidance,worldview_notes,theological_alignment,forbidden_changes")
@@ -227,6 +230,10 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           <Metric label="Critic reports" value={reports?.length || 0} />
         </SimpleGrid>
 
+        <Paper withBorder radius="md" p="md" bg="white" mb="xl">
+          <ManuscriptSearch bookId={bookId} />
+        </Paper>
+
         <WorkflowCommandCenter
           stage={commandCenter.stage}
           stageColor={commandCenter.stageColor}
@@ -267,6 +274,12 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           </Paper>
         )}
 
+        <VoiceCapturePanel
+          bookId={bookId}
+          chapters={(chapters || []).map((c) => ({ id: c.id, chapter_number: c.chapter_number, title: c.title ?? null }))}
+          existingProfile={(bible as { voice_profile?: unknown } | null)?.voice_profile as Record<string, unknown> | null}
+        />
+
         <Paper id="studio-actions" withBorder radius="md" p="xl" bg="white" mt="xl">
           <Group justify="space-between" mb="lg" align="flex-start">
             <div>
@@ -278,6 +291,16 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
             <Badge color="grape" variant="light">
               Local AI via LM Studio
             </Badge>
+            <Link href={`/books/${bookId}/world`} style={{ textDecoration: "none" }}>
+              <Button color="violet" variant="light">
+                World Bible
+              </Button>
+            </Link>
+            <Link href={`/books/${bookId}/read`} style={{ textDecoration: "none" }}>
+              <Button color="cyan" variant="light">
+                Beta Reader View
+              </Button>
+            </Link>
             <Link href={`/books/${bookId}/abridgement`} style={{ textDecoration: "none" }}>
               <Button color="teal" variant="light">
                 Abridged Edition
@@ -344,6 +367,13 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
             revisionInstructions={revisionInstructions || []}
           />
         </div>
+
+        <Paper withBorder radius="md" p="xl" bg="white" mt="xl">
+          <Title order={2} mb="md">
+            Collaboration
+          </Title>
+          <CollaborationPanel bookId={bookId} />
+        </Paper>
 
         <Paper withBorder radius="md" p="xl" bg="white" mt="xl">
           <Title order={2} mb="md">

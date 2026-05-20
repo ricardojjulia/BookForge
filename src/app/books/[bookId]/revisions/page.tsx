@@ -1,6 +1,8 @@
 import { Alert, Button, Container, Group, Paper, SimpleGrid, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { AppShell } from "@/components/layout/app-shell";
+import { ChapterSnapshotPanel } from "@/components/books/chapter-snapshot-panel";
+import { RevisionStatsPanel } from "@/components/books/revision-stats-panel";
 import { RevisionReviewList } from "@/components/books/revisions/revision-review-list";
 import { ResetRewriteButton } from "@/components/books/rewrite/reset-rewrite-button";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
@@ -101,6 +103,9 @@ export default async function RevisionsPage({
     );
   }
 
+  const { data: chapters } = await supabase.from("chapters").select("id,chapter_number,title").eq("book_id", bookId).order("chapter_number");
+  const firstChapter = (chapters || [])[0];
+
   const mapped = ((versions || []) as RawVersion[]).map((version) => ({
     id: version.id,
     revisionJobId: version.revision_job_id,
@@ -148,6 +153,16 @@ export default async function RevisionsPage({
           <Metric label="Needs review" value={pending || 0} />
           <Metric label="Accepted" value={accepted || 0} />
         </SimpleGrid>
+
+        <RevisionStatsPanel bookId={bookId} />
+
+        {firstChapter && (
+          <ChapterSnapshotPanel
+            bookId={bookId}
+            chapterId={firstChapter.id}
+            chapterLabel={`Ch. ${firstChapter.chapter_number}${firstChapter.title ? ` — ${firstChapter.title}` : ""}`}
+          />
+        )}
 
         <RevisionReviewList
           bookId={bookId}

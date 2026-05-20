@@ -16,6 +16,7 @@ export type RevisionPromptInput = {
   referenceMaterials?: string;
   revisionMode: RevisionMode;
   authorInstructions?: string;
+  voiceProfile?: string;
   text: string;
 };
 
@@ -53,6 +54,9 @@ ${input.authorNotes || "Not provided."}
 
 STYLE SAMPLES:
 ${input.styleSamples || "Not provided. If provided, use them only as voice and tone guidance. Do not copy phrasing directly."}
+
+AUTHOR VOICE PROFILE:
+${input.voiceProfile || "Not captured. Default: preserve the author's existing sentence rhythm and word choice."}
 
 SELECTED REFERENCE MATERIALS:
 ${input.referenceMaterials || "None selected."}
@@ -162,6 +166,7 @@ export function buildFullBookRewriteUnitPrompt(input: {
   nextParagraph?: string | null;
   rewriteStrategy?: RewriteStrategy | null;
   authorInstructions?: string | null;
+  voiceProfile?: unknown;
   paragraphNumber: number;
   text: string;
 }) {
@@ -177,6 +182,9 @@ ${compactJson(input.rewritePlan || {}, 7000)}
 
 REQUIRED CONTEXT PACKET FOR THIS CALL:
 ${compactJson(input.contextPacket || {}, 7000)}
+
+AUTHOR VOICE PROFILE:
+${input.voiceProfile ? compactJson(input.voiceProfile, 1500) : "Not captured. Infer voice from the manuscript blueprint and surrounding text."}
 
 REWRITE STRATEGY:
 ${input.rewriteStrategy ? formatRewriteStrategy(input.rewriteStrategy) : "Use the Rewrite Architect plan with balanced humanized literary polish."}

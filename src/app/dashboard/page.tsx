@@ -1,5 +1,6 @@
 import { Alert, Badge, Button, Container, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { DeleteBookButton } from "@/components/books/delete-book-button";
+import { OnboardingChecklist } from "@/components/onboarding/onboarding-checklist";
 import { AppShell } from "@/components/layout/app-shell";
 import { getBookAuthorDisplay } from "@/lib/books/status";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
@@ -29,7 +30,7 @@ export default async function DashboardPage() {
     );
   }
 
-  const [{ data: books }, { data: reports }] = await Promise.all([
+  const [{ data: books }, { data: reports }, { data: userSettings }] = await Promise.all([
     supabase
       .from("books")
       .select("id,title,author_name,genre,status,finished_export_id,created_at")
@@ -40,6 +41,11 @@ export default async function DashboardPage() {
       .select("id,book_id,report_type,created_at")
       .order("created_at", { ascending: false })
       .limit(6),
+    supabase
+      .from("user_settings")
+      .select("onboarding_completed_steps")
+      .eq("user_id", user.id)
+      .maybeSingle(),
   ]);
 
   const finishedExportIds = (books || [])
@@ -74,6 +80,8 @@ export default async function DashboardPage() {
             </Button>
           </Group>
         </Group>
+
+        <OnboardingChecklist completedSteps={(userSettings as { onboarding_completed_steps?: string[] } | null)?.onboarding_completed_steps || []} />
 
         <SimpleGrid cols={{ base: 1, md: 3 }} mb="xl">
           <Metric label="Books" value={books?.length || 0} />
