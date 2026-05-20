@@ -111,7 +111,9 @@ export function CriticReportsPanel({ bookId, reports }: { bookId: string; report
 function RecheckCriticButton({ bookId, reportType }: { bookId: string; reportType: string }) {
   const router = useRouter();
   const [loading, { open, close }] = useDisclosure(false);
-  const lens = reportType.replace(/^critic:/, "");
+  const isPostRewrite = reportType.startsWith("critic_post:");
+  const lens = reportType.replace(/^critic_post:/, "").replace(/^critic:/, "");
+  const stage = isPostRewrite ? "post_rewrite" : "baseline";
 
   async function recheck() {
     open();
@@ -119,7 +121,7 @@ function RecheckCriticButton({ bookId, reportType }: { bookId: string; reportTyp
       const response = await fetch(`/api/books/${bookId}/critic`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ lens }),
+        body: JSON.stringify({ lens, stage }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to recheck report.");

@@ -76,7 +76,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       top_p: settings.topP,
       max_tokens: Math.min(settings.maxOutputTokens, 2000),
       messages: [{ role: "user", content: VOICE_CAPTURE_PROMPT(sampleText) }],
-      response_format: { type: "text" },
+      
     });
 
     const voiceProfile = parseModelJsonOrFallback(

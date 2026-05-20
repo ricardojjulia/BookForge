@@ -107,7 +107,7 @@ const CRITIC_LENSES = [
   "continuity",
   "character_depth",
   "market_fit",
-  "theology_worldview",
+  "contemporary_view",
   "revision_priorities",
 ] as const;
 
@@ -117,7 +117,7 @@ const CRITIC_LABELS: Record<string, string> = {
   continuity: "Continuity",
   character_depth: "Character Depth",
   market_fit: "Market Fit",
-  theology_worldview: "Theology / Worldview",
+  contemporary_view: "Contemporary View",
   revision_priorities: "Revision Priorities",
 };
 

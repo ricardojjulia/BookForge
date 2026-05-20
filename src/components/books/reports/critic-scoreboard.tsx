@@ -16,7 +16,7 @@ const lensDescriptions: Record<CriticLens, string> = {
   continuity: "Continuity and timeline",
   character_depth: "Character depth and interaction",
   market_fit: "Market fit and reader promise",
-  theology_worldview: "Theology / worldview alignment",
+  contemporary_view: "Contemporary View alignment",
   revision_priorities: "Highest-leverage revision priorities",
 };
 

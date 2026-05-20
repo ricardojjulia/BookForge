@@ -46,7 +46,7 @@ export const revisionModes: Record<RevisionMode, { label: string; purpose: strin
     purpose: "Improve final paragraphs with emotional, suspenseful, reflective, or revelatory force.",
   },
   theological_alignment: {
-    label: "Theological / Philosophical Alignment",
+    label: "Contemporary View Alignment",
     purpose: "Preserve the author's intended worldview and flag drift or incompatible framing.",
   },
 };

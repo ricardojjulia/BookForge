@@ -94,10 +94,11 @@ export default function Home() {
                   <IconServer size={24} />
                 </ThemeIcon>
                 <div>
-                  <Title order={3}>Built for private, structured revision</Title>
+                  <Title order={3}>Built for structured, author-controlled revision</Title>
                   <Text c="dimmed">
-                    Supabase stores the book structure and history. LM Studio handles
-                    analysis and revision through an OpenAI-compatible local endpoint.
+                    Supabase stores the book structure and history. Run AI locally with
+                    LM Studio or connect a cloud provider — OpenAI, Anthropic, or Google
+                    — from Settings.
                   </Text>
                 </div>
               </Group>
@@ -107,9 +108,7 @@ export default function Home() {
                   <Text fw={700}>Guardrails</Text>
                 </Group>
                 <Text c="dimmed">
-                  No whole-book rewrite prompts, no silent character renames, no
-                  original text overwrites, and no public AI API calls unless a future
-                  setting explicitly enables them.
+                  Your voice, your story, your call. Use as much or as little of the toolkit as your manuscript needs — every feature is there to serve the work, not replace the author.
                 </Text>
               </Paper>
             </Stack>

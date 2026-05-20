@@ -172,7 +172,7 @@ export function buildFullBookRewriteUnitPrompt(input: {
 }) {
   return `You are rewriting one small unit of a book manuscript as part of a full-book rewrite.
 
-This is not an isolated rewrite. You must preserve whole-book context, continuity, character permanence, timeline logic, motifs, theology/worldview, emotional meaning, and author voice.
+This is not an isolated rewrite. You must preserve whole-book context, continuity, character permanence, timeline logic, motifs, contemporary view, emotional meaning, and author voice.
 
 MANUSCRIPT BLUEPRINT:
 ${compactJson(input.manuscriptBlueprint || {}, 7000)}
@@ -231,10 +231,10 @@ Rules:
 - Rewrite only TEXT TO REWRITE.
 - Do not rewrite the neighboring context.
 - Do not rename characters.
-- Do not change facts, relationships, timeline, ending, theology/worldview, or emotional meaning.
+- Do not change facts, relationships, timeline, ending, contemporary view, or emotional meaning.
 - Preserve the author's language when the manuscript is not in English.
 - Improve prose, clarity, rhythm, emotional force, and specificity only when it does not damage coherence.
-- Follow the selected rewrite strategy and its limits for expansion, voice preservation, readability, literary intensity, theological/worldview emphasis, and continuity strictness.
+- Follow the selected rewrite strategy and its limits for expansion, voice preservation, readability, literary intensity, contemporary-view emphasis, and continuity strictness.
 - Treat the required context packet as binding. Preserve accepted prior revisions, locked passages, continuity facts, Critic priorities, and chapter directives.
 - If a packet field is marked unavailable, do not invent it. Preserve the original text and flag uncertainty in continuityWarnings.
 - If improving the paragraph would require changing a fact or continuity, preserve the original and put the concern in continuityWarnings.

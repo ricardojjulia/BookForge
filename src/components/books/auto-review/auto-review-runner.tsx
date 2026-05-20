@@ -73,7 +73,7 @@ const CRITIC_LENSES = [
   "continuity",
   "character_depth",
   "market_fit",
-  "theology_worldview",
+  "contemporary_view",
   "revision_priorities",
 ] as const;
 
@@ -83,7 +83,7 @@ const CRITIC_LABELS: Record<string, string> = {
   continuity: "Continuity",
   character_depth: "Character Depth",
   market_fit: "Market Fit",
-  theology_worldview: "Theology / Worldview",
+  contemporary_view: "Contemporary View",
   revision_priorities: "Revision Priorities",
 };
 
@@ -243,8 +243,18 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
 
       } else if (stageId.startsWith("critic_baseline:")) {
         const lens = stageId.split(":")[1];
-        result = await callApi(`/api/books/${bookId}/critic`, { lens, stage: "baseline" });
-        if (!result.ok) throw new Error(String(result.data.error || `Critic ${lens} failed`));
+        let lastCriticError = `Critic ${lens} failed`;
+        result = { ok: false, data: {} };
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          result = await callApi(`/api/books/${bookId}/critic`, { lens, stage: "baseline" });
+          if (result.ok) break;
+          lastCriticError = String(result.data.error || lastCriticError);
+          if (attempt < 2) {
+            addLog(`Critic ${lens} attempt ${attempt} failed — retrying in 10s…`);
+            await new Promise((r) => setTimeout(r, 10000));
+          }
+        }
+        if (!result.ok) throw new Error(lastCriticError);
 
       } else if (stageId === "rewrite_plan") {
         result = await callApi(`/api/books/${bookId}/rewrite-plan`, {});
@@ -312,11 +322,27 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
       } else if (stageId === "drift_check") {
         result = await callApi(`/api/books/${bookId}/drift-check`, {});
         if (!result.ok) throw new Error(String(result.data.error || "Drift check failed"));
+        if (result.data.skipped) {
+          addLog(`Drift check skipped — ${result.data.reason || "no new samples"}`);
+          setStatus(stageId, "skipped", "no new samples");
+          await advanceJob(stageId, { durationMs: Date.now() - startMs, message: String(result.data.reason || "Drift check skipped") });
+          return true;
+        }
 
       } else if (stageId.startsWith("critic_post:")) {
         const lens = stageId.split(":")[1];
-        result = await callApi(`/api/books/${bookId}/critic`, { lens, stage: "post_rewrite" });
-        if (!result.ok) throw new Error(String(result.data.error || `Post-critic ${lens} failed`));
+        let lastPostCriticError = `Post-critic ${lens} failed`;
+        result = { ok: false, data: {} };
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          result = await callApi(`/api/books/${bookId}/critic`, { lens, stage: "post_rewrite" });
+          if (result.ok) break;
+          lastPostCriticError = String(result.data.error || lastPostCriticError);
+          if (attempt < 2) {
+            addLog(`Post-critic ${lens} attempt ${attempt} failed — retrying in 10s…`);
+            await new Promise((r) => setTimeout(r, 10000));
+          }
+        }
+        if (!result.ok) throw new Error(lastPostCriticError);
 
       } else if (stageId === "critics_check") {
         // Retry up to 3 times — this is a lightweight GET and transient network

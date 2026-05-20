@@ -43,7 +43,7 @@ export type CriticLens =
   | "continuity"
   | "character_depth"
   | "market_fit"
-  | "theology_worldview"
+  | "contemporary_view"
   | "revision_priorities";
 
 export type LlmProvider = "lmstudio" | "openai" | "anthropic" | "google";

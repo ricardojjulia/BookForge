@@ -471,14 +471,14 @@ function AuthorNotesForm({ bookId, authorNotes }: { bookId: string; authorNotes:
 
   return (
     <Stack>
-      <InputNotice text="Use author notes for creative preferences, worldview, theological alignment, forbidden changes, and voice guidance." />
+      <InputNotice text="Use author notes for creative preferences, contemporary view, forbidden changes, and voice guidance." />
       {message && <Alert color="green">{message}</Alert>}
       {error && <Alert color="red">{error}</Alert>}
       <SimpleGrid cols={{ base: 1, md: 2 }}>
         <Textarea label="Creative instructions" minRows={5} value={notes.creative_instructions} onChange={(event) => setNotes({ ...notes, creative_instructions: event.currentTarget.value })} />
         <Textarea label="Voice guidance" minRows={5} value={notes.voice_guidance} onChange={(event) => setNotes({ ...notes, voice_guidance: event.currentTarget.value })} />
-        <Textarea label="Worldview notes" minRows={5} value={notes.worldview_notes} onChange={(event) => setNotes({ ...notes, worldview_notes: event.currentTarget.value })} />
-        <Textarea label="Theological alignment" minRows={5} value={notes.theological_alignment} onChange={(event) => setNotes({ ...notes, theological_alignment: event.currentTarget.value })} />
+        <Textarea label="Contemporary View notes" minRows={5} value={notes.worldview_notes} onChange={(event) => setNotes({ ...notes, worldview_notes: event.currentTarget.value })} />
+        <Textarea label="Contemporary View alignment" minRows={5} value={notes.theological_alignment} onChange={(event) => setNotes({ ...notes, theological_alignment: event.currentTarget.value })} />
       </SimpleGrid>
       <Textarea label="Forbidden changes" minRows={4} value={notes.forbidden_changes} onChange={(event) => setNotes({ ...notes, forbidden_changes: event.currentTarget.value })} />
       <Group justify="flex-end">

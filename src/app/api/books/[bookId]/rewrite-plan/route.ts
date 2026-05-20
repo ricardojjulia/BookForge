@@ -98,7 +98,7 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
       temperature: Math.min(settings.temperature, 0.35),
       top_p: settings.topP,
       messages: [{ role: "user", content: prompt }],
-      response_format: { type: "text" },
+      
     });
 
     const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({

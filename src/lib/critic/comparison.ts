@@ -45,8 +45,8 @@ export function summarizeStrategyOutcome(reports: CriticComparableReport[]) {
 
   let recommendation = "Run the post-rewrite quality checks to compare this strategy against the baseline.";
   if (completed.length) {
-    if (regressions.some((item) => ["continuity", "theology_worldview"].includes(item.lens))) {
-      recommendation = "Pause before expanding this strategy. Fix continuity or worldview regression before accepting more drafts.";
+    if (regressions.some((item) => ["continuity", "contemporary_view"].includes(item.lens))) {
+      recommendation = "Pause before expanding this strategy. Fix continuity or contemporary-view regression before accepting more drafts.";
     } else if (regressions.length) {
       recommendation = "The strategy has benefits but also regressions. Adjust the preset settings before the next batch.";
     } else if (improvements.length >= 3) {

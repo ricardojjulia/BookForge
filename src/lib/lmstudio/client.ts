@@ -25,6 +25,8 @@ export type PreparedLmStudioModel = {
   loadedContextTokens: number | null;
   warnings: string[];
   nativeModelManagementAvailable: boolean;
+  /** True when this shim represents a cloud provider (Anthropic, OpenAI, Google). */
+  isCloud?: boolean;
 };
 
 export function createLmStudioClient(settings?: Partial<LmStudioSettings>) {
@@ -214,8 +216,10 @@ export async function createManagedChatCompletion(
   },
 ) {
   try {
+    const { top_p, ...paramsWithoutTopP } = params;
+    const safeParams = prepared.isCloud ? paramsWithoutTopP : params;
     return await client.chat.completions.create({
-      ...params,
+      ...safeParams,
       model: params.model || prepared.model,
       max_tokens: Math.min(params.max_tokens || prepared.runtimeLimits.maxOutputTokens, prepared.runtimeLimits.maxOutputTokens),
     });

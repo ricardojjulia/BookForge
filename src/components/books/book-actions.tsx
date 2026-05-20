@@ -84,7 +84,7 @@ const autoReviewStrategies = [
   "humanized_literary",
   "clarity_readability",
   "emotional_depth",
-  "theology_worldview",
+  "contemporary_view",
   "creative_enhancement",
 ] as const;
 

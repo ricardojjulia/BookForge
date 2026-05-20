@@ -4,7 +4,7 @@ export type RewriteStrategyId =
   | "clarity_readability"
   | "downsize_abridge"
   | "emotional_depth"
-  | "theology_worldview"
+  | "contemporary_view"
   | "creative_enhancement"
   | "custom";
 
@@ -140,9 +140,9 @@ export const rewriteStrategies: Record<RewriteStrategyId, RewriteStrategy> = {
       targetReductionPercent: 0,
     },
   },
-  theology_worldview: {
-    id: "theology_worldview",
-    label: "Theology/worldview alignment",
+  contemporary_view: {
+    id: "contemporary_view",
+    label: "Contemporary View alignment",
     summary: "Preserve and clarify philosophical or theological meaning without unwanted framing.",
     bestFor: "Devotional, pastoral, apologetic, grief, spiritual, or worldview-sensitive work.",
     instructions: [
