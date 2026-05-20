@@ -261,13 +261,22 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
         if (!result.ok) throw new Error(String(result.data.error || "Rewrite plan failed"));
 
       } else if (stageId === "rewrite_execute") {
+        // Check paragraph count before attempting rewrite — skip gracefully if no manuscript.
+        const countResult = await callApi(`/api/books/${bookId}/paragraph-count`);
+        const paragraphCount = (countResult.data?.count as number) ?? -1;
+        if (paragraphCount === 0) {
+          addLog("No manuscript paragraphs found — import your manuscript to enable rewriting.");
+          setStatus(stageId, "skipped", "no manuscript");
+          await advanceJob(stageId, { durationMs: Date.now() - startMs, message: "Skipped — no manuscript imported yet" });
+          return true;
+        }
+
         const strategy = STRATEGY_BY_MODE[mode];
         let batchResult = { ok: true, data: {} as Record<string, unknown> };
         let totalUnitsProcessed = 0;
         let batchNumber = 0;
 
         // Batch until no paragraphs remain or we hit the safety cap.
-        // Each batch persists partial progress so a crash mid-rewrite is recoverable.
         for (let i = 0; i < 200; i++) {
           batchResult = await callApi(`/api/books/${bookId}/rewrite-execute`, {
             maxUnits: REWRITE_BATCH_SIZE,
@@ -277,7 +286,8 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
           if (!batchResult.ok) throw new Error(String(batchResult.data.error || "Rewrite execute failed"));
 
           const content = batchResult.data.content as Record<string, unknown> | undefined;
-          const unitsInBatch = (content?.unitsProcessed as number) || (content?.processed as number) || 0;
+          // Route returns `rewritten` (paragraphs actually written) and `attempted` (total tried).
+          const unitsInBatch = (content?.rewritten as number) ?? (content?.attempted as number) ?? 0;
           totalUnitsProcessed += unitsInBatch;
           batchNumber++;
 
@@ -299,6 +309,15 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
         return true;
 
       } else if (stageId === "auto_accept") {
+        // Skip if there are no pending drafts (rewrite_execute was skipped or produced nothing).
+        const previewResult = await callApi(`/api/books/${bookId}/auto-revision`, { action: "preview" });
+        const pendingDrafts = (previewResult.data?.content as Record<string, unknown> | undefined)?.pendingDrafts as number ?? 0;
+        if (pendingDrafts === 0) {
+          addLog("No pending drafts to accept — skipping auto-accept.");
+          setStatus(stageId, "skipped", "no drafts");
+          await advanceJob(stageId, { durationMs: Date.now() - startMs, message: "Skipped — no pending drafts" });
+          return true;
+        }
         result = await callApi(`/api/books/${bookId}/auto-revision`, {
           action: "run",
           trustProfile: "full_trust",
