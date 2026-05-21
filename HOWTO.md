@@ -53,7 +53,30 @@ Open:
 http://localhost:3000
 ```
 
-## 2. LM Studio Setup
+## 2. Default Account (Seed User)
+
+After running migrations, seed the database to create a ready-to-use local account:
+
+```bash
+supabase db reset
+```
+
+Or apply the seed manually against a running instance:
+
+```bash
+supabase db seed
+```
+
+Default credentials:
+
+```text
+Email:    demo@bookforge.local
+Password: bookforge123
+```
+
+Change the password after first sign-in from **Account** in the top nav.
+
+## 3. LM Studio Setup
 
 1. Open LM Studio.
 2. Download or load an instruct/chat model.
@@ -152,42 +175,55 @@ Exports are saved through Supabase storage/export records.
 
 The Creation Wizard is available from the dashboard.
 
-Current flow:
+Steps:
 
 1. Enter a working title and idea.
 2. Select genre, audience, language, tone, and target page count.
 3. Add worldview boundaries, forbidden content, comparable books, and author notes.
-4. Run Concept Pass.
+4. Run Concept Pass — review the premise, emotional engine, and reader promise.
 5. Accept or revise the concept.
-6. Run Architecture Pass.
-7. Accept Architecture to create a real BookForge book with planned chapters.
+6. Run Architecture Pass — review the part/chapter structure, key beats, and word targets.
+7. Accept Architecture to create a BookForge book with planned chapter shells.
+8. On the book page, the **Architecture Roadmap** panel shows every chapter and its draft status.
+9. In Studio Actions, click **Generate Planned Draft** to generate up to 5 chapters at a time. Repeat until all chapters show "draft" status.
+10. When all chapters are drafted, click **Auto-Review Wizard** and choose "Do it all for me!" — it runs the full review, rewrite, and export cycle autonomously.
 
-Next planned step:
-
-- Generate chapter prose from the accepted architecture in small AI calls, then parse and evaluate the generated manuscript.
+Target pages drives chapter count. 50 pages → ~3 chapters; 200 pages → ~12–15 chapters. If the result feels too short, delete the book and restart with a higher page target.
 
 ## 9. Troubleshooting
 
-**Supabase environment is not configured**
+### Supabase environment is not configured
 
 Check `.env.local` and restart the dev server.
 
-**LM Studio says model unloaded**
+### LM Studio says model unloaded
 
 Open LM Studio, load the selected model, then test the connection from Settings.
 
-**Chapters look duplicated or wrong**
+### Chapters look duplicated or wrong
 
 Use Structure Audit before summaries or rewrite. Repair titles, merge title-only chapters, or split chapters from the repair tools.
 
-**Rewrite count looks smaller than the whole book**
+### Rewrite count looks smaller than the whole book
 
 Draft rewrite batch size means how many units to process in this run. BookForge intentionally favors smaller batches so the author can review direction before continuing.
 
-**A model returns malformed JSON**
+### A model returns malformed JSON
 
 BookForge attempts JSON repair, but local models can still fail. Retry with a stronger reasoning/extraction model or reduce the batch/context size.
 
-**Need a clean rewrite direction**
+### Need a clean rewrite direction
 
 Use Reset Rewrite Work to remove previous rewrite suggestions and approvals while preserving original manuscript text.
+
+### Auto-Review failed mid-run (laptop slept, network dropped)
+
+Click Auto-Review Wizard again. An orange "Resume" banner will appear showing how many stages completed. Click Resume — completed stages are skipped and the run picks up where it stopped.
+
+### Generated chapters are very short (a few paragraphs only)
+
+The model may have ignored the word-count instruction. Check that the architecture has `targetWords` or `targetPages` set per chapter. Running against a cloud model (Anthropic or OpenAI) via cloud execution mode produces more reliable lengths than a small local model.
+
+### Book has fewer chapters than expected after creation
+
+Chapter count is proportional to target pages. A 50-page target produces 3–4 chapters; aim for 200+ pages for a full novel structure.

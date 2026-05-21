@@ -61,26 +61,15 @@ This roadmap reflects the current local MVP as of April 29, 2026.
 - Dashboard entry point for creating a book from an idea.
 - Creation Wizard with target length capped at 150 pages.
 - Local model fit guidance, including single-model safe mode and dual-role sequential planning.
-- Concept pass through LM Studio.
-- Architecture pass through LM Studio.
+- Concept pass through LM Studio or cloud provider.
+- Architecture pass through LM Studio or cloud provider.
 - Accept Architecture route that creates a real BookForge project/book and planned chapters.
+- Generate Planned Draft: prose generation chapter by chapter with word-count targets, scene/paragraph parsing, and coherence report snapshots.
+- Architecture Roadmap panel: live progress view of the accepted architecture alongside draft status per chapter with expandable key beats and "next step" guidance.
+- Book Concept panel: approved concept metadata displayed on the book page, collapsed by default.
+- Auto-Review Wizard: one-click autonomous pipeline (summarise → blueprint → 7-lens critic → rewrite plan → rewrite → drift check → post-critic → export) with loop-until-green logic and resume-after-interruption support.
 
 ## Active Work
-
-### Creation Wizard Phase 2
-
-- Generate actual prose from the accepted architecture.
-- Generate chapter by chapter, then scene or paragraph cluster when chapters are too large.
-- Save generated units with prompt snapshots and provenance.
-- Parse generated prose into scenes and paragraphs.
-- Run baseline Manuscript Blueprint, chapter summaries, and BookForge Critic after draft creation.
-
-### Persistent AI Jobs
-
-- Move long-running work from request-bound routes toward a resumable worker-style loop.
-- Add a dedicated job history screen.
-- Add richer per-unit attempt history and failure diagnostics.
-- Add retry support for failed Blueprint chunks, summaries, Critic jobs, and rewrite units.
 
 ### Revision Studio Polish
 
@@ -89,16 +78,20 @@ This roadmap reflects the current local MVP as of April 29, 2026.
 - Add richer diff controls and clearer note handling.
 - Keep original, current, accepted, and draft text visually distinct.
 
+### User Account Management
+
+- Profile editing (display name, email, password change).
+- Account deletion with data purge.
+- Per-user preferences beyond AI settings.
+
 ## Next
 
-1. Finish Creation Wizard prose generation.
-2. Add generated-draft parsing and automatic post-creation evaluation.
-3. Improve model orchestration guidance for LM Studio memory limits and loaded models.
-4. Add job history and durable background processing.
-5. Expand export styling and metadata controls.
-6. Add reference-material selection into prompts.
-7. Improve collaborator workflows and permission-sensitive UI.
-8. Add automated tests around parsing, export assembly, and rewrite planning math.
+1. User account management (profile edit, password change, account delete).
+2. Add job history and durable background processing.
+3. Expand export styling and metadata controls.
+4. Add reference-material selection into prompts.
+5. Improve collaborator workflows and permission-sensitive UI.
+6. Add automated tests around parsing, export assembly, and rewrite planning math.
 
 ## Product Principles
 

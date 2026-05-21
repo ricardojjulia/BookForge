@@ -15,7 +15,8 @@ The product goal is not "rewrite this text." BookForge treats a manuscript as a 
 - **Revision Review** — accept / reject / rerun / batch revision decisions; full rewrite reset
 - **Final Manuscript Builder** — Markdown, DOCX, EPUB, and PDF export with assembly source preview
 - **Abridged Edition Builder** — shorter version of a manuscript from approved suggestions
-- **Creation Wizard** — start a new book from an idea through concept → architecture → chapter draft generation
+- **Creation Wizard** — start a new book from an idea through concept → architecture → chapter draft generation, with Architecture Roadmap and Book Concept panels on the book page
+- **Auto-Review Wizard** — one-click autonomous workflow: summarise → blueprint → seven-lens critic → rewrite plan → rewrite execution → drift check → post-rewrite critic → export. Loops up to three times until all critics score ≥ 70. Resumable after interruption.
 - **AI provider routing** — LM Studio local models or cloud providers (OpenAI, Anthropic, Google) with execution mode control (auto / local / cloud)
 - **FINISHED status** — mark a specific export as the finished version; one-click download from the dashboard
 
@@ -132,7 +133,11 @@ Open Settings to configure:
 2. Enter title, genre, audience, language, target pages, tone, and worldview boundaries
 3. Run the concept pass — review and accept the premise
 4. Run the architecture pass — review and accept chapter structure
-5. Generate chapter drafts one by one
+5. On the book page, use Generate Planned Draft in Studio Actions (up to 5 chapters at a time)
+6. The Architecture Roadmap panel shows progress and what to do next
+7. Once all chapters are drafted, run Auto-Review Wizard — it handles the rest autonomously
+
+If Auto-Review is interrupted (sleep, network drop), reopen the wizard and click **Resume** to continue from the last completed stage.
 
 ## Guardrails
 

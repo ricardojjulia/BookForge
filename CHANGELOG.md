@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 - 2026-05-19 (in development)
+## 0.3.0 - (planned)
 
 - Manuscript search — full-text search across all chapters and scenes.
 - Author Voice Capture — AI voice fingerprint extraction injected into rewrite prompts.
@@ -11,6 +11,41 @@
 - Series Bible — series-level container with cross-book character and world-building continuity.
 - Revision Statistics Dashboard — per-chapter and per-book metrics on acceptance rates, word count delta, and revision mode breakdown.
 - Collaboration UI — invite by email, role management (viewer / editor / admin), and access revocation.
+
+## 0.2.2 - 2026-05-21
+
+### Auto-Review Wizard
+
+- Resume function: opening the wizard detects a previous failed or interrupted run and offers a "Resume" button. Completed stages are pre-marked done and skipped; the run continues from the first incomplete stage.
+- Failed-state alert now includes a "Back to wizard to resume" button.
+- Log output labels resumed stages with `↩ Resuming — skipping already-completed`.
+
+### Creator Workflow
+
+- Architecture Roadmap panel on the book page: shows the full part/chapter structure from the accepted architecture alongside live draft status per chapter. Chapters are expandable to show key beats and emotional arc. Includes a "Next step" callout (generate remaining chapters or run Auto-Review) so the path forward is always visible.
+- Book Concept panel on the book page: surfaces approved concept metadata (main theme, premise, reader promise, emotional engine, creation thesis, genre fit, audience fit, suggested structure, core questions, differentiators, author risks). Collapsed by default with a "Show details" toggle.
+- `toDisplayString` serializer handles concept fields that are objects or arrays instead of plain strings, preventing React child object errors.
+- Draft generation word-count fix: prompt now includes explicit floor/ceiling word targets per chapter (80 % – 120 % of architecture target). `max_tokens` floor raised to 6 000 (was 2 048).
+- Page auto-refresh after draft generation: `revalidatePath` server-side plus a delayed second `router.refresh()` client-side so the book page reflects generated chapters without a manual reload.
+
+### Production Command Center
+
+- Creator-book guidance: after all chapters are drafted the command center now points to "Run Auto-Review" rather than a manual Blueprint step.
+- Removed confusing "Generate Blueprint" prompt for books that have no blueprint yet — Auto-Review generates it automatically.
+
+### Revision Loop Fixes
+
+- `rewrite_execute` field name corrected: runner now reads `rewritten` / `attempted` from the route response (was reading `unitsProcessed` / `processed`, causing the stage to always report zero and immediately exit).
+- Paragraph count gate before `rewrite_execute`: skips the stage with a clear message when no manuscript paragraphs exist (freshly created books with unimported manuscripts).
+- Preview gate before `auto_accept`: checks pending draft count before calling the auto-revision route; skips with "no pending drafts" if the rewrite produced nothing.
+
+### Cloud Provider Fix
+
+- Strip `top_p` from Anthropic API calls. Anthropic returns HTTP 400 when both `temperature` and `top_p` are present. `createManagedChatCompletion` now omits `top_p` when `preparedModel.isCloud` is true. The orchestrator sets `isCloud: true` on the cloud shim.
+
+### Landing Page
+
+- Updated Guardrails section copy to emphasise author control and opt-in usage of the toolkit.
 
 ## 0.2.0 - 2026-05-19
 
