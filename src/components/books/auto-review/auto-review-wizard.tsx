@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  Alert,
   Badge,
   Box,
   Button,
@@ -13,7 +14,7 @@ import {
   Text,
   ThemeIcon,
 } from "@mantine/core";
-import { IconRocket, IconScissors, IconArrowUp } from "@tabler/icons-react";
+import { IconRocket, IconScissors, IconArrowUp, IconPlayerPlay } from "@tabler/icons-react";
 import { AutoReviewRunner } from "./auto-review-runner";
 
 type Mode = "full_review" | "make_shorter" | "make_longer";
@@ -50,30 +51,67 @@ const MODES: { value: Mode; icon: React.ReactNode; label: string; tagline: strin
   },
 ];
 
+type ResumableJob = {
+  id: string;
+  mode: Mode;
+  stages_completed: string[];
+  error: string | null;
+};
+
 export function AutoReviewWizard({ bookId, bookTitle }: Props) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Mode | null>(null);
   const [running, setRunning] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [completedStages, setCompletedStages] = useState<string[] | undefined>(undefined);
+  const [resumableJob, setResumableJob] = useState<ResumableJob | null>(null);
+  const [checkingResume, setCheckingResume] = useState(false);
 
-  async function start() {
-    if (!selected) return;
+  async function checkForResumableJob() {
+    setCheckingResume(true);
+    try {
+      const res = await fetch(`/api/books/${bookId}/auto-review`);
+      const data = await res.json() as { job?: ResumableJob & { status?: string } };
+      const job = data.job;
+      if (job && (job.status === "failed" || job.status === "running") && Array.isArray(job.stages_completed) && job.stages_completed.length > 0) {
+        setResumableJob({ id: job.id, mode: job.mode, stages_completed: job.stages_completed, error: job.error });
+      } else {
+        setResumableJob(null);
+      }
+    } finally {
+      setCheckingResume(false);
+    }
+  }
+
+  async function start(resumeFrom?: ResumableJob) {
+    const mode = resumeFrom?.mode ?? selected;
+    if (!mode) return;
     const res = await fetch(`/api/books/${bookId}/auto-review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: selected }),
+      body: JSON.stringify({ mode }),
     });
-    const data = await res.json();
+    const data = await res.json() as { jobId?: string; error?: string };
     if (data.error) { alert(data.error); return; }
-    setJobId(data.jobId);
+    setJobId(data.jobId!);
+    setSelected(mode);
+    setCompletedStages(resumeFrom?.stages_completed);
     setRunning(true);
+    setResumableJob(null);
   }
 
   function reset() {
     setSelected(null);
     setRunning(false);
     setJobId(null);
+    setCompletedStages(undefined);
+    setResumableJob(null);
     setOpen(false);
+  }
+
+  function openWizard() {
+    setOpen(true);
+    checkForResumableJob();
   }
 
   return (
@@ -83,7 +121,7 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
         variant="gradient"
         gradient={{ from: "grape", to: "indigo" }}
         size="md"
-        onClick={() => setOpen(true)}
+        onClick={openWizard}
       >
         Auto-Review Wizard
       </Button>
@@ -104,12 +142,25 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
             jobId={jobId}
             mode={selected!}
             onDone={reset}
+            completedStages={completedStages}
           />
         ) : (
           <Stack gap="md">
+            {resumableJob && (
+              <Alert color="orange" icon={<IconPlayerPlay size={16} />} title="Previous run can be resumed">
+                <Text size="sm" mb="xs">
+                  {resumableJob.stages_completed.length} stage{resumableJob.stages_completed.length === 1 ? "" : "s"} completed before the last run stopped.
+                  Resume to skip those and continue from where it left off.
+                </Text>
+                {resumableJob.error && <Text size="xs" c="dimmed" mb="xs">{resumableJob.error}</Text>}
+                <Button size="xs" color="orange" leftSection={<IconPlayerPlay size={14} />} onClick={() => start(resumableJob)}>
+                  Resume ({resumableJob.stages_completed.length} stages done)
+                </Button>
+              </Alert>
+            )}
+
             <Text c="dimmed" size="sm">
-              Choose a mode. BookForge will run the entire workflow — no further decisions needed —
-              until the book is published.
+              {checkingResume ? "Checking for previous runs…" : "Choose a mode. BookForge will run the entire workflow — no further decisions needed — until the book is published."}
             </Text>
 
             <Stack gap="sm">
@@ -153,7 +204,7 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
               <Button
                 color="grape"
                 disabled={!selected}
-                onClick={start}
+                onClick={() => start()}
               >
                 Start — I&apos;ll grab a coffee ☕
               </Button>

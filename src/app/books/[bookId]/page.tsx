@@ -19,6 +19,8 @@ import { DriftReportsPanel } from "@/components/books/reports/drift-reports-pane
 import { HumanizedGuidancePanel } from "@/components/books/reports/humanized-guidance-panel";
 import { AutoReviewWizard } from "@/components/books/auto-review/auto-review-wizard";
 import { PostRunQualityGate } from "@/components/books/rewrite/post-run-quality-gate";
+import { BookConceptPanel } from "@/components/books/book-concept-panel";
+import { ArchitectureRoadmapPanel } from "@/components/books/architecture-roadmap-panel";
 import { SceneEditorPanel } from "@/components/books/scene-editor-panel";
 import { StructureAuditPanel } from "@/components/books/structure-audit-panel";
 import { getBookAuthorDisplay } from "@/lib/books/status";
@@ -62,6 +64,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
     { data: rewriteWorkflow },
     { data: rewritePlan },
     { data: latestDriftReport },
+    { data: creationProject },
   ] =
     await Promise.all([
       supabase.from("books").select("*").eq("id", bookId).single(),
@@ -150,7 +153,24 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      supabase
+        .from("creation_projects")
+        .select("id,working_title,genre,target_audience,language,target_pages,tone")
+        .eq("created_book_id", bookId)
+        .maybeSingle(),
     ]);
+
+  const { data: creationPlanVersions } = creationProject
+    ? await supabase
+        .from("creation_plan_versions")
+        .select("version_type,content,accepted")
+        .eq("creation_project_id", creationProject.id)
+        .in("version_type", ["concept", "architecture"])
+        .eq("accepted", true)
+        .order("created_at", { ascending: false })
+    : { data: null };
+  const acceptedConcept = creationPlanVersions?.find((v) => v.version_type === "concept")?.content as Record<string, unknown> | null | undefined;
+  const acceptedArchitecture = creationPlanVersions?.find((v) => v.version_type === "architecture")?.content as Record<string, unknown> | null | undefined;
 
   if (error || !book) {
     return (
@@ -230,6 +250,21 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           <Metric label="Manuscript Blueprint" value={bible ? "Ready" : "Not generated"} />
           <Metric label="Critic reports" value={reports?.length || 0} />
         </SimpleGrid>
+
+        {creationProject && acceptedConcept && (
+          <BookConceptPanel
+            creationProject={creationProject}
+            concept={acceptedConcept}
+          />
+        )}
+
+        {creationProject && acceptedArchitecture && (
+          <ArchitectureRoadmapPanel
+            architecture={acceptedArchitecture}
+            chapters={chapters || []}
+            plannedChapterCount={plannedChapterCount}
+          />
+        )}
 
         <Paper withBorder radius="md" p="md" bg="white" mb="xl">
           <ManuscriptSearch bookId={bookId} />

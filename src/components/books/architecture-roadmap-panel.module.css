@@ -1,0 +1,8 @@
+.chapterRow {
+  cursor: pointer;
+  user-select: none;
+}
+
+.chapterMeta {
+  flex: 1;
+}

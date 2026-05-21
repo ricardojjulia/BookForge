@@ -146,12 +146,15 @@ type Props = {
   jobId: string;
   mode: Mode;
   onDone: () => void;
+  /** Stage IDs already completed in a prior run — pre-marked done and skipped. */
+  completedStages?: string[];
 };
 
-export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Props) {
+export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, completedStages }: Props) {
   const stages = buildStages();
+  const preCompleted = new Set(completedStages || []);
   const [stageStates, setStageStates] = useState<StageState[]>(
-    stages.map((s) => ({ ...s, status: "pending" })),
+    stages.map((s) => ({ ...s, status: preCompleted.has(s.id) ? "done" : "pending" })),
   );
   const [iteration, setIteration] = useState(0);
   const [log, setLog] = useState<string[]>([]);
@@ -530,6 +533,10 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
       }
 
       for (const stage of stages) {
+        if (preCompleted.has(stage.id)) {
+          addLog(`↩ Resuming — skipping already-completed: ${stage.id}`);
+          continue;
+        }
         const ok = await runStage(stage.id);
         if (!ok) {
           const failedAt = actualFailedStageRef.current || stage.id;
@@ -584,7 +591,10 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone }: Pro
       )}
       {failed && (
         <Alert color="red" icon={<IconX size={18} />} title="Workflow failed">
-          {errorMsg}. Fix the issue (e.g., check LM Studio is running) and restart the wizard.
+          <Text size="sm" mb="xs">{errorMsg}. Fix the issue (e.g., check LM Studio is running or internet is connected) then resume — completed stages will be skipped.</Text>
+          <Button size="xs" color="orange" onClick={onDone}>
+            Back to wizard to resume
+          </Button>
         </Alert>
       )}
 
