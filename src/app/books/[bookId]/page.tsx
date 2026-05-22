@@ -16,7 +16,7 @@ import { CriticComparisonPanel } from "@/components/books/reports/critic-compari
 import { CriticReportsPanel } from "@/components/books/reports/critic-reports-panel";
 import { CriticScoreboard } from "@/components/books/reports/critic-scoreboard";
 import { DriftReportsPanel } from "@/components/books/reports/drift-reports-panel";
-import { HumanizedGuidancePanel } from "@/components/books/reports/humanized-guidance-panel";
+import { GuidanceWorkflowPanel } from "@/components/books/guidance/guidance-workflow-panel";
 import { AutoReviewWizard } from "@/components/books/auto-review/auto-review-wizard";
 import { PostRunQualityGate } from "@/components/books/rewrite/post-run-quality-gate";
 import { BookConceptPanel } from "@/components/books/book-concept-panel";
@@ -317,32 +317,28 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         />
 
         <Paper id="studio-actions" withBorder radius="md" p="xl" bg="white" mt="xl">
-          <Group justify="space-between" mb="lg" align="flex-start">
+          <Group justify="space-between" mb="sm" align="flex-start" wrap="nowrap">
             <div>
-              <Title order={2}>Studio Actions</Title>
-              <Text c="dimmed">
+              <Group gap="xs" mb={4}>
+                <Title order={2}>Studio Actions</Title>
+                <Badge color="grape" variant="light" size="sm">Local AI via LM Studio</Badge>
+              </Group>
+              <Text c="dimmed" size="sm">
                 Analyze, evaluate, revise, review, and export this manuscript from one controlled workflow.
               </Text>
             </div>
-            <Badge color="grape" variant="light">
-              Local AI via LM Studio
-            </Badge>
+            <AutoReviewWizard bookId={bookId} bookTitle={book.title} />
+          </Group>
+          <Group gap="xs" mb="lg">
             <Link href={`/books/${bookId}/world`} style={{ textDecoration: "none" }}>
-              <Button color="violet" variant="light">
-                World Bible
-              </Button>
+              <Button size="xs" color="violet" variant="light">World Bible</Button>
             </Link>
             <Link href={`/books/${bookId}/read`} style={{ textDecoration: "none" }}>
-              <Button color="cyan" variant="light">
-                Beta Reader View
-              </Button>
+              <Button size="xs" color="cyan" variant="light">Beta Reader View</Button>
             </Link>
             <Link href={`/books/${bookId}/abridgement`} style={{ textDecoration: "none" }}>
-              <Button color="teal" variant="light">
-                Abridged Edition
-              </Button>
+              <Button size="xs" color="teal" variant="light">Abridged Edition</Button>
             </Link>
-            <AutoReviewWizard bookId={bookId} bookTitle={book.title} />
           </Group>
           <BookActions
             bookId={bookId}
@@ -385,7 +381,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
 
         <DriftReportsPanel reports={reports || []} />
 
-        <HumanizedGuidancePanel bookId={bookId} reports={reports || []} />
+        <GuidanceWorkflowPanel bookId={bookId} reports={reports || []} />
 
         <ChapterMetadataPanel chapters={chapters || []} paragraphs={paragraphRows || []} />
 

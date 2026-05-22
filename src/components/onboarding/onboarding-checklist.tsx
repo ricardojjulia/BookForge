@@ -5,6 +5,7 @@ import { Alert, Badge, Button, Checkbox, Paper, Stack, Text, Title } from "@mant
 import { fetchJson } from "@/lib/http/fetch-json";
 
 const STEPS = [
+  { key: "ai_setup", label: "Set up your AI engine", description: "Connect LM Studio (local, private) or a cloud provider (OpenAI, Anthropic, Google). Use the 'Set up AI engine' button above." },
   { key: "import", label: "Import your manuscript", description: "Upload a TXT, DOCX, EPUB, or Markdown file — or paste text directly." },
   { key: "structure", label: "Review chapter structure", description: "Confirm chapters and scenes parsed correctly. Use the repair tools if anything is off." },
   { key: "blueprint", label: "Generate Manuscript Blueprint", description: "Run the AI analysis to build your book bible — characters, themes, and style notes." },

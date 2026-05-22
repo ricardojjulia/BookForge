@@ -16,7 +16,7 @@
  * lives in the expandable RunDetailPanel inside RunsTable.
  */
 
-import { Container, Grid, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { Container, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { AppShell } from "@/components/layout/app-shell";
 import { RunsTable } from "@/components/analytics/runs-table";
 import { createClient } from "@/lib/supabase/server";
@@ -218,17 +218,12 @@ export default async function AnalyticsPage() {
 
           {/* Per-run breakdown */}
           <div>
-            <Grid align="center" mb="sm">
-              <Grid.Col span="auto">
-                <Text fw={600}>All Runs</Text>
-              </Grid.Col>
-              {/* Column header hints */}
-              <Grid.Col span="content">
-                <Text size="xs" c="dimmed" ta="right" pr="md">
-                  Status · Duration · Cycles · Avg Score · Paragraphs
-                </Text>
-              </Grid.Col>
-            </Grid>
+            <Group justify="space-between" mb="sm">
+              <Text fw={600}>All Runs</Text>
+              <Text size="xs" c="dimmed" pr="md">
+                Status · Duration · Cycles · Avg Score · Paragraphs
+              </Text>
+            </Group>
             <RunsTable runs={runs} />
           </div>
         </Stack>

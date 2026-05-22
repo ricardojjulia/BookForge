@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { sendCollaboratorInvite } from "@/lib/email";
 
 const schema = z.object({
   email: z.string().email(),
@@ -25,9 +26,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       .single();
     if (error) throw error;
 
-    const inviteUrl = `${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/invite/${invite.token}`;
+    const inviteUrl = `${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:4747"}/invite/${invite.token}`;
 
-    return NextResponse.json({ invite, inviteUrl });
+    const { sent: emailSent } = await sendCollaboratorInvite({
+      toEmail: invite.email,
+      bookTitle: book.title,
+      inviteUrl,
+      role: invite.role,
+      invitedByEmail: user.email ?? "A BookForge user",
+    });
+
+    return NextResponse.json({ invite, inviteUrl, emailSent });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Failed." }, { status: 500 });
   }

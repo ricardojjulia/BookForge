@@ -54,6 +54,7 @@ export function CollaborationPanel({ bookId }: { bookId: string }) {
   const [role, setRole] = useState<string>("editor");
   const [inviting, setInviting] = useState(false);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviteEmailSent, setInviteEmailSent] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -83,6 +84,7 @@ export function CollaborationPanel({ bookId }: { bookId: string }) {
     setInviting(true);
     setInviteError(null);
     setInviteUrl(null);
+    setInviteEmailSent(false);
     try {
       const res = await fetch(`/api/books/${bookId}/invite`, {
         method: "POST",
@@ -92,6 +94,7 @@ export function CollaborationPanel({ bookId }: { bookId: string }) {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setInviteUrl(data.inviteUrl);
+      setInviteEmailSent(data.emailSent ?? false);
       setEmail("");
       load();
     } catch (e) {
@@ -154,8 +157,12 @@ export function CollaborationPanel({ bookId }: { bookId: string }) {
             </Group>
             {inviteError && <Alert color="red" py="xs">{inviteError}</Alert>}
             {inviteUrl && (
-              <Alert color="green" title="Invite link created">
-                <Text size="sm" mb="xs">Share this link — it expires in 7 days.</Text>
+              <Alert color="green" title={inviteEmailSent ? "Invite sent" : "Invite link created"}>
+                <Text size="sm" mb="xs">
+                  {inviteEmailSent
+                    ? "An invitation email is on its way. You can also share the link directly:"
+                    : "Share this link — it expires in 7 days."}
+                </Text>
                 <Group gap="xs">
                   <Text size="xs" ff="monospace" style={{ wordBreak: "break-all" }}>{inviteUrl}</Text>
                   <CopyButton value={inviteUrl} timeout={2000}>

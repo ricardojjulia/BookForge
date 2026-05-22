@@ -601,14 +601,6 @@ export function BookActions({
           description="Build reusable manuscript context before revision."
         >
           <Button
-            color="red"
-            fullWidth
-            loading={loading === "preflight:auto-review" || loading === "auto-review"}
-            onClick={() => openPreflight("auto-review")}
-          >
-            Auto Review Full Book
-          </Button>
-          <Button
             color="grape"
             fullWidth
             loading={loading === "preflight:book-bible" || loading === `/api/books/${bookId}/analyze`}
