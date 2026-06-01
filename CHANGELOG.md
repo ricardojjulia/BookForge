@@ -14,6 +14,7 @@
 - Added persistent freshness telemetry table (`freshness_events`) with RLS and migration-backed indexes.
 - Added analytics page freshness reliability section (24h event counts, route-level success/failure rates, latest failures).
 - Added interactive freshness analytics filters (24h/7d + route) and mini trend bars for quick reliability signal checks.
+- Added dedicated `GET /api/analytics/freshness` endpoint with pagination (`limit`/`offset`) and drilldown filters (`window`, `routeKey`) for scalable reliability analytics.
 
 ### Software Factory Governance
 

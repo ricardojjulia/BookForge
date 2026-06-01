@@ -23,7 +23,6 @@ import { RunsTable } from "@/components/analytics/runs-table";
 import { FreshnessTelemetryPanel } from "@/components/analytics/freshness-telemetry-panel";
 import { createClient } from "@/lib/supabase/server";
 import type { RunRecord, StageDuration, ScoreSnapshot } from "@/app/api/analytics/route";
-import type { FreshnessEventRow } from "@/lib/freshness/analytics";
 
 // ── Telemetry parsing (duplicated from the API route so the server component
 //    can work without an internal HTTP round-trip) ────────────────────────────
@@ -119,17 +118,6 @@ export default async function AnalyticsPage() {
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
     .limit(200);
-
-  const freshnessWindow = new Date();
-  freshnessWindow.setDate(freshnessWindow.getDate() - 7);
-  const freshnessWindowStart = freshnessWindow.toISOString();
-  const { data: freshnessRows } = await supabase
-    .from("freshness_events")
-    .select("event_name,route_key,status,reason,age_ms,error,occurred_at")
-    .eq("user_id", user.id)
-    .gte("occurred_at", freshnessWindowStart)
-    .order("occurred_at", { ascending: false })
-    .limit(5000);
 
   // Build typed RunRecord[] with derived telemetry metrics
   const runs: RunRecord[] = (jobs ?? []).map((job) => {
@@ -229,10 +217,7 @@ export default async function AnalyticsPage() {
             />
           </SimpleGrid>
 
-          <FreshnessTelemetryPanel
-            rows={(freshnessRows ?? []) as FreshnessEventRow[]}
-            fetchedAt={new Date().toISOString()}
-          />
+          <FreshnessTelemetryPanel />
 
           {/* Per-run breakdown */}
           <div>

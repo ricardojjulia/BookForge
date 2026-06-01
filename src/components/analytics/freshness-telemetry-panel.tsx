@@ -1,13 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Box, Group, Paper, Select, SegmentedControl, SimpleGrid, Stack, Table, Text } from "@mantine/core";
 import {
-  buildFreshnessTrend,
-  filterFreshnessEvents,
-  summarizeFreshnessEvents,
-  type FreshnessEventRow,
-  type FreshnessWindowHours,
+  type FreshnessSummary,
+  type FreshnessTrendBucket,
 } from "@/lib/freshness/analytics";
 
 function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -20,7 +17,7 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub?:
   );
 }
 
-function TrendBars({ points }: { points: Array<{ label: string; count: number }> }) {
+function TrendBars({ points }: { points: FreshnessTrendBucket[] }) {
   const max = Math.max(1, ...points.map((point) => point.count));
 
   return (
@@ -47,34 +44,88 @@ function TrendBars({ points }: { points: Array<{ label: string; count: number }>
   );
 }
 
-export function FreshnessTelemetryPanel({ rows, fetchedAt }: { rows: FreshnessEventRow[]; fetchedAt: string }) {
-  const asOf = useMemo(() => new Date(fetchedAt), [fetchedAt]);
+const EMPTY_SUMMARY: FreshnessSummary = {
+  totalEvents: 0,
+  byEvent: {
+    freshness_refresh_attempt: 0,
+    freshness_refresh_success: 0,
+    freshness_refresh_failed: 0,
+    freshness_forced_refresh_triggered: 0,
+  },
+  routes: [],
+  latestFailures: [],
+};
+
+const EMPTY_TREND: FreshnessTrendBucket[] = [];
+
+export function FreshnessTelemetryPanel() {
   const [windowValue, setWindowValue] = useState<"24h" | "7d">("24h");
   const [routeKey, setRouteKey] = useState<string>("all");
+  const [summary, setSummary] = useState<FreshnessSummary>(EMPTY_SUMMARY);
+  const [trend, setTrend] = useState<FreshnessTrendBucket[]>(EMPTY_TREND);
+  const [routeOptions, setRouteOptions] = useState<Array<{ label: string; value: string }>>([{ label: "All routes", value: "all" }]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [totalInWindow, setTotalInWindow] = useState(0);
 
-  const routeOptions = useMemo(
-    () => [
-      { label: "All routes", value: "all" },
-      ...Array.from(new Set(rows.map((row) => row.route_key)))
-        .sort((a, b) => a.localeCompare(b))
-        .map((route) => ({ label: route, value: route })),
-    ],
-    [rows],
-  );
+  const limit = 100;
+  const offset = page * limit;
 
-  const windowHours: FreshnessWindowHours = windowValue === "24h" ? 24 : 168;
-  const filteredRows = useMemo(
-    () =>
-      filterFreshnessEvents(rows, {
-        windowHours,
-        routeKey: routeKey === "all" ? null : routeKey,
-        asOf,
-      }),
-    [asOf, routeKey, rows, windowHours],
-  );
+  const requestUrl = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set("window", windowValue);
+    params.set("limit", String(limit));
+    params.set("offset", String(offset));
+    if (routeKey !== "all") params.set("routeKey", routeKey);
+    return `/api/analytics/freshness?${params.toString()}`;
+  }, [limit, offset, routeKey, windowValue]);
 
-  const summary = useMemo(() => summarizeFreshnessEvents(filteredRows), [filteredRows]);
-  const trend = useMemo(() => buildFreshnessTrend(filteredRows, { windowHours, asOf }), [asOf, filteredRows, windowHours]);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const res = await fetch(requestUrl, { cache: "no-store" });
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data?.error || "Failed to load freshness telemetry.");
+        }
+
+        if (cancelled) return;
+
+        setSummary(data.summary ?? EMPTY_SUMMARY);
+        setTrend((data.trend ?? EMPTY_TREND) as FreshnessTrendBucket[]);
+        setTotalInWindow(data.pagination?.totalInWindow ?? 0);
+
+        const routeChoices = [
+          { label: "All routes", value: "all" },
+          ...((data.summary?.routes ?? []) as Array<{ routeKey: string }>)
+            .map((route) => route.routeKey)
+            .sort((a, b) => a.localeCompare(b))
+            .map((route) => ({ label: route, value: route })),
+        ];
+        setRouteOptions(routeChoices);
+      } catch (nextError) {
+        if (cancelled) return;
+        setError(nextError instanceof Error ? nextError.message : "Failed to load freshness telemetry.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [requestUrl]);
+
+  const totalPages = Math.max(1, Math.ceil(totalInWindow / limit));
 
   return (
     <Stack gap="md">
@@ -86,7 +137,10 @@ export function FreshnessTelemetryPanel({ rows, fetchedAt }: { rows: FreshnessEv
         <Group gap="sm" wrap="wrap">
           <SegmentedControl
             value={windowValue}
-            onChange={(value) => setWindowValue(value as "24h" | "7d")}
+            onChange={(value) => {
+              setPage(0);
+              setWindowValue(value as "24h" | "7d");
+            }}
             data={[
               { label: "24h", value: "24h" },
               { label: "7d", value: "7d" },
@@ -95,12 +149,18 @@ export function FreshnessTelemetryPanel({ rows, fetchedAt }: { rows: FreshnessEv
           <Select
             w={240}
             value={routeKey}
-            onChange={(value) => setRouteKey(value ?? "all")}
+            onChange={(value) => {
+              setPage(0);
+              setRouteKey(value ?? "all");
+            }}
             data={routeOptions}
             searchable
           />
         </Group>
       </Group>
+
+      {error && <Text size="sm" c="red">{error}</Text>}
+      {loading && <Text size="sm" c="dimmed">Loading freshness telemetry…</Text>}
 
       <SimpleGrid cols={{ base: 2, sm: 4 }}>
         <MetricCard
@@ -165,6 +225,33 @@ export function FreshnessTelemetryPanel({ rows, fetchedAt }: { rows: FreshnessEv
           ))}
         </Stack>
       )}
+
+      <Group justify="space-between">
+        <Text size="xs" c="dimmed">
+          Showing {offset + 1}-{Math.min(offset + limit, totalInWindow)} of {totalInWindow} row(s)
+        </Text>
+        <Group gap="xs">
+          <Paper
+            withBorder
+            px="sm"
+            py={4}
+            style={{ cursor: page > 0 ? "pointer" : "not-allowed", opacity: page > 0 ? 1 : 0.5 }}
+            onClick={() => page > 0 && setPage(page - 1)}
+          >
+            <Text size="xs">Previous</Text>
+          </Paper>
+          <Text size="xs" c="dimmed">Page {page + 1} of {totalPages}</Text>
+          <Paper
+            withBorder
+            px="sm"
+            py={4}
+            style={{ cursor: page + 1 < totalPages ? "pointer" : "not-allowed", opacity: page + 1 < totalPages ? 1 : 0.5 }}
+            onClick={() => page + 1 < totalPages && setPage(page + 1)}
+          >
+            <Text size="xs">Next</Text>
+          </Paper>
+        </Group>
+      </Group>
     </Stack>
   );
 }
