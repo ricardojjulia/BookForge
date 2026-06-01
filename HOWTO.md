@@ -192,6 +192,22 @@ Target pages drives chapter count. 50 pages → ~3 chapters; 200 pages → ~12�
 
 ## 9. Troubleshooting
 
+## 10. Data Freshness and Refresh Behavior
+
+BookForge now surfaces freshness state on key operational pages.
+
+Policy:
+
+- Fresh: data snapshot is less than 24 hours old.
+- Stale: 24 hours to less than 48 hours old; UI prompts for refresh.
+- Expired: 48 hours or older; UI attempts a forced refresh once, then keeps the last snapshot visible if refresh fails.
+
+Operational notes:
+
+- Manual refresh is always available from the freshness banner.
+- If refresh fails, BookForge should continue showing the last available data with a warning so work can continue.
+- This behavior is designed to reduce API error dead-ends during admin and review workflows.
+
 ### Supabase environment is not configured
 
 Check `.env.local` and restart the dev server.

@@ -1,6 +1,7 @@
 import { Alert, Badge, Button, Container, Group, Paper, Progress, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { AppShell } from "@/components/layout/app-shell";
+import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { BookActions } from "@/components/books/book-actions";
 import { ManuscriptSearch } from "@/components/books/manuscript-search";
 import { VoiceCapturePanel } from "@/components/books/voice-capture-panel";
@@ -28,8 +29,6 @@ import { getRewriteReadiness, type RewriteReadiness } from "@/lib/rewrite/readin
 import type { RewriteWorkflowRow } from "@/lib/rewrite/workflows";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-
-export const dynamic = "force-dynamic";
 
 export default async function BookDashboardPage({ params }: { params: Promise<{ bookId: string }> }) {
   if (!hasSupabaseEnv()) {
@@ -228,6 +227,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
   return (
     <AppShell>
       <Container size="xl">
+        <DataFreshnessBanner routeKey={`book:${bookId}:dashboard`} fetchedAt={new Date().toISOString()} label="Book dashboard data" />
         <Group justify="space-between" mb="xl" align="flex-start">
           <div>
             <Group mb="xs">
@@ -352,9 +352,9 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           />
         </Paper>
 
-        <div style={{ marginTop: 24 }}>
+        <Stack mt="xl" gap={0}>
           <PersistentAiJobsPanel bookId={bookId} />
-        </div>
+        </Stack>
 
         <CriticReportsPanel bookId={bookId} reports={reports || []} />
 
@@ -392,7 +392,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
 
         <SceneEditorPanel chapters={chapters || []} scenes={sceneRows || []} paragraphs={paragraphRows || []} />
 
-        <div style={{ marginTop: 24 }}>
+        <Stack mt="xl" gap={0}>
           <BookInputsManager
             bookId={bookId}
             book={book}
@@ -403,7 +403,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
             matterSections={matterSections || []}
             revisionInstructions={revisionInstructions || []}
           />
-        </div>
+        </Stack>
 
         <Paper withBorder radius="md" p="xl" bg="white" mt="xl">
           <Title order={2} mb="md">

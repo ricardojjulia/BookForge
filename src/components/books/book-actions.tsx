@@ -350,8 +350,6 @@ export function BookActions({
       }, taskName);
       setOutput(formatResultMessage(path, result));
       router.refresh();
-      // Second refresh after a short delay to pick up revalidated server cache.
-      window.setTimeout(() => router.refresh(), 1200);
       setQueue((current) => ({
         ...current,
         currentUnit: "Complete",

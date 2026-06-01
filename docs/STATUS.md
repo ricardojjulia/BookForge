@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-05-21.
+Last updated: 2026-06-01.
 
 ## What Is Up
 
@@ -29,6 +29,9 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - FINISHED book status with signed export download.
 - Persistent AI Jobs panel.
 - Collaboration panel (invite, roles).
+- Publishing Lab gateway: post-finish ultimate critic, consensus reporting, generated assets, and cover variants.
+- Freshness UX foundation on key pages with stale/expired messaging and manual refresh controls.
+- Software-factory execution artifacts: phased execution log, engineering TODO, and admin/course ADR.
 
 ## Known Limits
 
@@ -36,6 +39,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Long AI jobs are still request-bound; no durable background worker yet.
 - KPF/KCB support is best-effort.
 - Automated test coverage is minimal.
+- Freshness telemetry events are defined but not yet fully instrumented across routes.
 
 ## What Is Next
 
@@ -44,3 +48,4 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 3. Export styling and metadata controls.
 4. Improved collaborator workflows.
 5. Automated tests for parsing, rewrite planning math, and export assembly.
+6. Admin/course domain implementation from ADR-0001.

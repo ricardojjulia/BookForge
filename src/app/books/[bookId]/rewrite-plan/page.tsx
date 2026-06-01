@@ -1,6 +1,7 @@
 import { Alert, Button, Container, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { AppShell } from "@/components/layout/app-shell";
+import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { RewriteExecutionPanel } from "@/components/books/rewrite/rewrite-execution-panel";
 import { RewriteModelEvaluator } from "@/components/books/rewrite/rewrite-model-evaluator";
 import { RewritePlanActions } from "@/components/books/rewrite/rewrite-plan-actions";
@@ -14,8 +15,6 @@ import { getDefaultRewriteWorkflow, type RewriteWorkflowRow } from "@/lib/rewrit
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import type { CriticLens } from "@/lib/types";
-
-export const dynamic = "force-dynamic";
 
 export default async function RewritePlanPage({ params }: { params: Promise<{ bookId: string }> }) {
   if (!hasSupabaseEnv()) {
@@ -172,6 +171,7 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
   return (
     <AppShell>
       <Container size="xl">
+        <DataFreshnessBanner routeKey={`book:${bookId}:rewrite-plan`} fetchedAt={new Date().toISOString()} label="Rewrite planning data" />
         <Group justify="space-between" mb="xl" align="flex-start">
           <div>
             <Title>Rewrite Architect</Title>

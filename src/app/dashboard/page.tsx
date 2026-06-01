@@ -1,13 +1,12 @@
 import { Alert, Badge, Button, Container, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { DeleteBookButton } from "@/components/books/delete-book-button";
+import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { OnboardingChecklist } from "@/components/onboarding/onboarding-checklist";
 import { SetupWizard } from "@/components/onboarding/setup-wizard";
 import { AppShell } from "@/components/layout/app-shell";
 import { getBookAuthorDisplay } from "@/lib/books/status";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-
-export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   if (!hasSupabaseEnv()) {
@@ -63,10 +62,12 @@ export default async function DashboardPage() {
       )
     : [];
   const finishedByBook = Object.fromEntries(finishedExports.map((fe) => [fe.bookId, fe]));
+  const freshnessFetchedAt = new Date().toISOString();
 
   return (
     <AppShell>
       <Container size="xl">
+        <DataFreshnessBanner routeKey="dashboard" fetchedAt={freshnessFetchedAt} label="Dashboard data" />
         <Group justify="space-between" mb="xl">
           <div>
             <Title>Author Dashboard</Title>

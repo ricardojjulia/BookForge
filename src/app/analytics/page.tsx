@@ -18,11 +18,10 @@
 
 import { Container, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { AppShell } from "@/components/layout/app-shell";
+import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { RunsTable } from "@/components/analytics/runs-table";
 import { createClient } from "@/lib/supabase/server";
 import type { RunRecord, StageDuration, ScoreSnapshot } from "@/app/api/analytics/route";
-
-export const dynamic = "force-dynamic";
 
 // ── Telemetry parsing (duplicated from the API route so the server component
 //    can work without an internal HTTP round-trip) ────────────────────────────
@@ -179,6 +178,7 @@ export default async function AnalyticsPage() {
     <AppShell>
       <Container size="xl">
         <Stack gap="xl">
+          <DataFreshnessBanner routeKey="analytics:runs" fetchedAt={new Date().toISOString()} label="Analytics data" />
           <div>
             <Title>Run Analytics</Title>
             <Text c="dimmed">

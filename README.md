@@ -19,6 +19,7 @@ The product goal is not "rewrite this text." BookForge treats a manuscript as a 
 - **Auto-Review Wizard** — one-click autonomous workflow: summarise → blueprint → seven-lens critic → rewrite plan → rewrite execution → drift check → post-rewrite critic → export. Loops up to three times until all critics score ≥ 70. Resumable after interruption.
 - **AI provider routing** — LM Studio local models or cloud providers (OpenAI, Anthropic, Google) with execution mode control (auto / local / cloud)
 - **FINISHED status** — mark a specific export as the finished version; one-click download from the dashboard
+- **Freshness-aware operational UX** — key screens show data age, allow manual refresh, and attempt one forced refresh for expired snapshots
 
 ## Roadmap — Features in Active Development
 

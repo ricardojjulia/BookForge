@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.3 - 2026-06-01
+
+### Reliability and Freshness
+
+- Replaced corrupted architecture document with a clean software-factory aligned architecture source of truth.
+- Added shared freshness policy helper (`fresh`, `stale`, `expired`) with 24h/48h thresholds.
+- Added reusable freshness banner with manual refresh and one-shot forced refresh behavior for expired snapshots.
+- Integrated freshness banner into key routes: dashboard, book dashboard, rewrite plan, final manuscript, analytics.
+- Removed duplicate delayed `router.refresh()` burst in Studio Actions to reduce API pressure and transient fetch failures.
+
+### Software Factory Governance
+
+- Added detailed phased execution log at `docs/SOFTWARE_FACTORY.md`.
+- Added live engineering backlog at `docs/TODO.md`.
+- Added domain decision record for admin-first and course-aware evolution at `docs/ADR-0001-admin-course-domain.md`.
+
 ## 0.3.0 - (planned)
 
 - Manuscript search — full-text search across all chapters and scenes.
