@@ -22,6 +22,10 @@ Last updated: 2026-06-01
 - [x] Surface refresh telemetry aggregation on analytics page (last 24h).
 - [x] Add freshness telemetry filters (24h/7d and route) and mini trend visualization.
 - [x] Add dedicated paginated freshness reliability API endpoint for scalable drilldown views.
+- [x] Add cursor-based drilldown filters (`eventName`, `status`) to freshness analytics endpoint.
+- [x] Add freshness reliability SLO cards (success/failure/forced rates with thresholds).
+- [x] Add retention cleanup policy for freshness telemetry (`cleanup_freshness_events`).
+- [x] Add critical failure alert hooks (`repeated_refresh_failures`, `forced_refresh_loop`).
 
 ## Domain Shift (Admin + Courses)
 

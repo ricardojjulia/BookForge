@@ -2,6 +2,7 @@ import type { FreshnessStatus } from "@/lib/freshness/policy";
 import type { FreshnessRefreshReason, FreshnessTelemetryEventName } from "@/lib/freshness/telemetry";
 
 export type FreshnessEventRow = {
+  id?: string;
   event_name: FreshnessTelemetryEventName;
   route_key: string;
   status: FreshnessStatus;
@@ -9,6 +10,19 @@ export type FreshnessEventRow = {
   age_ms: number | null;
   error: string | null;
   occurred_at: string;
+};
+
+export type FreshnessAlertReason = "repeated_refresh_failures" | "forced_refresh_loop";
+export type FreshnessAlertSeverity = "warning" | "critical";
+
+export type FreshnessAlertRow = {
+  id: string;
+  route_key: string;
+  reason: FreshnessAlertReason;
+  severity: FreshnessAlertSeverity;
+  details: Record<string, unknown> | null;
+  created_at: string;
+  resolved_at: string | null;
 };
 
 export type FreshnessRouteSummary = {

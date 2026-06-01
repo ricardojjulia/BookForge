@@ -33,6 +33,8 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Freshness UX foundation on key pages with stale/expired messaging and manual refresh controls.
 - Freshness telemetry pipeline: lifecycle events emitted from UI and received by `/api/telemetry/freshness` for operational logging.
 - Freshness automated test coverage: policy threshold math and banner refresh lifecycle behavior (manual and forced fallback).
+- Freshness reliability analytics: dedicated `/api/analytics/freshness` endpoint with cursor drilldown, route/event/status filters, and paginated row inspection.
+- Freshness SLO reporting and alerting: success/failure/forced-rate thresholds plus alert generation for repeated failures and forced-refresh loops.
 - Software-factory execution artifacts: phased execution log, engineering TODO, and admin/course ADR.
 
 ## Known Limits
@@ -41,7 +43,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Long AI jobs are still request-bound; no durable background worker yet.
 - KPF/KCB support is best-effort.
 - Automated test coverage is minimal.
-- Freshness telemetry currently logs through a server sink; analytics dashboarding for these events is not yet implemented.
+- Freshness telemetry cleanup scheduling is currently function-based (`cleanup_freshness_events`) and still needs cron/job orchestration in production environments.
 
 ## What Is Next
 

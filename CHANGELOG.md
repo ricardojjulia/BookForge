@@ -15,6 +15,12 @@
 - Added analytics page freshness reliability section (24h event counts, route-level success/failure rates, latest failures).
 - Added interactive freshness analytics filters (24h/7d + route) and mini trend bars for quick reliability signal checks.
 - Added dedicated `GET /api/analytics/freshness` endpoint with pagination (`limit`/`offset`) and drilldown filters (`window`, `routeKey`) for scalable reliability analytics.
+- Upgraded freshness analytics endpoint to cursor-based pagination and deeper drilldown filters (`eventName`, `status`) for large result sets.
+- Added row-level freshness event drilldown table and active alert feed in analytics telemetry panel.
+- Added lightweight reliability SLO cards with thresholds: success rate (>=95%), failure rate (<=5%), forced refresh rate (<=10%).
+- Added retention cleanup policy via `cleanup_freshness_events(retention_days int default 90)`.
+- Added observability hooks that create alerts for repeated refresh failures and forced-refresh loops.
+- Added safety migration to ensure `freshness_events` table exists when local migration history drifts.
 
 ### Software Factory Governance
 
