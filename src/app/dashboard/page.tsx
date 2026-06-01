@@ -162,6 +162,11 @@ export default async function DashboardPage() {
                       Download {finishedExport.format.toUpperCase()}
                     </Button>
                   )}
+                  {isFinished && (
+                    <Button component="a" href={`/books/${book.id}/publishing-lab`} color="orange" variant="light">
+                      Publishing Lab
+                    </Button>
+                  )}
                   <Group mt={isFinished ? "xs" : "sm"}>
                     <Button component="a" href={`/books/${book.id}`} variant={isFinished ? "subtle" : "light"} color="grape">
                       {isFinished ? "Continue editing" : "Continue Editing"}

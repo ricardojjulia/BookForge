@@ -339,6 +339,9 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
             <Link href={`/books/${bookId}/abridgement`} style={{ textDecoration: "none" }}>
               <Button size="xs" color="teal" variant="light">Abridged Edition</Button>
             </Link>
+            <Link href={`/books/${bookId}/publishing-lab`} style={{ textDecoration: "none" }}>
+              <Button size="xs" color="orange" variant="light">Publishing Lab</Button>
+            </Link>
           </Group>
           <BookActions
             bookId={bookId}
