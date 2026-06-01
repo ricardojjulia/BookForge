@@ -16,13 +16,14 @@
  * lives in the expandable RunDetailPanel inside RunsTable.
  */
 
-import { Container, Group, Paper, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
+import { Container, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { AppShell } from "@/components/layout/app-shell";
 import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { RunsTable } from "@/components/analytics/runs-table";
+import { FreshnessTelemetryPanel } from "@/components/analytics/freshness-telemetry-panel";
 import { createClient } from "@/lib/supabase/server";
 import type { RunRecord, StageDuration, ScoreSnapshot } from "@/app/api/analytics/route";
-import { summarizeFreshnessEvents, type FreshnessEventRow } from "@/lib/freshness/analytics";
+import type { FreshnessEventRow } from "@/lib/freshness/analytics";
 
 // ── Telemetry parsing (duplicated from the API route so the server component
 //    can work without an internal HTTP round-trip) ────────────────────────────
@@ -120,7 +121,7 @@ export default async function AnalyticsPage() {
     .limit(200);
 
   const freshnessWindow = new Date();
-  freshnessWindow.setHours(freshnessWindow.getHours() - 24);
+  freshnessWindow.setDate(freshnessWindow.getDate() - 7);
   const freshnessWindowStart = freshnessWindow.toISOString();
   const { data: freshnessRows } = await supabase
     .from("freshness_events")
@@ -128,9 +129,7 @@ export default async function AnalyticsPage() {
     .eq("user_id", user.id)
     .gte("occurred_at", freshnessWindowStart)
     .order("occurred_at", { ascending: false })
-    .limit(500);
-
-  const freshnessSummary = summarizeFreshnessEvents((freshnessRows ?? []) as FreshnessEventRow[]);
+    .limit(5000);
 
   // Build typed RunRecord[] with derived telemetry metrics
   const runs: RunRecord[] = (jobs ?? []).map((job) => {
@@ -230,75 +229,10 @@ export default async function AnalyticsPage() {
             />
           </SimpleGrid>
 
-          <div>
-            <Group justify="space-between" mb="sm">
-              <Text fw={600}>Freshness Telemetry (Last 24h)</Text>
-              <Text size="xs" c="dimmed" pr="md">
-                {freshnessSummary.totalEvents} event(s) captured
-              </Text>
-            </Group>
-
-            <SimpleGrid cols={{ base: 2, sm: 4 }} mb="md">
-              <MetricCard
-                label="Refresh Attempts"
-                value={String(freshnessSummary.byEvent.freshness_refresh_attempt)}
-              />
-              <MetricCard
-                label="Refresh Success"
-                value={String(freshnessSummary.byEvent.freshness_refresh_success)}
-              />
-              <MetricCard
-                label="Refresh Failed"
-                value={String(freshnessSummary.byEvent.freshness_refresh_failed)}
-              />
-              <MetricCard
-                label="Forced Triggered"
-                value={String(freshnessSummary.byEvent.freshness_forced_refresh_triggered)}
-              />
-            </SimpleGrid>
-
-            {freshnessSummary.routes.length > 0 ? (
-              <Table withTableBorder withColumnBorders striped fz="sm">
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Route</Table.Th>
-                    <Table.Th>Total Events</Table.Th>
-                    <Table.Th>Attempts</Table.Th>
-                    <Table.Th>Success</Table.Th>
-                    <Table.Th>Failed</Table.Th>
-                    <Table.Th>Forced</Table.Th>
-                    <Table.Th>Success Rate</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {freshnessSummary.routes.slice(0, 8).map((route) => (
-                    <Table.Tr key={route.routeKey}>
-                      <Table.Td>{route.routeKey}</Table.Td>
-                      <Table.Td>{route.total}</Table.Td>
-                      <Table.Td>{route.attempts}</Table.Td>
-                      <Table.Td>{route.successes}</Table.Td>
-                      <Table.Td>{route.failures}</Table.Td>
-                      <Table.Td>{route.forcedTriggers}</Table.Td>
-                      <Table.Td>{route.successRate !== null ? `${route.successRate}%` : "—"}</Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            ) : (
-              <Text size="sm" c="dimmed">No freshness telemetry in the last 24 hours yet.</Text>
-            )}
-
-            {freshnessSummary.latestFailures.length > 0 && (
-              <Stack gap={4} mt="sm">
-                <Text size="sm" fw={600}>Latest refresh failures</Text>
-                {freshnessSummary.latestFailures.map((failure, index) => (
-                  <Text size="xs" c="dimmed" key={`${failure.routeKey}:${failure.occurredAt}:${index}`}>
-                    {new Date(failure.occurredAt).toLocaleString()} • {failure.routeKey} • {failure.error}
-                  </Text>
-                ))}
-              </Stack>
-            )}
-          </div>
+          <FreshnessTelemetryPanel
+            rows={(freshnessRows ?? []) as FreshnessEventRow[]}
+            fetchedAt={new Date().toISOString()}
+          />
 
           {/* Per-run breakdown */}
           <div>

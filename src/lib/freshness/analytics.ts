@@ -33,6 +33,82 @@ export type FreshnessSummary = {
   }>;
 };
 
+export type FreshnessWindowHours = 24 | 168;
+
+export type FreshnessTrendBucket = {
+  label: string;
+  count: number;
+};
+
+export function filterFreshnessEvents(
+  rows: FreshnessEventRow[],
+  input: {
+    windowHours: FreshnessWindowHours;
+    routeKey?: string | null;
+    asOf?: Date;
+  },
+) {
+  const asOf = input.asOf ?? new Date();
+  const start = new Date(asOf);
+  start.setHours(start.getHours() - input.windowHours);
+
+  return rows.filter((row) => {
+    const occurredAt = new Date(row.occurred_at);
+    if (!Number.isFinite(occurredAt.getTime())) return false;
+    if (occurredAt.getTime() < start.getTime() || occurredAt.getTime() > asOf.getTime()) return false;
+    if (input.routeKey && row.route_key !== input.routeKey) return false;
+    return true;
+  });
+}
+
+export function buildFreshnessTrend(
+  rows: FreshnessEventRow[],
+  input: {
+    windowHours: FreshnessWindowHours;
+    asOf?: Date;
+  },
+): FreshnessTrendBucket[] {
+  const asOf = input.asOf ?? new Date();
+
+  if (input.windowHours === 24) {
+    const bucketSizeHours = 4;
+    const buckets = Array.from({ length: 6 }, (_, index) => {
+      const end = new Date(asOf);
+      end.setHours(end.getHours() - (5 - index) * bucketSizeHours);
+      const start = new Date(end);
+      start.setHours(start.getHours() - bucketSizeHours);
+      const label = `${start.getHours().toString().padStart(2, "0")}-${end.getHours().toString().padStart(2, "0")}`;
+      return { start, end, label, count: 0 };
+    });
+
+    for (const row of rows) {
+      const occurredAt = new Date(row.occurred_at);
+      const match = buckets.find((bucket) => occurredAt.getTime() > bucket.start.getTime() && occurredAt.getTime() <= bucket.end.getTime());
+      if (match) match.count += 1;
+    }
+
+    return buckets.map(({ label, count }) => ({ label, count }));
+  }
+
+  const buckets = Array.from({ length: 7 }, (_, index) => {
+    const end = new Date(asOf);
+    end.setDate(end.getDate() - (6 - index));
+    end.setHours(23, 59, 59, 999);
+    const start = new Date(end);
+    start.setHours(0, 0, 0, 0);
+    const label = start.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return { start, end, label, count: 0 };
+  });
+
+  for (const row of rows) {
+    const occurredAt = new Date(row.occurred_at);
+    const match = buckets.find((bucket) => occurredAt.getTime() >= bucket.start.getTime() && occurredAt.getTime() <= bucket.end.getTime());
+    if (match) match.count += 1;
+  }
+
+  return buckets.map(({ label, count }) => ({ label, count }));
+}
+
 const EVENT_NAMES: FreshnessTelemetryEventName[] = [
   "freshness_refresh_attempt",
   "freshness_refresh_success",

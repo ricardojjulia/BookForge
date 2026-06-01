@@ -20,6 +20,7 @@ Last updated: 2026-06-01
 - [x] Add unit tests for stale/expired threshold calculations.
 - [x] Add integration-style component tests for manual refresh and force-refresh behavior.
 - [x] Surface refresh telemetry aggregation on analytics page (last 24h).
+- [x] Add freshness telemetry filters (24h/7d and route) and mini trend visualization.
 
 ## Domain Shift (Admin + Courses)
 

@@ -13,6 +13,7 @@
 - Added Vitest-based automated coverage for freshness policy threshold math and banner lifecycle behavior (manual refresh + forced refresh failure fallback).
 - Added persistent freshness telemetry table (`freshness_events`) with RLS and migration-backed indexes.
 - Added analytics page freshness reliability section (24h event counts, route-level success/failure rates, latest failures).
+- Added interactive freshness analytics filters (24h/7d + route) and mini trend bars for quick reliability signal checks.
 
 ### Software Factory Governance
 
