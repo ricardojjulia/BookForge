@@ -98,3 +98,4 @@ Acceptance:
 - 2026-06-01: Completed High-finding architecture doc fix and rolled freshness UX to dashboard/book/rewrite/final/analytics routes.
 - 2026-06-01: Added ADR-0001 for admin/course-aware domain strategy and refreshed changelog/status/howto/readme docs.
 - 2026-06-01: Implemented freshness telemetry sink (`/api/telemetry/freshness`) and added Vitest coverage for freshness policy and banner lifecycle behavior.
+- 2026-06-01: Added durable `freshness_events` storage + analytics page 24h reliability section (event counts, route success rates, latest failures).

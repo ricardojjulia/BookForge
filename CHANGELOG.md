@@ -11,6 +11,8 @@
 - Removed duplicate delayed `router.refresh()` burst in Studio Actions to reduce API pressure and transient fetch failures.
 - Instrumented freshness telemetry lifecycle events in the banner (`attempt`, `success`, `failed`, `forced_triggered`) with a centralized server sink at `/api/telemetry/freshness`.
 - Added Vitest-based automated coverage for freshness policy threshold math and banner lifecycle behavior (manual refresh + forced refresh failure fallback).
+- Added persistent freshness telemetry table (`freshness_events`) with RLS and migration-backed indexes.
+- Added analytics page freshness reliability section (24h event counts, route-level success/failure rates, latest failures).
 
 ### Software Factory Governance
 

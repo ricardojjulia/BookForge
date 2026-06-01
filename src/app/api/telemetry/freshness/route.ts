@@ -32,10 +32,26 @@ export async function POST(request: Request) {
       data: { user },
     } = await supabase.auth.getUser();
 
-    console.info("[freshness-telemetry]", {
-      userId: user?.id ?? null,
-      ...event,
+    if (!user) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
+    const { error } = await supabase.from("freshness_events").insert({
+      user_id: user.id,
+      event_name: event.name,
+      route_key: event.routeKey,
+      status: event.status,
+      reason: event.reason ?? null,
+      age_ms: event.ageMs ?? null,
+      stale_after_hours: event.staleAfterHours ?? null,
+      force_after_hours: event.forceAfterHours ?? null,
+      error: event.error ?? null,
+      occurred_at: event.occurredAt ?? new Date().toISOString(),
     });
+
+    if (error) {
+      throw error;
+    }
 
     return NextResponse.json({ ok: true });
   } catch (error) {

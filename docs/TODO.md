@@ -19,6 +19,7 @@ Last updated: 2026-06-01
 - [x] Add refresh telemetry events and server sink for API reliability.
 - [x] Add unit tests for stale/expired threshold calculations.
 - [x] Add integration-style component tests for manual refresh and force-refresh behavior.
+- [x] Surface refresh telemetry aggregation on analytics page (last 24h).
 
 ## Domain Shift (Admin + Courses)
 
