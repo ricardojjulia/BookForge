@@ -113,15 +113,18 @@ Implementation components:
 
 ## 7. Reliability and Tooling
 
-Operational events to track:
+Operational events instrumented:
 - `freshness_refresh_attempt`
 - `freshness_refresh_success`
 - `freshness_refresh_failed`
 - `freshness_forced_refresh_triggered`
 
+Telemetry sink:
+- `POST /api/telemetry/freshness` (server-side operational logging).
+
 Quality gates:
-- Unit tests for freshness threshold math.
-- UI tests for stale/expired rendering and fallback behavior.
+- Unit tests for freshness threshold math (`src/lib/freshness/policy.test.ts`).
+- UI tests for stale/expired rendering and fallback behavior (`src/components/layout/data-freshness-banner.test.tsx`).
 - PR checklist item: avoid unnecessary route-wide `force-dynamic` usage.
 
 ## 8. Security and Access

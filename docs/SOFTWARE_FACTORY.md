@@ -66,8 +66,8 @@ Acceptance:
 
 ### Phase D — Tooling and Guardrails
 
-- [ ] Add telemetry schema for refresh lifecycle (`cache_hit`, `stale_hit`, `refresh_attempt`, `refresh_failed`).
-- [ ] Add test coverage for freshness math and UI thresholds.
+- [x] Add refresh telemetry instrumentation for lifecycle events (`freshness_refresh_attempt`, `freshness_refresh_success`, `freshness_refresh_failed`, `freshness_forced_refresh_triggered`).
+- [x] Add test coverage for freshness math and UI thresholds.
 - [x] Add engineering checklist to prevent accidental always-live fetch regressions.
 
 Acceptance:
@@ -97,3 +97,4 @@ Acceptance:
 - 2026-06-01: Created software-factory execution log and phased plan.
 - 2026-06-01: Completed High-finding architecture doc fix and rolled freshness UX to dashboard/book/rewrite/final/analytics routes.
 - 2026-06-01: Added ADR-0001 for admin/course-aware domain strategy and refreshed changelog/status/howto/readme docs.
+- 2026-06-01: Implemented freshness telemetry sink (`/api/telemetry/freshness`) and added Vitest coverage for freshness policy and banner lifecycle behavior.

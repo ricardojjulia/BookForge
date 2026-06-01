@@ -9,6 +9,8 @@
 - Added reusable freshness banner with manual refresh and one-shot forced refresh behavior for expired snapshots.
 - Integrated freshness banner into key routes: dashboard, book dashboard, rewrite plan, final manuscript, analytics.
 - Removed duplicate delayed `router.refresh()` burst in Studio Actions to reduce API pressure and transient fetch failures.
+- Instrumented freshness telemetry lifecycle events in the banner (`attempt`, `success`, `failed`, `forced_triggered`) with a centralized server sink at `/api/telemetry/freshness`.
+- Added Vitest-based automated coverage for freshness policy threshold math and banner lifecycle behavior (manual refresh + forced refresh failure fallback).
 
 ### Software Factory Governance
 

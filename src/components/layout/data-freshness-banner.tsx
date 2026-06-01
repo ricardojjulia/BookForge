@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Group, Text } from "@mantine/core";
 import { useRouter } from "next/navigation";
 import { evaluateFreshness, formatAge } from "@/lib/freshness/policy";
+import { emitFreshnessTelemetry } from "@/lib/freshness/telemetry";
 
 const STORAGE_PREFIX = "bookforge:freshness:";
 
@@ -47,16 +48,44 @@ export function DataFreshnessBanner({
     [forceAfterHours, referenceTime, staleAfterHours],
   );
 
+  function baseEvent() {
+    return {
+      routeKey,
+      label,
+      status: freshness.status,
+      ageMs: freshness.ageMs,
+      staleAfterHours,
+      forceAfterHours,
+    } as const;
+  }
+
   async function refreshNow(reason: "manual" | "forced") {
     setRefreshing(true);
     setRefreshError(null);
+    emitFreshnessTelemetry({
+      name: "freshness_refresh_attempt",
+      reason,
+      ...baseEvent(),
+    });
+
     try {
       const nowIso = new Date().toISOString();
       window.localStorage.setItem(storageKey, nowIso);
       router.refresh();
+      emitFreshnessTelemetry({
+        name: "freshness_refresh_success",
+        reason,
+        ...baseEvent(),
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Refresh failed.";
       setRefreshError(message);
+      emitFreshnessTelemetry({
+        name: "freshness_refresh_failed",
+        reason,
+        error: message,
+        ...baseEvent(),
+      });
       if (reason === "forced") {
         setRefreshError(`Forced refresh failed: ${message}. Showing last available snapshot.`);
       }
@@ -68,6 +97,11 @@ export function DataFreshnessBanner({
   useEffect(() => {
     if (freshness.status !== "expired" || hasAutoForced.current) return;
     hasAutoForced.current = true;
+    emitFreshnessTelemetry({
+      name: "freshness_forced_refresh_triggered",
+      reason: "forced",
+      ...baseEvent(),
+    });
     void refreshNow("forced");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [freshness.status]);

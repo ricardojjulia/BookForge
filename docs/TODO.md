@@ -16,9 +16,9 @@ Last updated: 2026-06-01
 
 ## Medium
 
-- [ ] Add refresh telemetry events and dashboard for API reliability.
-- [ ] Add unit tests for stale/expired threshold calculations.
-- [ ] Add integration tests for manual refresh and force-refresh behavior.
+- [x] Add refresh telemetry events and server sink for API reliability.
+- [x] Add unit tests for stale/expired threshold calculations.
+- [x] Add integration-style component tests for manual refresh and force-refresh behavior.
 
 ## Domain Shift (Admin + Courses)
 

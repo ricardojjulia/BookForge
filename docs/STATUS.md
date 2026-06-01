@@ -31,6 +31,8 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Collaboration panel (invite, roles).
 - Publishing Lab gateway: post-finish ultimate critic, consensus reporting, generated assets, and cover variants.
 - Freshness UX foundation on key pages with stale/expired messaging and manual refresh controls.
+- Freshness telemetry pipeline: lifecycle events emitted from UI and received by `/api/telemetry/freshness` for operational logging.
+- Freshness automated test coverage: policy threshold math and banner refresh lifecycle behavior (manual and forced fallback).
 - Software-factory execution artifacts: phased execution log, engineering TODO, and admin/course ADR.
 
 ## Known Limits
@@ -39,7 +41,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Long AI jobs are still request-bound; no durable background worker yet.
 - KPF/KCB support is best-effort.
 - Automated test coverage is minimal.
-- Freshness telemetry events are defined but not yet fully instrumented across routes.
+- Freshness telemetry currently logs through a server sink; analytics dashboarding for these events is not yet implemented.
 
 ## What Is Next
 
