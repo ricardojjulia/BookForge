@@ -18,6 +18,7 @@ Last updated: 2026-06-02
 - [x] Split chapter summaries into queue + worker handoff.
 - [x] Split Manuscript Blueprint generation into queue + worker handoff.
 - [x] Split Critic batch generation into queue + worker handoff.
+- [x] Split rewrite execution (main panel) into queue + worker handoff.
 - Design durable background processing for the remaining long-running AI workflows.
 - [x] Add a job-history screen so users can inspect queued, running, and completed work.
 - Establish the retry, cancellation, and visibility policy for those jobs.
