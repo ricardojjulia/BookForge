@@ -98,6 +98,12 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
     setCompletedStages(resumeFrom?.stages_completed);
     setRunning(true);
     setResumableJob(null);
+
+    void fetch(`/api/books/${bookId}/auto-review/process`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId: data.jobId, mode }),
+    });
   }
 
   function reset() {
@@ -143,6 +149,7 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
             mode={selected!}
             onDone={reset}
             completedStages={completedStages}
+            serverManaged
           />
         ) : (
           <Stack gap="md">

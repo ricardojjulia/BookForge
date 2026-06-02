@@ -148,9 +148,10 @@ type Props = {
   onDone: () => void;
   /** Stage IDs already completed in a prior run — pre-marked done and skipped. */
   completedStages?: string[];
+  serverManaged?: boolean;
 };
 
-export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, completedStages }: Props) {
+export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, completedStages, serverManaged = false }: Props) {
   const stages = buildStages();
   const preCompleted = new Set(completedStages || []);
   const [stageStates, setStageStates] = useState<StageState[]>(
@@ -504,6 +505,7 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
   }
 
   useEffect(() => {
+    if (serverManaged) return;
     if (runningRef.current) return;
     runningRef.current = true;
 
@@ -561,6 +563,52 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!serverManaged) return;
+
+    let cancelled = false;
+
+    const syncFromJob = async () => {
+      const res = await fetch(`/api/books/${bookId}/auto-review`);
+      const data = await res.json().catch(() => ({}));
+      const job = data.job as {
+        status?: string;
+        current_stage?: string;
+        stages_completed?: string[];
+        iteration?: number;
+        log?: Array<{ message?: string; stage?: string; iteration?: number; type?: string }>;
+        error?: string | null;
+        export_id?: string | null;
+      } | undefined;
+      if (cancelled || !job) return;
+
+      const completed = new Set(job.stages_completed || []);
+      setStageStates((prev) =>
+        prev.map((stage) => {
+          if (completed.has(stage.id)) return { ...stage, status: "done" };
+          if (job.current_stage === stage.id && job.status === "running") return { ...stage, status: "running" };
+          if (job.status === "failed" && job.current_stage === stage.id) return { ...stage, status: "failed", detail: job.error || "Failed" };
+          return { ...stage, status: "pending", detail: undefined };
+        }),
+      );
+      setLog((job.log || []).map((entry, index) => `[${index + 1}] ${entry.message || entry.stage || entry.type || "log"}`));
+      setIteration(job.iteration || 0);
+      setExportId(job.export_id || null);
+      setDone(job.status === "completed");
+      setFailed(job.status === "failed");
+      setErrorMsg(job.error || null);
+    };
+
+    void syncFromJob();
+    const interval = window.setInterval(() => {
+      void syncFromJob();
+    }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [bookId, serverManaged]);
 
   const doneCount = stageStates.filter((s) => s.status === "done" || s.status === "skipped").length;
   const progress = Math.round((doneCount / stages.length) * 100);

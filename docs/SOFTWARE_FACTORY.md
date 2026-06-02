@@ -97,6 +97,7 @@ Acceptance:
 
 ## Change Log (Factory)
 
+- 2026-06-02: Added a server worker route for auto-review so the wizard can enqueue work and monitor progress instead of orchestrating the stages itself.
 - 2026-06-02: Extended the heartbeat pattern to the full-book rewrite executor so paragraph-level rewrite jobs stay visible during long model calls.
 - 2026-06-02: Added persistent heartbeats for long-running analysis, summary, critic, and draft-generation routes so in-flight jobs stay visible during blocking model calls.
 - 2026-06-02: Completed the Phase 1 job-history visibility slice with summary cards and stale-running prioritization.
