@@ -45,6 +45,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - LM Studio model orchestrator: task-fit scoring, fallback selection, runtime limits.
 - FINISHED book status with signed export download.
 - Persistent AI Jobs panel.
+- AI Jobs History page with stale-running visibility and priority ordering.
 - Collaboration panel (invite, roles).
 - Publishing Lab gateway: post-finish ultimate critic, consensus reporting, generated assets, and cover variants.
 - Freshness UX foundation on key pages with stale/expired messaging and manual refresh controls.
@@ -56,7 +57,6 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 
 ## Known Limits
 
-- Job history is not yet exposed as a first-class screen.
 - Long AI jobs are still request-bound; no durable background worker yet.
 - KPF/KCB support is best-effort.
 - Automated test coverage is minimal.
@@ -64,9 +64,8 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 
 ## What Is Next
 
-1. Job history screen.
-2. Durable background processing for long-running AI workflows.
-3. Export styling and metadata controls.
-4. Improved collaborator workflows.
-5. Automated tests for parsing, rewrite planning math, and export assembly.
-6. Admin/course domain implementation from ADR-0001.
+1. Durable background processing for long-running AI workflows.
+2. Export styling and metadata controls.
+3. Improved collaborator workflows.
+4. Automated tests for parsing, rewrite planning math, and export assembly.
+5. Admin/course domain implementation from ADR-0001.

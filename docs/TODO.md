@@ -12,7 +12,7 @@ Last updated: 2026-06-02
 ### Phase 1 — Operational Maturity
 
 - Design durable background processing for long-running AI workflows.
-- Add a job-history screen so users can inspect queued, running, and completed work.
+- [x] Add a job-history screen so users can inspect queued, running, and completed work.
 - Establish the retry, cancellation, and visibility policy for those jobs.
 
 ### Phase 2 — Product Quality

@@ -97,6 +97,7 @@ Acceptance:
 
 ## Change Log (Factory)
 
+- 2026-06-02: Completed the Phase 1 job-history visibility slice with summary cards and stale-running prioritization.
 - 2026-06-02: Reframed the factory log for the v0.3.0 cycle and updated branch context.
 - 2026-06-01: Created software-factory execution log and phased plan.
 - 2026-06-01: Completed High-finding architecture doc fix and rolled freshness UX to dashboard/book/rewrite/final/analytics routes.

@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { Alert, Badge, Button, Container, Group, Paper, Progress, Stack, Table, Text, Title } from "@mantine/core";
+import { Alert, Badge, Button, Container, Group, Paper, Progress, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
 import { AppShell } from "@/components/layout/app-shell";
-import { extractJobProgress, getJobProgressDisplay, isStaleRunningJob } from "@/lib/ai/job-state";
+import { extractJobProgress, getJobProgressDisplay, isStaleRunningJob, summarizeRevisionJobs } from "@/lib/ai/job-state";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -16,6 +16,7 @@ type JobRow = {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  progress?: ReturnType<typeof extractJobProgress>;
 };
 
 export default async function JobsHistoryPage({ params }: { params: Promise<{ bookId: string }> }) {
@@ -51,6 +52,19 @@ export default async function JobsHistoryPage({ params }: { params: Promise<{ bo
     );
   }
 
+  const jobRows = ((jobs || []) as JobRow[]).map((job) => ({
+    ...job,
+    progress: extractJobProgress(job.settings),
+  }));
+  const summary = summarizeRevisionJobs(jobRows);
+  const sortedJobs = [...jobRows].sort((a, b) => {
+    const rankDiff = jobRank(a.status) - jobRank(b.status);
+    if (rankDiff !== 0) return rankDiff;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+  const staleRunningJob = sortedJobs.find((job) => isStaleRunningJob(job.status, job.progress || null));
+  const activeJob = sortedJobs.find((job) => job.status === "running" || job.status === "paused" || job.status === "queued");
+
   return (
     <AppShell>
       <Container size="xl">
@@ -73,8 +87,32 @@ export default async function JobsHistoryPage({ params }: { params: Promise<{ bo
           </Group>
         </Group>
 
+        <SimpleGrid cols={{ base: 2, md: 4 }} mb="xl">
+          <MetricCard label="Total jobs" value={summary.total} tone="gray" />
+          <MetricCard label="Active" value={summary.active} tone="grape" />
+          <MetricCard label="Stale running" value={summary.staleRunning} tone="orange" />
+          <MetricCard label="Failed" value={summary.failed} tone="red" />
+        </SimpleGrid>
+
+        {staleRunningJob ? (
+          <Alert color="orange" mb="md" title="Long-running job visibility">
+            <Text size="sm">
+              {staleRunningJob.progress?.taskName || humanizeMode(staleRunningJob.mode)} has not sent a heartbeat in a
+              while. Last unit: {staleRunningJob.progress?.currentUnit || "unknown"}. Check LM Studio, mark the job
+              failed, or start a replacement run if this one is stalled.
+            </Text>
+          </Alert>
+        ) : activeJob ? (
+          <Alert color="blue" mb="md" title="Most recent active job">
+            <Text size="sm">
+              {activeJob.progress?.taskName || humanizeMode(activeJob.mode)} is {activeJob.status || "unknown"} and
+              remains visible above completed history.
+            </Text>
+          </Alert>
+        ) : null}
+
         <Paper withBorder radius="md" p="xl" bg="white">
-          {!jobs?.length ? (
+          {!sortedJobs.length ? (
             <Alert color="gray">No AI jobs have been created for this book yet.</Alert>
           ) : (
             <Table striped highlightOnHover>
@@ -89,17 +127,16 @@ export default async function JobsHistoryPage({ params }: { params: Promise<{ bo
                 </tr>
               </thead>
               <tbody>
-                {(jobs as JobRow[]).map((job) => {
-                  const progress = extractJobProgress(job.settings);
-                  const { completed, total, percent } = getJobProgressDisplay(progress, job.status);
-                  const stale = isStaleRunningJob(job.status, progress);
+                {sortedJobs.map((job) => {
+                  const { completed, total, percent } = getJobProgressDisplay(job.progress || null, job.status);
+                  const stale = isStaleRunningJob(job.status, job.progress || null);
                   return (
                     <tr key={job.id}>
                       <td>
                         <Stack gap={2}>
-                          <Text fw={800}>{progress?.taskName || humanizeMode(job.mode)}</Text>
+                          <Text fw={800}>{job.progress?.taskName || humanizeMode(job.mode)}</Text>
                           <Text size="xs" c="dimmed">
-                            {progress?.currentUnit || job.id}
+                            {job.progress?.currentUnit || job.id}
                           </Text>
                         </Stack>
                       </td>
@@ -115,9 +152,9 @@ export default async function JobsHistoryPage({ params }: { params: Promise<{ bo
                         </Text>
                       </td>
                       <td>
-                        <Text size="sm">OK {progress?.successful || 0}</Text>
-                        <Text size="sm">Skipped {progress?.skipped || 0}</Text>
-                        <Text size="sm">Failed {progress?.failed || 0}</Text>
+                        <Text size="sm">OK {job.progress?.successful || 0}</Text>
+                        <Text size="sm">Skipped {job.progress?.skipped || 0}</Text>
+                        <Text size="sm">Failed {job.progress?.failed || 0}</Text>
                       </td>
                       <td>
                         <Text size="sm">{new Date(job.created_at).toLocaleString()}</Text>
@@ -164,6 +201,29 @@ function statusColor(status: string | null) {
   if (status === "paused") return "yellow";
   if (status === "failed" || status === "cancelled") return "red";
   return "gray";
+}
+
+function jobRank(status: string | null) {
+  if (status === "running") return 0;
+  if (status === "paused") return 1;
+  if (status === "queued") return 2;
+  if (status === "failed") return 3;
+  if (status === "cancelled") return 4;
+  if (status === "completed") return 5;
+  return 6;
+}
+
+function MetricCard({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return (
+    <Paper withBorder radius="md" p="md" bg="white">
+      <Text size="xs" c="dimmed">
+        {label}
+      </Text>
+      <Text fw={900} c={tone} fz={24}>
+        {value}
+      </Text>
+    </Paper>
+  );
 }
 
 function humanizeMode(mode: string) {
