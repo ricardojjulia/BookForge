@@ -1,28 +1,33 @@
 # Engineering TODO
 
-Last updated: 2026-06-01
+Last updated: 2026-06-02
 
-## v0.3.0 Kickoff (Scaffold)
+## v0.3.0 Plan
 
-## Critical
+### Phase 0 — Scope Lock
 
-- [ ] Lock v0.3.0 scope and success metrics.
-- [ ] Convert scope into prioritized epics with acceptance criteria.
-- [ ] Create implementation milestones and release checkpoint dates.
+- Define release goals, non-goals, and acceptance criteria.
+- Freeze the first release slice and the rollback boundary.
 
-## High
+### Phase 1 — Operational Maturity
 
-- [ ] Define durable job architecture for long-running AI workflows.
-- [ ] Define observability and alerting coverage targets for key user journeys.
-- [ ] Define collaboration and account-management UX improvements for v0.3.0.
+- Design durable background processing for long-running AI workflows.
+- Add a job-history screen so users can inspect queued, running, and completed work.
+- Establish the retry, cancellation, and visibility policy for those jobs.
 
-## Medium
+### Phase 2 — Product Quality
 
-- [ ] Map ADR-0001 entities to deliverable slices (API, UI, policy, telemetry).
-- [ ] Add test plan targets by layer (unit, integration, E2E) for v0.3.0 scope.
-- [ ] Add documentation/update checklist for each PR in this cycle.
+- Refine export styling and metadata controls.
+- Improve collaborator workflows where they still require manual coordination.
+- Expand tests around parsing, rewrite planning math, and export assembly.
 
-## Critical
+### Phase 3 — Admin/Course Delivery
+
+- Map accepted book artifacts into course assets.
+- Define admin controls and freshness SLAs by screen.
+- Split ADR-0001 into implementable slices with explicit dependencies.
+
+## Prior Cycle: Reliability and Freshness
 
 - [x] Rebuild `docs/ARCHITECTURE.md` to remove corrupted content.
 - [x] Implement freshness policy library and reusable banner.

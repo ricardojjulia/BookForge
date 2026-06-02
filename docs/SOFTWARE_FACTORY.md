@@ -1,99 +1,103 @@
 # Software Factory Execution Log
 
-Last updated: 2026-06-01
+Last updated: 2026-06-02
 Owner: Engineering
-Branch: feat/v0.2.2-creator-panels-resume-account
+Branch: feat/v0.3.0-next
 
 ## Mission
 
-Execute the reliability and workflow pivot work with traceable phases, explicit acceptance criteria, and fresh documentation.
+Execute the v0.3.0 software-factory cycle with traceable phases, explicit acceptance criteria, and fresh documentation.
 
 ## Scope
 
-- Fix all High findings from the 2026-06-01 assessment.
-- Implement stale-aware data UX with manual refresh and force-refresh policy.
-- Add tooling and process guardrails for reliability.
-- Refresh architecture/status/changelog/todo documentation.
+- Lock the v0.3.0 release slice.
+- Design durable background processing and job-history visibility.
+- Improve collaborator and export workflows.
+- Split the admin/course direction into implementable slices.
+- Keep status, TODO, and factory documentation in sync with delivery.
 
-## High Findings and Fix Ownership
+## v0.3.0 Workstreams
 
-1. Corrupted architecture document
+1. Release scope and milestones
 
 - Status: In progress
-- Owner: Docs/Platform
-- Deliverable: Clean `docs/ARCHITECTURE.md` as single source of truth.
+- Owner: Product + Engineering
+- Deliverable: Release goals, non-goals, and exit criteria for v0.3.0.
 
-1. Always-live fetch strategy increases fragility
+1. Operational maturity
 
 - Status: In progress
 - Owner: App Platform
-- Deliverable: Freshness tooling + route integration + reduced unconditional dynamic behavior.
+- Deliverable: Durable jobs, job-history UX, retry/cancel/visibility policy.
+
+1. Product quality
+
+- Status: Planned
+- Owner: App UI + Platform
+- Deliverable: Export metadata controls, collaborator workflow refinements, and test expansion.
+
+1. Admin/course delivery
+
+- Status: Planned
+- Owner: Product + Platform
+- Deliverable: ADR-0001 slices for course assets, admin controls, and freshness SLAs.
 
 ## Execution Phases
 
-### Phase A — Documentation Recovery (Blocker)
+### Phase A — Scope Lock (Blocker)
 
-- [x] Replace corrupted architecture document.
-- [x] Align `README.md`, `docs/STATUS.md`, and changelog language with actual behavior.
-
-Acceptance:
-
-- Architecture docs no longer contain unrelated content.
-- Data freshness model documented as policy.
-
-### Phase B — Freshness Contract + UX
-
-- [x] Create shared freshness policy module.
-- [x] Add reusable freshness banner with refresh controls.
-- [x] Add force-refresh threshold handling (`>= 48h`) with non-blocking fallback.
+- [ ] Confirm v0.3.0 scope and non-goals.
+- [ ] Define release checkpoints and owner map.
+- [ ] Freeze the first implementation slice.
 
 Acceptance:
 
-- User can see freshness age and refresh manually.
-- Expired snapshots trigger forced refresh attempt without blocking stale display.
+- Scope is small enough to ship incrementally.
+- Every slice has an owner and acceptance criteria.
 
-### Phase C — Key Route Rollout
+### Phase B — Operational Maturity
 
-- [x] Dashboard
-- [x] Book page
-- [x] Rewrite plan
-- [x] Final manuscript
-- [x] Analytics
+- [ ] Design durable background processing for long-running AI workflows.
+- [ ] Add a job-history screen for queued/running/completed work.
+- [ ] Define retry/cancel/visibility behavior.
 
 Acceptance:
 
-- All key pages surface freshness and recover gracefully from refresh failures.
+- Long-running work can be observed and managed.
+- Job state is visible without relying on request-bound completion.
 
-### Phase D — Tooling and Guardrails
+### Phase C — Product Quality
 
-- [x] Add refresh telemetry instrumentation for lifecycle events (`freshness_refresh_attempt`, `freshness_refresh_success`, `freshness_refresh_failed`, `freshness_forced_refresh_triggered`).
-- [x] Add test coverage for freshness math and UI thresholds.
-- [x] Add engineering checklist to prevent accidental always-live fetch regressions.
-
-Acceptance:
-
-- CI verifies freshness behavior.
-- Team has operational visibility on refresh failures.
-
-### Phase E — Admin + Course Domain Preparation
-
-- [x] Publish domain ADR for admin-first/course-aware workflow.
-- [ ] Define migration strategy from book-centric to hybrid domain.
+- [ ] Refine export styling and metadata controls.
+- [ ] Improve collaborator workflows where coordination is still manual.
+- [ ] Expand tests around parsing, rewrite planning math, and export assembly.
 
 Acceptance:
 
-- Approved domain map before feature implementation.
+- The highest-friction author workflows are easier to complete.
+- Test coverage increases in the riskier core paths.
+
+### Phase D — Admin + Course Delivery
+
+- [ ] Map accepted book artifacts into course assets.
+- [ ] Define admin controls and freshness SLAs by screen.
+- [ ] Split ADR-0001 into implementable slices.
+
+Acceptance:
+
+- The admin/course path is ready for implementation without re-litigating the domain model.
 
 ## Risk Register
 
-- Risk: Auth-dependent routes may still be dynamic even without explicit `force-dynamic`.
-- Mitigation: Introduce client freshness controls and route-level policy wrappers.
+- Risk: Scope creep can turn v0.3.0 into an unfocused release.
+- Mitigation: Freeze the first slice and require explicit acceptance criteria.
 
-- Risk: Force-refresh can loop if based on source update timestamps only.
-- Mitigation: Track snapshot refresh timestamp per route key and force once per stale window.
+- Risk: Long-running jobs can still be request-bound.
+- Mitigation: Favor a dedicated job-history contract and later durable worker integration.
 
 ## Change Log (Factory)
 
+- 2026-06-02: Reframed the factory log for the v0.3.0 cycle and updated branch context.
 - 2026-06-01: Created software-factory execution log and phased plan.
 - 2026-06-01: Completed High-finding architecture doc fix and rolled freshness UX to dashboard/book/rewrite/final/analytics routes.
 - 2026-06-01: Added ADR-0001 for admin/course-aware domain strategy and refreshed changelog/status/howto/readme docs.

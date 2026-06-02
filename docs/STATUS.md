@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-06-01.
+Last updated: 2026-06-02.
 
 ## v0.3.0 Kickoff (Scaffold)
 
@@ -15,7 +15,7 @@ Planning state:
 Initial target areas for v0.3.0:
 
 1. Production-hardening for reliability and observability.
-2. Durable background processing for long-running AI workflows.
+2. Durable background processing and job-history visibility for long-running AI workflows.
 3. Author and collaborator workflow quality-of-life improvements.
 4. Admin/course domain execution from ADR-0001.
 
@@ -56,7 +56,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 
 ## Known Limits
 
-- User account management (profile edit, password change, delete account) is not yet built — Supabase Auth handles login but there is no UI for account changes.
+- Job history is not yet exposed as a first-class screen.
 - Long AI jobs are still request-bound; no durable background worker yet.
 - KPF/KCB support is best-effort.
 - Automated test coverage is minimal.
@@ -64,8 +64,8 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 
 ## What Is Next
 
-1. User account management UI (highest priority — noted as a gap).
-2. Job history screen.
+1. Job history screen.
+2. Durable background processing for long-running AI workflows.
 3. Export styling and metadata controls.
 4. Improved collaborator workflows.
 5. Automated tests for parsing, rewrite planning math, and export assembly.
