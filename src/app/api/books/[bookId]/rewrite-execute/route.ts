@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { buildJobProgress, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
+import { buildJobProgress, createRevisionJobHeartbeat, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
 import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
@@ -396,6 +396,14 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         failed: 0,
         skipped,
       });
+      const heartbeat = createRevisionJobHeartbeat(supabase, job.id, jobSettings, {
+        currentUnit: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number} (${unitIndex + 1}/${eligibleUnits.length})`,
+        totalUnits: eligibleUnits.length,
+        attempted,
+        successful: rewritten,
+        failed: 0,
+        skipped,
+      });
 
       try {
         const contextPacket = buildRewriteContextPacket({
@@ -492,6 +500,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           ],
         });
         throw unitError;
+      } finally {
+        heartbeat.stop();
       }
     }
 

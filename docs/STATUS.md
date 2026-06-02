@@ -47,6 +47,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Persistent AI Jobs panel.
 - AI Jobs History page with stale-running visibility and priority ordering.
 - Long-running analysis, chapter summary, critic, and draft-generation routes now persist periodic job heartbeats during model calls.
+- The full-book rewrite executor now also persists periodic job heartbeats during model calls.
 - Collaboration panel (invite, roles).
 - Publishing Lab gateway: post-finish ultimate critic, consensus reporting, generated assets, and cover variants.
 - Freshness UX foundation on key pages with stale/expired messaging and manual refresh controls.
