@@ -110,15 +110,41 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
     }
     setLoadingAction(`retry:${job.id}`);
     try {
-      await fetchJson(
-        endpoint.path,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(endpoint.body),
-        },
-        "Retry failed units",
-      );
+      if (supportsServerManagedHandoff(endpoint.path)) {
+        const queued = await fetchJson<{ content?: { jobId?: string; revisionJobId?: string } }>(
+          endpoint.path,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...endpoint.body, serverManaged: true }),
+          },
+          "Queue retry failed units",
+        );
+        const handoffJobId = queued.content?.jobId || queued.content?.revisionJobId;
+        if (handoffJobId) {
+          void fetchJson(
+            endpoint.path,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ ...endpoint.body, jobId: handoffJobId }),
+            },
+            "Retry failed units worker",
+          ).then(() => loadJobs()).catch(() => {
+            // best effort; poller will surface failure state
+          });
+        }
+      } else {
+        await fetchJson(
+          endpoint.path,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(endpoint.body),
+          },
+          "Retry failed units",
+        );
+      }
       await loadJobs();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to retry failed units.");
@@ -135,15 +161,41 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
     }
     setLoadingAction(`resume-interrupted:${job.id}`);
     try {
-      await fetchJson(
-        endpoint.path,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(endpoint.body),
-        },
-        "Resume interrupted job",
-      );
+      if (supportsServerManagedHandoff(endpoint.path)) {
+        const queued = await fetchJson<{ content?: { jobId?: string; revisionJobId?: string } }>(
+          endpoint.path,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...endpoint.body, serverManaged: true }),
+          },
+          "Queue interrupted replacement",
+        );
+        const handoffJobId = queued.content?.jobId || queued.content?.revisionJobId;
+        if (handoffJobId) {
+          void fetchJson(
+            endpoint.path,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ ...endpoint.body, jobId: handoffJobId }),
+            },
+            "Resume interrupted worker",
+          ).then(() => loadJobs()).catch(() => {
+            // best effort; poller will surface failure state
+          });
+        }
+      } else {
+        await fetchJson(
+          endpoint.path,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(endpoint.body),
+          },
+          "Resume interrupted job",
+        );
+      }
       await loadJobs();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to resume interrupted job.");
@@ -381,6 +433,15 @@ function replacementEndpoint(bookId: string, job: PersistedAiJob) {
     if (lens) return { path: `/api/books/${bookId}/critic`, body: { lens, stage: stringSetting(job.settings, "stage") || "baseline" } };
   }
   return null;
+}
+
+function supportsServerManagedHandoff(path: string) {
+  return (
+    path.includes("/rewrite-execute") ||
+    path.includes("/chapters/summarize") ||
+    path.endsWith("/analyze") ||
+    path.includes("/critic/all")
+  );
 }
 
 function stringSetting(settings: Record<string, unknown> | null | undefined, key: string) {

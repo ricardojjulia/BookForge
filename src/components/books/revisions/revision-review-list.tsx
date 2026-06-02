@@ -144,30 +144,54 @@ export function RevisionReviewList({
     setLoadingId(`rewrite:${version.id}`);
     setMessage("");
     setError("");
+    const payload = {
+      paragraphId: version.paragraphId,
+      maxUnits: 1,
+      rewriteExistingDrafts: true,
+      rewriteAccepted: true,
+    };
     try {
-      const result = await fetchJson<{ content?: { rewritten?: number; skipped?: number } }>(
+      const queued = await fetchJson<{ content?: { revisionJobId?: string } }>(
         `/api/books/${bookId}/rewrite-execute`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            paragraphId: version.paragraphId,
-            maxUnits: 1,
-            rewriteExistingDrafts: true,
-            rewriteAccepted: true,
-          }),
+          body: JSON.stringify({ ...payload, serverManaged: true }),
         },
-        "Rewrite paragraph again",
+        "Queue paragraph rewrite",
       );
-      setMessage(
-        result.content?.rewritten
-          ? "New paragraph rewrite draft created."
-          : `No new draft was created.${result.content?.skipped ? ` Skipped ${result.content.skipped} unit(s).` : ""}`,
-      );
-      router.refresh();
+      const revisionJobId = queued.content?.revisionJobId;
+      if (!revisionJobId) {
+        throw new Error("Rewrite job was not created.");
+      }
+
+      setMessage("Paragraph rewrite queued.");
+
+      void fetchJson<{ content?: { rewritten?: number; skipped?: number } }>(
+        `/api/books/${bookId}/rewrite-execute`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...payload, jobId: revisionJobId }),
+        },
+        "Rewrite paragraph again worker",
+      )
+        .then((result) => {
+          setMessage(
+            result.content?.rewritten
+              ? "New paragraph rewrite draft created."
+              : `No new draft was created.${result.content?.skipped ? ` Skipped ${result.content.skipped} unit(s).` : ""}`,
+          );
+          router.refresh();
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : "Unable to rewrite paragraph again.");
+        })
+        .finally(() => {
+          setLoadingId(null);
+        });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to rewrite paragraph again.");
-    } finally {
       setLoadingId(null);
     }
   }

@@ -124,6 +124,7 @@ function buildItems(content: Record<string, unknown>): ActionItem[] {
 
 type RewriteResult = {
   content?: {
+    revisionJobId?: string;
     attempted?: number;
     rewritten?: number;
     skippedAccepted?: number;
@@ -164,47 +165,74 @@ function RewriteModal({
     if (!item) return;
     setRunning(true);
     setResult(null);
+    const payload = {
+      strategyId: strategy,
+      authorInstructions: instructions.trim() || undefined,
+      maxUnits: 500,
+      coverageMode: "normal" as const,
+      rewriteAccepted,
+    };
     try {
-      const data = await fetchJson<RewriteResult>(
+      const queued = await fetchJson<RewriteResult>(
         `/api/books/${bookId}/rewrite-execute`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            strategyId: strategy,
-            authorInstructions: instructions.trim() || undefined,
-            maxUnits: 500,
-            coverageMode: "normal",
-            rewriteAccepted,
-          }),
+          body: JSON.stringify({ ...payload, serverManaged: true }),
         },
-        "Guidance rewrite",
+        "Queue guidance rewrite",
       );
-      const attempted = data?.content?.attempted ?? 0;
-      const rewritten = data?.content?.rewritten ?? 0;
-      const skippedAccepted = data?.content?.skippedAccepted ?? 0;
-
-      if (attempted === 0 && skippedAccepted > 0 && !rewriteAccepted) {
-        setResult({
-          type: "warning",
-          message: `All ${skippedAccepted} paragraph${skippedAccepted !== 1 ? "s" : ""} already have accepted revisions. Enable "Re-run on accepted paragraphs" below and try again to rewrite existing content.`,
-        });
-      } else if (attempted === 0) {
-        setResult({
-          type: "warning",
-          message: "No eligible paragraphs found. All paragraphs may be locked, too short, or already have pending drafts.",
-        });
-      } else {
-        setResult({
-          type: "success",
-          message: `${rewritten} of ${attempted} paragraph${attempted !== 1 ? "s" : ""} queued for rewrite. Review drafts in the Revisions page.`,
-        });
-        onSuccess(item.key);
-        router.refresh();
+      const revisionJobId = queued?.content?.revisionJobId;
+      if (!revisionJobId) {
+        throw new Error("Rewrite job was not created.");
       }
+
+      setResult({
+        type: "success",
+        message: "Rewrite was queued and is now running in the background.",
+      });
+
+      void fetchJson<RewriteResult>(
+        `/api/books/${bookId}/rewrite-execute`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...payload, jobId: revisionJobId }),
+        },
+        "Guidance rewrite worker",
+      )
+        .then((data) => {
+          const attempted = data?.content?.attempted ?? 0;
+          const rewritten = data?.content?.rewritten ?? 0;
+          const skippedAccepted = data?.content?.skippedAccepted ?? 0;
+
+          if (attempted === 0 && skippedAccepted > 0 && !rewriteAccepted) {
+            setResult({
+              type: "warning",
+              message: `All ${skippedAccepted} paragraph${skippedAccepted !== 1 ? "s" : ""} already have accepted revisions. Enable "Re-run on accepted paragraphs" below and try again to rewrite existing content.`,
+            });
+          } else if (attempted === 0) {
+            setResult({
+              type: "warning",
+              message: "No eligible paragraphs found. All paragraphs may be locked, too short, or already have pending drafts.",
+            });
+          } else {
+            setResult({
+              type: "success",
+              message: `${rewritten} of ${attempted} paragraph${attempted !== 1 ? "s" : ""} queued for rewrite. Review drafts in the Revisions page.`,
+            });
+            onSuccess(item.key);
+            router.refresh();
+          }
+        })
+        .catch((err) => {
+          setResult({ type: "error", message: err instanceof Error ? err.message : "Rewrite failed." });
+        })
+        .finally(() => {
+          setRunning(false);
+        });
     } catch (err) {
       setResult({ type: "error", message: err instanceof Error ? err.message : "Rewrite failed." });
-    } finally {
       setRunning(false);
     }
   }

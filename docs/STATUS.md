@@ -54,6 +54,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Manuscript Blueprint generation now supports queue-first job creation with worker-resume processing.
 - Critic batch generation now supports queue-first job creation with worker-resume processing.
 - Rewrite execution now supports queue-first job creation with worker-resume processing in the main rewrite execution panel.
+- Guidance rewrites, revision-level rewrite-again actions, and persistent jobs retry/replacement flows now use queue handoff for queue-capable routes.
 - Collaboration panel (invite, roles).
 - Publishing Lab gateway: post-finish ultimate critic, consensus reporting, generated assets, and cover variants.
 - Freshness UX foundation on key pages with stale/expired messaging and manual refresh controls.
@@ -65,7 +66,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 
 ## Known Limits
 
-- The durable worker currently covers auto-review, planned draft generation, chapter summaries, Manuscript Blueprint generation, Critic batch generation, and rewrite execution from the main panel; remaining callers can still invoke request-bound execution directly.
+- The durable worker handoff now covers auto-review, planned draft generation, chapter summaries, Manuscript Blueprint generation, Critic batch generation, rewrite execution, and rewrite retry/replacement call sites in the UI.
 - KPF/KCB support is best-effort.
 - Automated test coverage is minimal.
 - Freshness telemetry cleanup scheduling is currently function-based (`cleanup_freshness_events`) and still needs cron/job orchestration in production environments.
