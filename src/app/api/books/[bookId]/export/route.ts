@@ -186,6 +186,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           includeBackMatter: options.includeBackMatter,
           useOriginalForLocked: options.useOriginalForLocked,
           abridgedMode: options.abridgedMode,
+          epubMetadata: options.epubMetadata || null,
+          pdfOptions: options.pdfOptions || null,
           approvedCutCount: approvedCuts?.count || 0,
           paragraphCount: paragraphs?.length || 0,
           exportedParagraphCount: exportParagraphs.length,

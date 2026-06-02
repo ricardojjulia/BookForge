@@ -14,6 +14,26 @@ type FinalManuscriptBuilderProps = {
    *  everything reviewable — if acceptedPercent is still < 90 they have
    *  hit the natural ceiling (short/structural paragraphs can't be rewritten). */
   pendingDraftCount: number;
+  initialDefaults?: {
+    format?: string;
+    sourceMode?: string;
+    includeFrontMatter?: boolean;
+    includeBackMatter?: boolean;
+    useOriginalForLocked?: boolean;
+    abridgedMode?: boolean;
+    epubMetadata?: {
+      language?: string;
+      publisher?: string;
+      copyright?: string;
+      description?: string;
+    } | null;
+    pdfOptions?: {
+      fontSize?: number;
+      lineGap?: number;
+      pageNumbers?: boolean;
+      pageSize?: "LETTER" | "A4";
+    } | null;
+  } | null;
 };
 
 type ExportResponse = {
@@ -43,22 +63,23 @@ export function FinalManuscriptBuilder({
   totalParagraphs,
   lockedParagraphs,
   pendingDraftCount,
+  initialDefaults,
 }: FinalManuscriptBuilderProps) {
   const router = useRouter();
-  const [format, setFormat] = useState("markdown");
-  const [sourceMode, setSourceMode] = useState("accepted");
-  const [includeFrontMatter, setIncludeFrontMatter] = useState(true);
-  const [includeBackMatter, setIncludeBackMatter] = useState(true);
-  const [useOriginalForLocked, setUseOriginalForLocked] = useState(true);
-  const [abridgedMode, setAbridgedMode] = useState(false);
-  const [epubLanguage, setEpubLanguage] = useState("en");
-  const [epubPublisher, setEpubPublisher] = useState("");
-  const [epubCopyright, setEpubCopyright] = useState("");
-  const [epubDescription, setEpubDescription] = useState("");
-  const [pdfFontSize, setPdfFontSize] = useState<number | "">(11.5);
-  const [pdfLineGap, setPdfLineGap] = useState<number | "">(3);
-  const [pdfPageNumbers, setPdfPageNumbers] = useState(true);
-  const [pdfPageSize, setPdfPageSize] = useState("LETTER");
+  const [format, setFormat] = useState(initialDefaults?.format || "markdown");
+  const [sourceMode, setSourceMode] = useState(initialDefaults?.sourceMode || "accepted");
+  const [includeFrontMatter, setIncludeFrontMatter] = useState(initialDefaults?.includeFrontMatter ?? true);
+  const [includeBackMatter, setIncludeBackMatter] = useState(initialDefaults?.includeBackMatter ?? true);
+  const [useOriginalForLocked, setUseOriginalForLocked] = useState(initialDefaults?.useOriginalForLocked ?? true);
+  const [abridgedMode, setAbridgedMode] = useState(initialDefaults?.abridgedMode ?? false);
+  const [epubLanguage, setEpubLanguage] = useState(initialDefaults?.epubMetadata?.language || "en");
+  const [epubPublisher, setEpubPublisher] = useState(initialDefaults?.epubMetadata?.publisher || "");
+  const [epubCopyright, setEpubCopyright] = useState(initialDefaults?.epubMetadata?.copyright || "");
+  const [epubDescription, setEpubDescription] = useState(initialDefaults?.epubMetadata?.description || "");
+  const [pdfFontSize, setPdfFontSize] = useState<number | "">(typeof initialDefaults?.pdfOptions?.fontSize === "number" ? initialDefaults.pdfOptions.fontSize : 11.5);
+  const [pdfLineGap, setPdfLineGap] = useState<number | "">(typeof initialDefaults?.pdfOptions?.lineGap === "number" ? initialDefaults.pdfOptions.lineGap : 3);
+  const [pdfPageNumbers, setPdfPageNumbers] = useState(initialDefaults?.pdfOptions?.pageNumbers ?? true);
+  const [pdfPageSize, setPdfPageSize] = useState(initialDefaults?.pdfOptions?.pageSize || "LETTER");
   const [loading, setLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [message, setMessage] = useState("");

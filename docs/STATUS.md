@@ -55,6 +55,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Critic batch generation now supports queue-first job creation with worker-resume processing.
 - Rewrite execution now supports queue-first job creation with worker-resume processing in the main rewrite execution panel.
 - Guidance rewrites, revision-level rewrite-again actions, and persistent jobs retry/replacement flows now use queue handoff for queue-capable routes.
+- Final manuscript export controls now persist EPUB/PDF metadata and style options in export records and prefill the builder from the latest export.
 - Collaboration panel (invite, roles).
 - Publishing Lab gateway: post-finish ultimate critic, consensus reporting, generated assets, and cover variants.
 - Freshness UX foundation on key pages with stale/expired messaging and manual refresh controls.
