@@ -15,6 +15,7 @@ Last updated: 2026-06-02
 - [x] Add rewrite-executor heartbeats for long-running AI workflows.
 - [x] Add auto-review worker route for durable background processing.
 - [x] Split planned draft generation into queue + worker handoff.
+- [x] Split chapter summaries into queue + worker handoff.
 - Design durable background processing for the remaining long-running AI workflows.
 - [x] Add a job-history screen so users can inspect queued, running, and completed work.
 - Establish the retry, cancellation, and visibility policy for those jobs.

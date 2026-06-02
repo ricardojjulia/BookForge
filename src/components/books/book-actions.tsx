@@ -647,6 +647,115 @@ export function BookActions({
     }
   }
 
+  async function runQueuedChapterSummaries(preflight: AiTaskPreflightData | null) {
+    const path = `/api/books/${bookId}/chapters/summarize`;
+    const totalUnits = Math.max(1, preflight?.expectedAiCalls || chapterCount || 1);
+    const estimatedSecondsPerCall = preflight?.estimatedSecondsPerCall || 30;
+    const startedAt = Date.now();
+
+    setLoading(path);
+    setOutput("");
+    setQueue({
+      currentTask: "Generate Chapter Summaries",
+      currentUnit: `Queued ${totalUnits} chapter summary call(s)`,
+      totalUnits,
+      completedUnits: 0,
+      successfulUnits: 0,
+      failedUnits: 0,
+      skippedUnits: 0,
+      startedAt,
+      estimatedSecondsPerCall,
+      elapsedSeconds: 0,
+      currentCallElapsedSeconds: 0,
+      currentCallProgress: 0.1,
+      nextCallSeconds: estimatedSecondsPerCall,
+      estimatedSecondsRemaining: totalUnits * estimatedSecondsPerCall,
+      estimatedProgress: true,
+      status: "running",
+    });
+
+    try {
+      const created = await fetchJson<{ content?: { jobId?: string; queued?: boolean; totalUnits?: number } }>(
+        path,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ serverManaged: true }),
+        },
+        "Queue chapter summary generation",
+      );
+
+      const jobId = created.content?.jobId;
+      if (!jobId) {
+        throw new Error("Chapter summary job was not created.");
+      }
+
+      setOutput(`Chapter summaries queued for ${totalUnits} chapter(s).`);
+      setQueue((current) => ({
+        ...current,
+        currentUnit: `Processing ${totalUnits} chapter summary call(s)`,
+        status: "running",
+        estimatedProgress: true,
+      }));
+
+      void fetchJson<{ content?: { summarized?: number; aiCallPlan?: Record<string, unknown> } }>(
+        path,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jobId }),
+        },
+        "Generate chapter summaries worker",
+      )
+        .then((result) => {
+          setOutput(formatResultMessage(path, result));
+          router.refresh();
+          setQueue((current) => ({
+            ...current,
+            currentUnit: "Complete",
+            completedUnits: current.totalUnits,
+            successfulUnits: current.totalUnits,
+            elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
+            currentCallElapsedSeconds: estimatedSecondsPerCall,
+            currentCallProgress: 1,
+            nextCallSeconds: 0,
+            estimatedSecondsRemaining: 0,
+            estimatedProgress: false,
+            status: "complete",
+          }));
+        })
+        .catch((error) => {
+          setOutput(JSON.stringify({ error: error instanceof Error ? error.message : "Chapter summary generation failed." }, null, 2));
+          setQueue((current) => ({
+            ...current,
+            failedUnits: Math.max(1, current.failedUnits),
+            completedUnits: Math.min(current.totalUnits, current.completedUnits + 1),
+            elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
+            currentCallProgress: 0,
+            nextCallSeconds: null,
+            estimatedProgress: false,
+            status: "cancelled",
+          }));
+        })
+        .finally(() => {
+          setLoading(null);
+        });
+    } catch (error) {
+      setOutput(JSON.stringify({ error: error instanceof Error ? error.message : "Chapter summary queue failed." }, null, 2));
+      setQueue((current) => ({
+        ...current,
+        failedUnits: Math.max(1, current.failedUnits),
+        completedUnits: Math.min(current.totalUnits, current.completedUnits + 1),
+        elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
+        currentCallProgress: 0,
+        nextCallSeconds: null,
+        estimatedProgress: false,
+        status: "cancelled",
+      }));
+      setLoading(null);
+    }
+  }
+
   useEffect(() => {
     if (queue.status !== "running" || !queue.startedAt || !queue.estimatedSecondsPerCall || !queue.estimatedProgress) {
       return;
@@ -816,6 +925,8 @@ export function BookActions({
           setPendingTask(null);
           if (task.kind === "auto-review") {
             void runAutoReview(task.preflight);
+          } else if (task.path.includes("/chapters/summarize")) {
+            void runQueuedChapterSummaries(task.preflight);
           } else if (task.path.includes("/generate-draft")) {
             void runQueuedGenerateDraft(task.preflight);
           } else {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { buildJobProgress, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
+import { buildJobProgress, createRevisionJobHeartbeat, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
 import { estimateAiCallPlan } from "@/lib/ai/call-planner";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
@@ -14,6 +14,8 @@ import { createClient } from "@/lib/supabase/server";
 const schema = z.object({
   chapterIds: z.array(z.string().uuid()).optional(),
   retryJobId: z.string().uuid().optional(),
+  jobId: z.string().uuid().optional(),
+  serverManaged: z.boolean().optional(),
 });
 
 type RetryJobSettings = {
@@ -97,42 +99,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     });
 
     const startedAt = new Date().toISOString();
-    const { data: job, error: jobError } = await supabase
-      .from("revision_jobs")
-      .insert({
-        book_id: bookId,
-        mode: "chapter_summaries",
-        status: "running",
-        settings: {
-          model,
-          preparedModel,
-          modelSource: modelSelection.source,
-          configuredModelFallbackOrder: modelSelection.configuredModels,
-          availableModels: modelSelection.availableModels,
-          usedLoadedFallback: modelSelection.usedLoadedFallback,
-          unit: "chapter",
-          chapterIds: body.chapterIds || null,
-          retryJobId: body.retryJobId || null,
-          progress: buildJobProgress({
-            taskName: "Generate chapter summaries",
-            currentUnit: chapterRows.length ? `Chapter 1 of ${chapterRows.length}` : "No chapters",
-            totalUnits: chapterRows.length,
-            attempted: 0,
-            successful: 0,
-            failed: 0,
-            skipped: 0,
-            startedAt,
-            estimatedSecondsPerUnit: plan.estimatedSecondsPerCall,
-          }),
-        },
-        prompt_snapshot: "Chapter summary extractor: one focused LM Studio call per chapter.",
-        created_by: user.id,
-        started_at: startedAt,
-      })
-      .select("id")
-      .single();
-    if (jobError) throw jobError;
-
+    let jobId = body.jobId || "";
+    let jobStatus = "running";
     let jobSettings: unknown = {
       model,
       preparedModel,
@@ -144,18 +112,87 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       chapterIds: body.chapterIds || null,
       retryJobId: body.retryJobId || null,
     };
+
+    if (jobId) {
+      const { data: existingJob, error: existingJobError } = await supabase
+        .from("revision_jobs")
+        .select("id,status,settings")
+        .eq("id", jobId)
+        .eq("book_id", bookId)
+        .eq("created_by", user.id)
+        .single();
+      if (existingJobError) throw existingJobError;
+      if (!existingJob) return NextResponse.json({ error: "Summary job not found." }, { status: 404 });
+      if (existingJob.status === "completed") return NextResponse.json({ ok: true, message: "Summary job already completed." });
+      if (existingJob.status === "failed") return NextResponse.json({ ok: true, message: "Summary job already failed." });
+      jobStatus = String(existingJob.status || "running");
+      jobSettings = existingJob.settings || jobSettings;
+    } else {
+      const status = body.serverManaged ? "queued" : "running";
+      const { data: job, error: jobError } = await supabase
+        .from("revision_jobs")
+        .insert({
+          book_id: bookId,
+          mode: "chapter_summaries",
+          status,
+          settings: {
+            model,
+            preparedModel,
+            modelSource: modelSelection.source,
+            configuredModelFallbackOrder: modelSelection.configuredModels,
+            availableModels: modelSelection.availableModels,
+            usedLoadedFallback: modelSelection.usedLoadedFallback,
+            unit: "chapter",
+            chapterIds: body.chapterIds || null,
+            retryJobId: body.retryJobId || null,
+            progress: buildJobProgress({
+              taskName: "Generate chapter summaries",
+              currentUnit: chapterRows.length ? `Chapter 1 of ${chapterRows.length}` : "No chapters",
+              totalUnits: chapterRows.length,
+              attempted: 0,
+              successful: 0,
+              failed: 0,
+              skipped: 0,
+              startedAt,
+              estimatedSecondsPerUnit: plan.estimatedSecondsPerCall,
+            }),
+          },
+          prompt_snapshot: "Chapter summary extractor: one focused LM Studio call per chapter.",
+          created_by: user.id,
+          started_at: status === "running" ? startedAt : null,
+        })
+        .select("id")
+        .single();
+      if (jobError) throw jobError;
+      jobId = job.id;
+      jobStatus = status;
+
+      if (body.serverManaged) {
+        return NextResponse.json({ content: { jobId, queued: true, totalUnits: chapterRows.length } });
+      }
+    }
+
     const results = [];
     let attempted = 0;
     let failed = 0;
 
+    if (jobStatus !== "running") {
+      await supabase
+        .from("revision_jobs")
+        .update({ status: "running", started_at: startedAt })
+        .eq("id", jobId)
+        .eq("book_id", bookId)
+        .eq("created_by", user.id);
+    }
+
     for (const [index, chapter] of chapterRows.entries()) {
-      const pauseStatus = await waitWhileRevisionJobPaused(supabase, job.id);
+      const pauseStatus = await waitWhileRevisionJobPaused(supabase, jobId);
       if (pauseStatus === "cancelled") break;
-      const currentStatus = await getRevisionJobStatus(supabase, job.id);
+      const currentStatus = await getRevisionJobStatus(supabase, jobId);
       if (currentStatus === "cancelled") break;
 
       attempted += 1;
-      jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+      jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
         currentUnit: `Chapter ${chapter.chapter_number}: ${chapter.title || `Chapter ${chapter.chapter_number}`} (${index + 1}/${chapterRows.length})`,
         totalUnits: chapterRows.length,
         attempted,
@@ -163,14 +200,14 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         failed,
         skipped: 0,
       });
-        const heartbeat = createRevisionJobHeartbeat(supabase, job.id, jobSettings, {
-          currentUnit: `Chapter ${chapter.chapter_number}: ${chapter.title || `Chapter ${chapter.chapter_number}`} (${index + 1}/${chapterRows.length})`,
-          totalUnits: chapterRows.length,
-          attempted,
-          successful: results.length,
-          failed,
-          skipped: 0,
-        });
+      const heartbeat = createRevisionJobHeartbeat(supabase, jobId, jobSettings, {
+        currentUnit: `Chapter ${chapter.chapter_number}: ${chapter.title || `Chapter ${chapter.chapter_number}`} (${index + 1}/${chapterRows.length})`,
+        totalUnits: chapterRows.length,
+        attempted,
+        successful: results.length,
+        failed,
+        skipped: 0,
+      });
       const title = chapter.title || `Chapter ${chapter.chapter_number}`;
       try {
         const prompt = buildChapterSummaryPrompt({ title, text: chapter.original_text || "" });
@@ -204,7 +241,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           summary,
           analysis: parsed,
         });
-        jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+        jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
           currentUnit: index + 1 >= chapterRows.length ? "Finalizing summaries" : `Chapter ${index + 2} of ${chapterRows.length}`,
           totalUnits: chapterRows.length,
           attempted,
@@ -221,7 +258,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           modelSource: modelSelection.source,
           configuredModels: modelSelection.configuredModels,
         });
-        jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+        jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
           currentUnit: `Failed at chapter ${chapter.chapter_number}`,
           totalUnits: chapterRows.length,
           attempted,
@@ -239,13 +276,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           ],
         });
         throw chapterError;
-        } finally {
-          heartbeat.stop();
+      } finally {
+        heartbeat.stop();
       }
     }
 
     const completedAt = new Date().toISOString();
-    const finalStatus = await getRevisionJobStatus(supabase, job.id);
+    const finalStatus = await getRevisionJobStatus(supabase, jobId);
     const completedStatus = finalStatus === "cancelled" ? "cancelled" : "completed";
     const { error: finalJobError } = await supabase
       .from("revision_jobs")
@@ -280,7 +317,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           }),
         },
       })
-      .eq("id", job.id);
+      .eq("id", jobId);
     if (finalJobError) throw finalJobError;
 
     return NextResponse.json({
