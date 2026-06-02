@@ -49,6 +49,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Long-running analysis, chapter summary, critic, and draft-generation routes now persist periodic job heartbeats during model calls.
 - The full-book rewrite executor now also persists periodic job heartbeats during model calls.
 - Auto-review now has a server worker route plus a monitor-only wizard flow, so the orchestration is no longer client-bound.
+- Planned draft generation now supports a queue-first handoff, so the initial request can create the job and the worker call can continue it asynchronously.
 - Collaboration panel (invite, roles).
 - Publishing Lab gateway: post-finish ultimate critic, consensus reporting, generated assets, and cover variants.
 - Freshness UX foundation on key pages with stale/expired messaging and manual refresh controls.
@@ -60,7 +61,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 
 ## Known Limits
 
-- The durable worker currently covers auto-review; the other long AI routes still run in request-bound handlers.
+- The durable worker currently covers auto-review and planned draft generation; the other long AI routes still run in request-bound handlers.
 - KPF/KCB support is best-effort.
 - Automated test coverage is minimal.
 - Freshness telemetry cleanup scheduling is currently function-based (`cleanup_freshness_events`) and still needs cron/job orchestration in production environments.

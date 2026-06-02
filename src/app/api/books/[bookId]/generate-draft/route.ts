@@ -25,6 +25,12 @@ type ArchitectureChapter = {
   partTitle?: string;
 };
 
+const schema = z.object({
+  jobId: z.string().uuid().optional(),
+  limit: z.number().int().min(1).max(5).optional(),
+  serverManaged: z.boolean().optional(),
+});
+
 function getErrorMessage(error: unknown, context: { model?: string; task?: string; modelSource?: string; configuredModels?: string[] } = {}) {
   const lmStudioMessage = getLmStudioErrorMessage(error, "", context);
   if (lmStudioMessage) return lmStudioMessage;
@@ -38,8 +44,8 @@ function getErrorMessage(error: unknown, context: { model?: string; task?: strin
 export async function POST(request: Request, { params }: { params: Promise<{ bookId: string }> }) {
   try {
     const { bookId } = await params;
-    const body = await request.json().catch(() => ({}));
-    const requestedLimit = Number(body?.limit || 3);
+    const body = schema.parse(await request.json().catch(() => ({})));
+    const requestedLimit = Number(body.limit || 3);
     const limit = Math.max(1, Math.min(5, Number.isFinite(requestedLimit) ? requestedLimit : 3));
 
     const supabase = await createClient();
@@ -116,6 +122,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     });
     const { client, model, preparedModel, modelSelection } = modelPlan;
     const generated: Array<{ chapterNumber: number; title: string | null; paragraphCount: number }> = [];
+    let jobId = body.jobId || "";
 
     const initialJobSettings = mergeJobSettings(
       {
@@ -140,33 +147,53 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       },
     );
 
-    const { data: job, error: jobError } = await supabase
-      .from("revision_jobs")
-      .insert({
-        book_id: bookId,
-        mode: "creation_draft_generation",
-        status: "running",
-        settings: initialJobSettings,
-        created_by: user.id,
-        started_at: new Date().toISOString(),
-      })
-      .select("id")
-      .single();
-    if (jobError) throw jobError;
-
     let currentJobSettings: unknown = initialJobSettings;
+
+    if (jobId) {
+      const { data: existingJob, error: existingJobError } = await supabase
+        .from("revision_jobs")
+        .select("id,status,settings")
+        .eq("id", jobId)
+        .eq("book_id", bookId)
+        .eq("created_by", user.id)
+        .single();
+      if (existingJobError) throw existingJobError;
+      if (!existingJob) return NextResponse.json({ error: "Draft job not found." }, { status: 404 });
+      if (existingJob.status === "completed") return NextResponse.json({ ok: true, message: "Draft job already completed." });
+      if (existingJob.status === "failed") return NextResponse.json({ ok: true, message: "Draft job already failed." });
+      currentJobSettings = existingJob.settings || initialJobSettings;
+    } else {
+      const { data: job, error: jobError } = await supabase
+        .from("revision_jobs")
+        .insert({
+          book_id: bookId,
+          mode: "creation_draft_generation",
+          status: "running",
+          settings: initialJobSettings,
+          created_by: user.id,
+          started_at: new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+      if (jobError) throw jobError;
+      jobId = job.id;
+
+      if (body.serverManaged) {
+        return NextResponse.json({ content: { jobId, queued: true, totalUnits: plannedChapters.length } });
+      }
+    }
     let successCount = 0;
 
     try {
       for (const chapter of plannedChapters) {
         const chapterLabel = `Chapter ${chapter.chapter_number}${chapter.title ? `: ${chapter.title}` : ""}`;
-        currentJobSettings = await updateRevisionJobProgress(supabase, job.id, currentJobSettings, {
+        currentJobSettings = await updateRevisionJobProgress(supabase, jobId, currentJobSettings, {
           currentUnit: chapterLabel,
           attempted: successCount,
           successful: successCount,
           totalUnits: plannedChapters.length,
         });
-        const heartbeat = createRevisionJobHeartbeat(supabase, job.id, currentJobSettings, {
+        const heartbeat = createRevisionJobHeartbeat(supabase, jobId, currentJobSettings, {
           currentUnit: chapterLabel,
           attempted: successCount,
           successful: successCount,
@@ -315,7 +342,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       }
 
       const remaining = Math.max(0, (chapters || []).filter((chapter) => chapter.status === "planned").length - generated.length);
-      currentJobSettings = await updateRevisionJobProgress(supabase, job.id, currentJobSettings, {
+      currentJobSettings = await updateRevisionJobProgress(supabase, jobId, currentJobSettings, {
         currentUnit: `${generated.length} chapter${generated.length === 1 ? "" : "s"} generated`,
         attempted: successCount,
         successful: successCount,
@@ -338,7 +365,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
             completedAt: new Date().toISOString(),
           }),
         })
-        .eq("id", job.id);
+        .eq("id", jobId);
 
       await supabase
         .from("creation_projects")
@@ -384,7 +411,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
           }),
           completed_at: new Date().toISOString(),
         })
-        .eq("id", job.id);
+        .eq("id", jobId);
       throw error;
     }
   } catch (error) {
