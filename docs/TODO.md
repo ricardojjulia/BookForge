@@ -2,6 +2,26 @@
 
 Last updated: 2026-06-01
 
+## v0.3.0 Kickoff (Scaffold)
+
+## Critical
+
+- [ ] Lock v0.3.0 scope and success metrics.
+- [ ] Convert scope into prioritized epics with acceptance criteria.
+- [ ] Create implementation milestones and release checkpoint dates.
+
+## High
+
+- [ ] Define durable job architecture for long-running AI workflows.
+- [ ] Define observability and alerting coverage targets for key user journeys.
+- [ ] Define collaboration and account-management UX improvements for v0.3.0.
+
+## Medium
+
+- [ ] Map ADR-0001 entities to deliverable slices (API, UI, policy, telemetry).
+- [ ] Add test plan targets by layer (unit, integration, E2E) for v0.3.0 scope.
+- [ ] Add documentation/update checklist for each PR in this cycle.
+
 ## Critical
 
 - [x] Rebuild `docs/ARCHITECTURE.md` to remove corrupted content.

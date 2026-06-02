@@ -2,6 +2,23 @@
 
 Last updated: 2026-06-01.
 
+## v0.3.0 Kickoff (Scaffold)
+
+Branch: `feat/v0.3.0-next`
+
+Planning state:
+
+- Scope definition in progress.
+- Epics and acceptance criteria pending confirmation.
+- Execution plan and milestone dates pending.
+
+Initial target areas for v0.3.0:
+
+1. Production-hardening for reliability and observability.
+2. Durable background processing for long-running AI workflows.
+3. Author and collaborator workflow quality-of-life improvements.
+4. Admin/course domain execution from ADR-0001.
+
 ## What Is Up
 
 BookForge AI is a working local-first manuscript studio covering the full author workflow from raw idea to finished export. The end-to-end loop is proven: concept → architecture → draft generation → Auto-Review (critic, rewrite, drift check, re-critic) → export.
