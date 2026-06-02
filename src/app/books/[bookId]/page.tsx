@@ -1,7 +1,10 @@
 import { Alert, Badge, Button, Container, Group, Paper, Progress, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { AppShell } from "@/components/layout/app-shell";
+import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { BookActions } from "@/components/books/book-actions";
+import { ManuscriptSearch } from "@/components/books/manuscript-search";
+import { VoiceCapturePanel } from "@/components/books/voice-capture-panel";
 import { ChapterSummaryReview } from "@/components/books/chapter-summary-review";
 import { ChapterSummaryViewer } from "@/components/books/chapter-summary-viewer";
 import { ChapterMetadataPanel } from "@/components/books/chapter-metadata-panel";
@@ -9,12 +12,16 @@ import { DeleteBookButton } from "@/components/books/delete-book-button";
 import { PersistentAiJobsPanel } from "@/components/books/jobs/persistent-ai-jobs-panel";
 import { BookInputsManager } from "@/components/books/inputs/book-inputs-manager";
 import { PassageLockManager } from "@/components/books/passage-lock-manager";
+import { CollaborationPanel } from "@/components/books/collaboration-panel";
 import { CriticComparisonPanel } from "@/components/books/reports/critic-comparison-panel";
 import { CriticReportsPanel } from "@/components/books/reports/critic-reports-panel";
 import { CriticScoreboard } from "@/components/books/reports/critic-scoreboard";
 import { DriftReportsPanel } from "@/components/books/reports/drift-reports-panel";
-import { HumanizedGuidancePanel } from "@/components/books/reports/humanized-guidance-panel";
+import { GuidanceWorkflowPanel } from "@/components/books/guidance/guidance-workflow-panel";
+import { AutoReviewWizard } from "@/components/books/auto-review/auto-review-wizard";
 import { PostRunQualityGate } from "@/components/books/rewrite/post-run-quality-gate";
+import { BookConceptPanel } from "@/components/books/book-concept-panel";
+import { ArchitectureRoadmapPanel } from "@/components/books/architecture-roadmap-panel";
 import { SceneEditorPanel } from "@/components/books/scene-editor-panel";
 import { StructureAuditPanel } from "@/components/books/structure-audit-panel";
 import { getBookAuthorDisplay } from "@/lib/books/status";
@@ -22,8 +29,6 @@ import { getRewriteReadiness, type RewriteReadiness } from "@/lib/rewrite/readin
 import type { RewriteWorkflowRow } from "@/lib/rewrite/workflows";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-
-export const dynamic = "force-dynamic";
 
 export default async function BookDashboardPage({ params }: { params: Promise<{ bookId: string }> }) {
   if (!hasSupabaseEnv()) {
@@ -58,6 +63,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
     { data: rewriteWorkflow },
     { data: rewritePlan },
     { data: latestDriftReport },
+    { data: creationProject },
   ] =
     await Promise.all([
       supabase.from("books").select("*").eq("id", bookId).single(),
@@ -68,7 +74,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         .order("chapter_number"),
       supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId),
       supabase.from("scenes").select("id", { count: "exact", head: true }).eq("book_id", bookId),
-      supabase.from("book_bibles").select("content,updated_at").eq("book_id", bookId).maybeSingle(),
+      supabase.from("book_bibles").select("content,updated_at,voice_profile").eq("book_id", bookId).maybeSingle(),
       supabase
         .from("author_notes")
         .select("creative_instructions,voice_guidance,worldview_notes,theological_alignment,forbidden_changes")
@@ -146,7 +152,24 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      supabase
+        .from("creation_projects")
+        .select("id,working_title,genre,target_audience,language,target_pages,tone")
+        .eq("created_book_id", bookId)
+        .maybeSingle(),
     ]);
+
+  const { data: creationPlanVersions } = creationProject
+    ? await supabase
+        .from("creation_plan_versions")
+        .select("version_type,content,accepted")
+        .eq("creation_project_id", creationProject.id)
+        .in("version_type", ["concept", "architecture"])
+        .eq("accepted", true)
+        .order("created_at", { ascending: false })
+    : { data: null };
+  const acceptedConcept = creationPlanVersions?.find((v) => v.version_type === "concept")?.content as Record<string, unknown> | null | undefined;
+  const acceptedArchitecture = creationPlanVersions?.find((v) => v.version_type === "architecture")?.content as Record<string, unknown> | null | undefined;
 
   if (error || !book) {
     return (
@@ -204,6 +227,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
   return (
     <AppShell>
       <Container size="xl">
+        <DataFreshnessBanner routeKey={`book:${bookId}:dashboard`} fetchedAt={new Date().toISOString()} label="Book dashboard data" />
         <Group justify="space-between" mb="xl" align="flex-start">
           <div>
             <Group mb="xs">
@@ -226,6 +250,25 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           <Metric label="Manuscript Blueprint" value={bible ? "Ready" : "Not generated"} />
           <Metric label="Critic reports" value={reports?.length || 0} />
         </SimpleGrid>
+
+        {creationProject && acceptedConcept && (
+          <BookConceptPanel
+            creationProject={creationProject}
+            concept={acceptedConcept}
+          />
+        )}
+
+        {creationProject && acceptedArchitecture && (
+          <ArchitectureRoadmapPanel
+            architecture={acceptedArchitecture}
+            chapters={chapters || []}
+            plannedChapterCount={plannedChapterCount}
+          />
+        )}
+
+        <Paper withBorder radius="md" p="md" bg="white" mb="xl">
+          <ManuscriptSearch bookId={bookId} />
+        </Paper>
 
         <WorkflowCommandCenter
           stage={commandCenter.stage}
@@ -267,21 +310,37 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           </Paper>
         )}
 
+        <VoiceCapturePanel
+          bookId={bookId}
+          chapters={(chapters || []).map((c) => ({ id: c.id, chapter_number: c.chapter_number, title: c.title ?? null }))}
+          existingProfile={(bible as { voice_profile?: unknown } | null)?.voice_profile as Record<string, unknown> | null}
+        />
+
         <Paper id="studio-actions" withBorder radius="md" p="xl" bg="white" mt="xl">
-          <Group justify="space-between" mb="lg" align="flex-start">
+          <Group justify="space-between" mb="sm" align="flex-start" wrap="nowrap">
             <div>
-              <Title order={2}>Studio Actions</Title>
-              <Text c="dimmed">
+              <Group gap="xs" mb={4}>
+                <Title order={2}>Studio Actions</Title>
+                <Badge color="grape" variant="light" size="sm">Local AI via LM Studio</Badge>
+              </Group>
+              <Text c="dimmed" size="sm">
                 Analyze, evaluate, revise, review, and export this manuscript from one controlled workflow.
               </Text>
             </div>
-            <Badge color="grape" variant="light">
-              Local AI via LM Studio
-            </Badge>
+            <AutoReviewWizard bookId={bookId} bookTitle={book.title} />
+          </Group>
+          <Group gap="xs" mb="lg">
+            <Link href={`/books/${bookId}/world`} style={{ textDecoration: "none" }}>
+              <Button size="xs" color="violet" variant="light">World Bible</Button>
+            </Link>
+            <Link href={`/books/${bookId}/read`} style={{ textDecoration: "none" }}>
+              <Button size="xs" color="cyan" variant="light">Beta Reader View</Button>
+            </Link>
             <Link href={`/books/${bookId}/abridgement`} style={{ textDecoration: "none" }}>
-              <Button color="teal" variant="light">
-                Abridged Edition
-              </Button>
+              <Button size="xs" color="teal" variant="light">Abridged Edition</Button>
+            </Link>
+            <Link href={`/books/${bookId}/publishing-lab`} style={{ textDecoration: "none" }}>
+              <Button size="xs" color="orange" variant="light">Publishing Lab</Button>
             </Link>
           </Group>
           <BookActions
@@ -293,9 +352,9 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           />
         </Paper>
 
-        <div style={{ marginTop: 24 }}>
+        <Stack mt="xl" gap={0}>
           <PersistentAiJobsPanel bookId={bookId} />
-        </div>
+        </Stack>
 
         <CriticReportsPanel bookId={bookId} reports={reports || []} />
 
@@ -320,11 +379,12 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           }
           acceptedParagraphs={acceptedParagraphs || 0}
           totalParagraphs={paragraphs || 0}
+          pendingDraftCount={pendingDrafts || 0}
         />
 
         <DriftReportsPanel reports={reports || []} />
 
-        <HumanizedGuidancePanel bookId={bookId} reports={reports || []} />
+        <GuidanceWorkflowPanel bookId={bookId} reports={reports || []} />
 
         <ChapterMetadataPanel chapters={chapters || []} paragraphs={paragraphRows || []} />
 
@@ -332,7 +392,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
 
         <SceneEditorPanel chapters={chapters || []} scenes={sceneRows || []} paragraphs={paragraphRows || []} />
 
-        <div style={{ marginTop: 24 }}>
+        <Stack mt="xl" gap={0}>
           <BookInputsManager
             bookId={bookId}
             book={book}
@@ -343,7 +403,14 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
             matterSections={matterSections || []}
             revisionInstructions={revisionInstructions || []}
           />
-        </div>
+        </Stack>
+
+        <Paper withBorder radius="md" p="xl" bg="white" mt="xl">
+          <Title order={2} mb="md">
+            Collaboration
+          </Title>
+          <CollaborationPanel bookId={bookId} />
+        </Paper>
 
         <Paper withBorder radius="md" p="xl" bg="white" mt="xl">
           <Title order={2} mb="md">
@@ -493,21 +560,21 @@ function getBookCommandCenter(input: {
 
   if (!input.hasBlueprint) {
     return {
-      stage: "Setup",
-      stageColor: "yellow",
-      guidance: "Generate the Manuscript Blueprint so rewrite, Critic, and export decisions share the same context.",
-      actionLabel: "Generate Blueprint",
-      actionHref: `/books/${input.bookId}`,
+      stage: "Draft ready",
+      stageColor: "blue",
+      guidance: "Your draft is ready. Run Auto-Review to analyze it, get critic feedback, and start improving — it generates the Blueprint automatically as its first step.",
+      actionLabel: "Run Auto-Review",
+      actionHref: `/books/${input.bookId}#studio-actions`,
     };
   }
 
   if (!input.hasRewritePlan || !input.rewriteWorkflowStarted) {
     return {
-      stage: "Planning",
+      stage: "Ready to rewrite",
       stageColor: "grape",
-      guidance: "Open Rewrite Architect, evaluate the model, generate the rewrite plan, and run a controlled sample batch.",
-      actionLabel: "Open Rewrite Architect",
-      actionHref: `/books/${input.bookId}/rewrite-plan`,
+      guidance: "Blueprint is in place. Run Auto-Review to generate a rewrite plan and begin improving the manuscript.",
+      actionLabel: "Run Auto-Review",
+      actionHref: `/books/${input.bookId}#studio-actions`,
     };
   }
 

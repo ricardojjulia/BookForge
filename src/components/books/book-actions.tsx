@@ -84,7 +84,7 @@ const autoReviewStrategies = [
   "humanized_literary",
   "clarity_readability",
   "emotional_depth",
-  "theology_worldview",
+  "contemporary_view",
   "creative_enhancement",
 ] as const;
 
@@ -598,14 +598,6 @@ export function BookActions({
           title="Prepare Context"
           description="Build reusable manuscript context before revision."
         >
-          <Button
-            color="red"
-            fullWidth
-            loading={loading === "preflight:auto-review" || loading === "auto-review"}
-            onClick={() => openPreflight("auto-review")}
-          >
-            Auto Review Full Book
-          </Button>
           <Button
             color="grape"
             fullWidth

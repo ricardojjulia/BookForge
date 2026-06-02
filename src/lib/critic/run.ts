@@ -99,7 +99,7 @@ export async function runCriticLens(input: {
     temperature: 0.3,
     top_p: settings.topP,
     messages: [{ role: "user", content: prompt }],
-    response_format: { type: "text" },
+    
   });
 
   const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({

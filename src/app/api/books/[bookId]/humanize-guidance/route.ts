@@ -38,7 +38,7 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
         "critic:continuity",
         "critic:character_depth",
         "critic:market_fit",
-        "critic:theology_worldview",
+        "critic:contemporary_view",
         "critic:revision_priorities",
         "rewrite_drift_check",
       ])
@@ -75,7 +75,7 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
       top_p: settings.topP,
       max_tokens: 3000,
       messages: [{ role: "user", content: buildHumanizeGuidancePrompt({ criticReports, driftReports }) }],
-      response_format: { type: "text" },
+      
     });
 
     const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({

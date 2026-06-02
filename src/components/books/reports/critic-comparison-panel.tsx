@@ -34,7 +34,7 @@ export function CriticComparisonPanel({
   const comparisons = buildCriticComparisons(reports);
   const regressions = comparisons.filter((item) => typeof item.delta === "number" && item.delta < 0);
   const priorityRegressions = regressions.filter((item) =>
-    ["continuity", "prose_quality", "theology_worldview", "character_depth"].includes(item.lens),
+    ["continuity", "prose_quality", "contemporary_view", "character_depth"].includes(item.lens),
   );
   const acceptedPercent = totalParagraphs ? Math.round((acceptedParagraphs / totalParagraphs) * 100) : 0;
   const readyForPostRewrite = totalParagraphs > 0 && acceptedPercent >= 80;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Badge,
@@ -17,8 +17,17 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { fetchJson } from "@/lib/http/fetch-json";
+
+type CloudProviderInfo = {
+  provider: string;
+  model: string | null;
+  executionMode: string;
+  usedForPlanning: boolean;
+  usedForRewrite: boolean;
+};
 
 type ModelStatusResponse = {
   connected: boolean;
@@ -27,6 +36,8 @@ type ModelStatusResponse = {
   contextWindowTokens: number;
   availableModels: string[];
   configuredModels: Array<{ key: string; label: string; model: string; available: boolean }>;
+  cloudProvider: CloudProviderInfo | null;
+  executionMode: string;
   warnings: string[];
 };
 
@@ -94,7 +105,7 @@ export function CreateBookWizard() {
   const [architecture, setArchitecture] = useState<ChapterArchitecture | null>(null);
   const [error, setError] = useState("");
 
-  async function runModelPreflight() {
+  const runModelPreflight = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -109,7 +120,14 @@ export function CreateBookWizard() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void runModelPreflight();
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [runModelPreflight]);
 
   async function acceptConceptAndGenerateArchitecture() {
     if (!creationProjectId || !concept) return;
@@ -216,8 +234,13 @@ export function CreateBookWizard() {
                 Build an approved plan first, then generate the draft in chapters and paragraph units. Target length is capped at 150 pages.
               </Text>
             </div>
-            <Badge color="grape" variant="light">
-              Local LM Studio
+            <Badge
+              color={status?.cloudProvider?.usedForPlanning ? "blue" : "grape"}
+              variant="light"
+            >
+              {status?.cloudProvider?.usedForPlanning
+                ? `${providerLabel(status.cloudProvider.provider)} · ${status.cloudProvider.model || "default model"}`
+                : "Local LM Studio"}
             </Badge>
           </Group>
 
@@ -270,7 +293,7 @@ export function CreateBookWizard() {
             onChange={(event) => setIdea(event.currentTarget.value)}
           />
           <Textarea
-            label="Worldview, theology, or forbidden changes"
+            label="Contemporary View or forbidden changes"
             minRows={3}
             placeholder="Optional boundaries: avoid prosperity-gospel tone, preserve grief tenderness, avoid academic language..."
             value={boundaries}
@@ -285,34 +308,61 @@ export function CreateBookWizard() {
             <div>
               <Title order={2}>Creation AI Strategy</Title>
               <Text c="dimmed">
-                Default is one loaded model for memory safety. Dual-role mode is sequential, so BookForge does not assume two large models can stay loaded together.
+                {status?.cloudProvider?.usedForPlanning
+                  ? `Concept and architecture passes will use ${providerLabel(status.cloudProvider.provider)}. Draft generation uses your execution mode setting.`
+                  : "Default is one loaded model for memory safety. Dual-role mode is sequential, so BookForge does not assume two large models can stay loaded together."}
               </Text>
             </div>
             <Button color="teal" variant="light" loading={loading} onClick={runModelPreflight}>
-              Check LM Studio Fit
+              {status?.cloudProvider?.usedForPlanning ? "Refresh Status" : "Check LM Studio Fit"}
             </Button>
           </Group>
 
-          <SegmentedControl
-            value={mode}
-            onChange={(value) => setMode(value as CreationMode)}
-            data={[
-              { label: "Single-model safe", value: "single_safe" },
-              { label: "Dual-role sequential", value: "dual_role_sequential" },
-            ]}
-          />
+          {!(status?.cloudProvider?.usedForPlanning) && (
+            <SegmentedControl
+              value={mode}
+              onChange={(value) => setMode(value as CreationMode)}
+              data={[
+                { label: "Single-model safe", value: "single_safe" },
+                { label: "Dual-role sequential", value: "dual_role_sequential" },
+              ]}
+            />
+          )}
 
           {error && <Alert color="red">{error}</Alert>}
           {status && (
             <SimpleGrid cols={{ base: 1, md: 4 }}>
-              <Metric label="LM Studio" value={status.connected ? "Connected" : "Disconnected"} ready={status.connected} />
-              <Metric label="Available models" value={status.availableModels.length} ready={status.availableModels.length > 0} />
-              <Metric label="Recommended mode" value={recommendedMode === "dual_role_sequential" ? "Dual-role" : "Single"} ready />
-              <Metric label="Context window" value={status.contextWindowTokens.toLocaleString()} ready />
+              {status.cloudProvider?.usedForPlanning ? (
+                <>
+                  <Metric label="Provider" value={providerLabel(status.cloudProvider.provider)} ready />
+                  <Metric label="Model" value={status.cloudProvider.model || "default"} ready />
+                  <Metric label="Mode" value={status.cloudProvider.executionMode} ready />
+                  <Metric label="LM Studio" value={status.connected ? "Also connected" : "Not required"} ready={status.connected} />
+                </>
+              ) : (
+                <>
+                  <Metric label="LM Studio" value={status.connected ? "Connected" : "Disconnected"} ready={status.connected} />
+                  <Metric label="Available models" value={status.availableModels.length} ready={status.availableModels.length > 0} />
+                  <Metric label="Recommended mode" value={recommendedMode === "dual_role_sequential" ? "Dual-role" : "Single"} ready />
+                  <Metric label="Context window" value={status.contextWindowTokens.toLocaleString()} ready />
+                </>
+              )}
             </SimpleGrid>
           )}
 
-          {status?.warnings?.length ? (
+          {status?.cloudProvider && !status.cloudProvider.usedForPlanning && (
+            <Alert color="blue" variant="light">
+              <Text size="sm">
+                <strong>{providerLabel(status.cloudProvider.provider)}</strong> is configured but execution mode is set to <strong>Local</strong> — creation will use LM Studio.{" "}
+                <Text component={Link} href="/settings" size="sm" c="blue" td="underline">
+                  Change execution mode in Settings
+                </Text>{" "}
+                to Auto or Cloud to use {providerLabel(status.cloudProvider.provider)} for planning.
+              </Text>
+            </Alert>
+          )}
+
+          {!status?.cloudProvider?.usedForPlanning && status?.warnings?.length ? (
             <Alert color="yellow" variant="light">
               {status.warnings.slice(0, 3).map((warning) => (
                 <Text key={warning} size="sm">
@@ -478,6 +528,16 @@ export function CreateBookWizard() {
       [key]: value,
     }));
   }
+}
+
+function providerLabel(provider: string): string {
+  const labels: Record<string, string> = {
+    anthropic: "Anthropic",
+    openai: "OpenAI",
+    google: "Google Gemini",
+    lmstudio: "LM Studio",
+  };
+  return labels[provider] || provider;
 }
 
 function getRecommendedCreationMode(status: ModelStatusResponse | null): CreationMode {

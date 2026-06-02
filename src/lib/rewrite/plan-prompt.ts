@@ -58,7 +58,7 @@ Return JSON with:
     "characterPermanenceRules": [],
     "timelineRules": [],
     "motifRules": [],
-    "theologyWorldviewRules": [],
+    "contemporaryViewRules": [],
     "contextWindowRules": [],
     "driftPreventionRules": [],
     "forbiddenChanges": []
@@ -136,7 +136,7 @@ Return JSON with:
     "continuity",
     "character_depth",
     "market_fit",
-    "theology_worldview",
+    "contemporary_view",
     "revision_priorities"
   ],
   "acceptanceCriteria": []

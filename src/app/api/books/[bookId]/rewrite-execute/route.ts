@@ -29,7 +29,7 @@ const schema = z.object({
     "clarity_readability",
     "downsize_abridge",
     "emotional_depth",
-    "theology_worldview",
+    "contemporary_view",
     "creative_enhancement",
     "custom",
   ]).default("humanized_literary"),
@@ -124,7 +124,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       { data: acceptedRevisionRows, error: acceptedRevisionRowsError },
       { data: lockedPassageRows, error: lockedPassageRowsError },
     ] = await Promise.all([
-      supabase.from("book_bibles").select("content").eq("book_id", bookId).maybeSingle(),
+      supabase.from("book_bibles").select("content,voice_profile").eq("book_id", bookId).maybeSingle(),
       supabase
         .from("coherence_reports")
         .select("content")
@@ -428,6 +428,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           nextParagraph: rows[paragraphIndex + 1]?.original_text,
           rewriteStrategy,
           authorInstructions: body.authorInstructions,
+          voiceProfile: (bible as { voice_profile?: unknown } | null)?.voice_profile,
           paragraphNumber: paragraph.paragraph_number,
           text: paragraph.original_text,
         });
@@ -437,7 +438,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           top_p: settings.topP,
           max_tokens: 1800,
           messages: [{ role: "user", content: prompt }],
-          response_format: { type: "text" },
+          
         });
 
         const parsed = parseRewriteResponse(completion.choices[0]?.message.content || "{}");

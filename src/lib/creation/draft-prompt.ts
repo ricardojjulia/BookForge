@@ -8,10 +8,16 @@ export function buildCreationDraftChapterPrompt(input: {
   boundaries: string;
   concept: unknown;
   architecture: unknown;
-  chapter: unknown;
+  chapter: { targetWords?: number; targetPages?: number; [key: string]: unknown };
   previousChapterSummary: string;
   nextChapterSummary: string;
 }) {
+  const targetWords = input.chapter.targetWords
+    || (input.chapter.targetPages ? Math.round(input.chapter.targetPages * 250) : null)
+    || Math.round((input.targetPages * 250) / 10);
+  const wordFloor = Math.max(600, Math.round(targetWords * 0.8));
+  const wordCeiling = Math.round(targetWords * 1.2);
+
   return `You are BookForge Creator drafting one chapter of a book.
 
 Write manuscript prose for the assigned chapter only. Do not draft the whole book.
@@ -28,8 +34,8 @@ ${input.targetAudience || "Unspecified"}
 LANGUAGE:
 ${input.language || "English"}
 
-TARGET LENGTH:
-${input.targetPages} pages total. Respect the chapter target in the architecture.
+CHAPTER WORD COUNT TARGET:
+Write between ${wordFloor.toLocaleString()} and ${wordCeiling.toLocaleString()} words for this chapter. This is a hard requirement — do not produce a summary or placeholder. Write the full chapter prose now.
 
 TONE:
 ${input.tone || "No special tone supplied."}
@@ -54,21 +60,17 @@ ${input.nextChapterSummary || "No next chapter context was supplied."}
 
 Rules:
 - Draft only the assigned chapter.
+- Write the complete chapter — ${wordFloor.toLocaleString()} words minimum, multiple scenes and paragraphs.
 - Preserve continuity with the approved architecture.
 - Do not contradict prior or upcoming chapters.
 - Do not include markdown fences.
 - Do not include analysis before or after the chapter.
 - Do not include a title page or table of contents.
 - Use natural book prose, not outline bullets.
-- Use paragraph breaks.
+- Use paragraph breaks between scenes and ideas.
 - Keep the language consistent with the requested language.
 
-Return ONLY valid JSON. The "chapterText" field MUST contain the complete manuscript prose for the chapter — multiple paragraphs of fully written book text, NOT a description, NOT a placeholder, NOT an empty string. Write the chapter now and place it in "chapterText".
+Return ONLY valid JSON with this exact structure. The "chapterText" value must be the complete prose — not a description of what you would write, not a placeholder:
 
-{
-  "chapterText": "<full manuscript prose for this chapter goes here>",
-  "chapterSummary": "<one sentence summary of what happens in this chapter>",
-  "continuityNotes": [],
-  "generationNotes": []
-}`;
+{"chapterText":"<write the full chapter prose here — ${wordFloor.toLocaleString()} words minimum>","chapterSummary":"<one sentence>","continuityNotes":[],"generationNotes":[]}`;
 }

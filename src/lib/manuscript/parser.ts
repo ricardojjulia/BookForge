@@ -1,5 +1,6 @@
 import mammoth from "mammoth";
 import JSZip from "jszip";
+import { PDFParse } from "pdf-parse";
 import type { ParsedChapter, ParsedManuscript, ParsedParagraph, ParsedScene } from "@/lib/types";
 
 const chapterPattern =
@@ -30,7 +31,16 @@ export async function extractTextFromFile(file: File): Promise<string> {
     return extractTextFromKindlePackage(Buffer.from(await file.arrayBuffer()), extension.toUpperCase());
   }
 
-  throw new Error("Unsupported file type. Upload .txt, .md, .docx, .epub, .kpf, or .kcb.");
+  if (extension === "pdf") {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const parser = new PDFParse({ data: buffer });
+    const result = await parser.getText();
+    const text = result.text.trim();
+    if (!text) throw new Error("This PDF has no extractable text. It may be a scanned image — convert it to text first.");
+    return text;
+  }
+
+  throw new Error("Unsupported file type. Upload .txt, .md, .docx, .epub, .pdf, .kpf, or .kcb.");
 }
 
 export function parseManuscript(originalText: string, title = "Untitled Book"): ParsedManuscript {

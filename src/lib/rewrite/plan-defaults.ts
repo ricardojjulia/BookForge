@@ -44,7 +44,7 @@ export function applyRewritePlanDefaults(
         "Preserve recurring images, symbols, and emotional echoes.",
         "Strengthen motifs only when they already exist or are implied by the manuscript.",
       ]),
-      theologyWorldviewRules: nonEmptyArray(objectValue(current.coherenceContract).theologyWorldviewRules, [
+      contemporaryViewRules: nonEmptyArray(objectValue(current.coherenceContract).contemporaryViewRules ?? objectValue(current.coherenceContract).theologyWorldviewRules, [
         "Do not remove or dilute stated theological, devotional, pastoral, or philosophical meaning.",
         "Avoid unwanted doctrinal framing, overstatement, or tone drift.",
       ]),

@@ -1,14 +1,13 @@
 import { Alert, Badge, Button, Container, Group, Paper, Progress, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { AppShell } from "@/components/layout/app-shell";
+import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { ChapterAcceptanceWorkflow, type ChapterFinalReadiness } from "@/components/books/export/chapter-acceptance-workflow";
 import { FinalQualityGate } from "@/components/books/export/final-quality-gate";
 import { FinalManuscriptBuilder } from "@/components/books/export/final-manuscript-builder";
 import { MarkFinishedButton } from "@/components/books/export/mark-finished-button";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-
-export const dynamic = "force-dynamic";
 
 type ExportRow = {
   id: string;
@@ -158,6 +157,7 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
   return (
     <AppShell>
       <Container size="xl">
+        <DataFreshnessBanner routeKey={`book:${bookId}:final-manuscript`} fetchedAt={new Date().toISOString()} label="Final manuscript data" />
         <Group justify="space-between" mb="xl" align="flex-start">
           <div>
             <Group gap="sm" mb={4}>
@@ -194,6 +194,7 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
           acceptedParagraphs={acceptedParagraphs || 0}
           totalParagraphs={totalParagraphs || 0}
           lockedParagraphs={lockedParagraphs || 0}
+          pendingDraftCount={pendingDrafts || 0}
         />
 
         <FinalReadinessPanel readiness={finalReadiness} />

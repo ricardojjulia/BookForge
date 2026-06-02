@@ -43,7 +43,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     const revisionJobId = body.revisionJobId || (await getLatestRewriteJobId(supabase, bookId));
     if (!revisionJobId) {
-      return NextResponse.json({ error: "No rewrite job found to check." }, { status: 400 });
+      return NextResponse.json({ skipped: true, reason: "No rewrite job found — drift check skipped." });
     }
 
     const [
@@ -88,7 +88,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     }));
 
     if (!revisionSamples.length) {
-      return NextResponse.json({ error: "No revision samples found for this rewrite job." }, { status: 400 });
+      return NextResponse.json({ skipped: true, reason: "No new revision samples to check — drift check skipped." });
     }
 
     const settings = await getUserLmStudioSettings(user.id);
@@ -114,7 +114,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           }),
         },
       ],
-      response_format: { type: "text" },
+      
     });
 
     const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({
@@ -125,7 +125,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       timelineDrift: [],
       characterDrift: [],
       motifDrift: [],
-      theologyWorldviewDrift: [],
+      contemporaryViewDrift: [],
       overExpansionWarnings: [],
       recommendedActions: [],
       parseWarning: parseError,

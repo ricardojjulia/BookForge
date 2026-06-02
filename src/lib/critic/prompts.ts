@@ -21,8 +21,8 @@ export const criticLenses: Record<CriticLens, { label: string; instruction: stri
     label: "Market Fit",
     instruction: "Evaluate likely audience fit, genre expectations, positioning, hooks, and reader promise.",
   },
-  theology_worldview: {
-    label: "Theology / Worldview",
+  contemporary_view: {
+    label: "Contemporary View",
     instruction: "Evaluate alignment, tonal drift, overstatement, unwanted framing, and philosophical consistency.",
   },
   revision_priorities: {

@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { buildCreationDraftChapterPrompt } from "@/lib/creation/draft-prompt";
 import { mergeJobSettings, updateRevisionJobProgress } from "@/lib/ai/job-state";
@@ -192,9 +193,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         const completion = await createManagedChatCompletion(client, preparedModel, {
             temperature: Math.min(Math.max(settings.temperature, 0.45), 0.8),
             top_p: settings.topP,
-            max_tokens: Math.min(Math.max(settings.maxOutputTokens, 2048), 12000),
+            max_tokens: Math.min(Math.max(settings.maxOutputTokens, 6000), 12000),
             messages: [{ role: "user", content: prompt }],
-            response_format: { type: "text" },
+            
           })
           .catch((error) => {
             throw new Error(
@@ -350,6 +351,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         })
         .eq("id", bookId)
         .in("status", ["planned", "draft", "generating"]);
+
+      revalidatePath(`/books/${bookId}`);
 
       return NextResponse.json({
         content: {

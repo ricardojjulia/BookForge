@@ -114,7 +114,7 @@ export function FinalQualityGate({
           <QualityAction
             title="Final drift check"
             status={latestDrift ? String(latestDrift.content?.overallDriftRisk || "checked") : "not checked"}
-            description="Check voice, facts, timeline, motifs, characters, and worldview before export."
+            description="Check voice, facts, timeline, motifs, characters, and contemporary view before export."
             loading={loading === "drift"}
             disabled={!latestRewriteJobId}
             onClick={() => runAction("drift")}

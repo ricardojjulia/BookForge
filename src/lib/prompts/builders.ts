@@ -16,6 +16,7 @@ export type RevisionPromptInput = {
   referenceMaterials?: string;
   revisionMode: RevisionMode;
   authorInstructions?: string;
+  voiceProfile?: string;
   text: string;
 };
 
@@ -53,6 +54,9 @@ ${input.authorNotes || "Not provided."}
 
 STYLE SAMPLES:
 ${input.styleSamples || "Not provided. If provided, use them only as voice and tone guidance. Do not copy phrasing directly."}
+
+AUTHOR VOICE PROFILE:
+${input.voiceProfile || "Not captured. Default: preserve the author's existing sentence rhythm and word choice."}
 
 SELECTED REFERENCE MATERIALS:
 ${input.referenceMaterials || "None selected."}
@@ -162,12 +166,13 @@ export function buildFullBookRewriteUnitPrompt(input: {
   nextParagraph?: string | null;
   rewriteStrategy?: RewriteStrategy | null;
   authorInstructions?: string | null;
+  voiceProfile?: unknown;
   paragraphNumber: number;
   text: string;
 }) {
   return `You are rewriting one small unit of a book manuscript as part of a full-book rewrite.
 
-This is not an isolated rewrite. You must preserve whole-book context, continuity, character permanence, timeline logic, motifs, theology/worldview, emotional meaning, and author voice.
+This is not an isolated rewrite. You must preserve whole-book context, continuity, character permanence, timeline logic, motifs, contemporary view, emotional meaning, and author voice.
 
 MANUSCRIPT BLUEPRINT:
 ${compactJson(input.manuscriptBlueprint || {}, 7000)}
@@ -177,6 +182,9 @@ ${compactJson(input.rewritePlan || {}, 7000)}
 
 REQUIRED CONTEXT PACKET FOR THIS CALL:
 ${compactJson(input.contextPacket || {}, 7000)}
+
+AUTHOR VOICE PROFILE:
+${input.voiceProfile ? compactJson(input.voiceProfile, 1500) : "Not captured. Infer voice from the manuscript blueprint and surrounding text."}
 
 REWRITE STRATEGY:
 ${input.rewriteStrategy ? formatRewriteStrategy(input.rewriteStrategy) : "Use the Rewrite Architect plan with balanced humanized literary polish."}
@@ -223,10 +231,10 @@ Rules:
 - Rewrite only TEXT TO REWRITE.
 - Do not rewrite the neighboring context.
 - Do not rename characters.
-- Do not change facts, relationships, timeline, ending, theology/worldview, or emotional meaning.
+- Do not change facts, relationships, timeline, ending, contemporary view, or emotional meaning.
 - Preserve the author's language when the manuscript is not in English.
 - Improve prose, clarity, rhythm, emotional force, and specificity only when it does not damage coherence.
-- Follow the selected rewrite strategy and its limits for expansion, voice preservation, readability, literary intensity, theological/worldview emphasis, and continuity strictness.
+- Follow the selected rewrite strategy and its limits for expansion, voice preservation, readability, literary intensity, contemporary-view emphasis, and continuity strictness.
 - Treat the required context packet as binding. Preserve accepted prior revisions, locked passages, continuity facts, Critic priorities, and chapter directives.
 - If a packet field is marked unavailable, do not invent it. Preserve the original text and flag uncertainty in continuityWarnings.
 - If improving the paragraph would require changing a fact or continuity, preserve the original and put the concern in continuityWarnings.

@@ -158,7 +158,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           temperature: settings.temperature,
           top_p: settings.topP,
           messages: [{ role: "user", content: prompt }],
-          response_format: { type: "text" },
+          
         });
 
         const content = completion.choices[0]?.message.content || "{}";

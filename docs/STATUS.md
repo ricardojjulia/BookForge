@@ -1,51 +1,55 @@
 # Project Status
 
-Last updated: April 29, 2026.
+Last updated: 2026-06-01.
 
 ## What Is Up
 
-BookForge AI is now a working local MVP for manuscript import, analysis, guided rewrite planning, draft rewrite review, and export. The app is optimized for an author running Supabase locally and LM Studio on a 16-inch MacBook Pro.
+BookForge AI is a working local-first manuscript studio covering the full author workflow from raw idea to finished export. The end-to-end loop is proven: concept → architecture → draft generation → Auto-Review (critic, rewrite, drift check, re-critic) → export.
 
-The major product direction is stable:
-
-- import or create a book
-- structure it into chapters/scenes/paragraphs
-- build context with Blueprint, summaries, and Critic
-- rewrite in controlled units
-- preserve coherence and revision history
-- export only what the author accepts
+The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls to Anthropic, OpenAI, or Google for critic and planning tasks.
 
 ## What Has Been Done
 
-- Built the full-stack foundation with Next.js, Mantine, Supabase, and LM Studio.
-- Added database migrations, RLS, auth, storage, settings, model assignments, and local environment scaffolding.
-- Added manuscript import and parsing for common author formats.
-- Added structure audit and repair tools.
-- Added Manuscript Blueprint and BookForge Critic.
-- Added Rewrite Architect, model fit scoring, guided rewrite runs, draft rewrite execution, and revision review.
-- Added export workflows for Markdown, DOCX, EPUB, and PDF.
-- Added Creation Wizard concept and architecture passes from an idea prompt.
-
-## What Is Next
-
-The highest-value next tranche is Creation Wizard Phase 2:
-
-1. Generate actual chapter prose from an accepted architecture.
-2. Save generation prompt snapshots and generated units.
-3. Parse generated prose into scenes and paragraphs.
-4. Run summaries, Blueprint, and BookForge Critic automatically.
-5. Route the new draft into Rewrite Architect.
-
-The second tranche is durable AI execution:
-
-1. Add job history.
-2. Add better retry and failure diagnostics.
-3. Move long AI runs toward resumable worker-style processing.
+- Full-stack foundation: Next.js 16, React 19, Mantine 9, Tailwind 4, Supabase, LM Studio.
+- Manuscript import (TXT, MD, DOCX, EPUB, KPF/KCB best-effort, paste, manual).
+- Structure audit and repair tools.
+- Manuscript Blueprint (book bible) generation.
+- BookForge Critic: seven scored lenses with saved reports and readable report cards.
+- Chapter summaries with health checks and regeneration.
+- Rewrite Architect with model evaluation, coherence contracts, guided workflow, and draft rewrite execution.
+- Revision Review: accept / reject / rerun / batch / reset.
+- Final Manuscript Builder: Markdown, DOCX, EPUB, PDF export.
+- Abridged Edition Builder.
+- Creation Wizard: concept → architecture → draft generation (full prose, scene/paragraph parsing, word-count targets).
+- Architecture Roadmap panel: part/chapter progress view with expandable key beats and "next step" callout.
+- Book Concept panel: approved concept surfaced on the book page, collapsible.
+- Auto-Review Wizard: autonomous end-to-end pipeline with loop-until-green critic logic, resume after interruption.
+- Cloud provider support: Anthropic, OpenAI, Google via execution mode setting (Auto / Local / Cloud).
+- LM Studio model orchestrator: task-fit scoring, fallback selection, runtime limits.
+- FINISHED book status with signed export download.
+- Persistent AI Jobs panel.
+- Collaboration panel (invite, roles).
+- Publishing Lab gateway: post-finish ultimate critic, consensus reporting, generated assets, and cover variants.
+- Freshness UX foundation on key pages with stale/expired messaging and manual refresh controls.
+- Freshness telemetry pipeline: lifecycle events emitted from UI and received by `/api/telemetry/freshness` for operational logging.
+- Freshness automated test coverage: policy threshold math and banner refresh lifecycle behavior (manual and forced fallback).
+- Freshness reliability analytics: dedicated `/api/analytics/freshness` endpoint with cursor drilldown, route/event/status filters, and paginated row inspection.
+- Freshness SLO reporting and alerting: success/failure/forced-rate thresholds plus alert generation for repeated failures and forced-refresh loops.
+- Software-factory execution artifacts: phased execution log, engineering TODO, and admin/course ADR.
 
 ## Known Limits
 
-- Long AI jobs are still mostly request-bound.
-- Creation Wizard creates a real planned book but does not yet generate the full prose draft.
-- KPF/KCB support is best-effort because Kindle package internals vary.
-- Local model quality depends heavily on what LM Studio has loaded.
-- Automated test coverage still needs to be added around parsing, rewrite planning, and exports.
+- User account management (profile edit, password change, delete account) is not yet built — Supabase Auth handles login but there is no UI for account changes.
+- Long AI jobs are still request-bound; no durable background worker yet.
+- KPF/KCB support is best-effort.
+- Automated test coverage is minimal.
+- Freshness telemetry cleanup scheduling is currently function-based (`cleanup_freshness_events`) and still needs cron/job orchestration in production environments.
+
+## What Is Next
+
+1. User account management UI (highest priority — noted as a gap).
+2. Job history screen.
+3. Export styling and metadata controls.
+4. Improved collaborator workflows.
+5. Automated tests for parsing, rewrite planning math, and export assembly.
+6. Admin/course domain implementation from ADR-0001.

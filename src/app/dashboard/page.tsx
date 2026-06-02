@@ -1,11 +1,12 @@
 import { Alert, Badge, Button, Container, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { DeleteBookButton } from "@/components/books/delete-book-button";
+import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
+import { OnboardingChecklist } from "@/components/onboarding/onboarding-checklist";
+import { SetupWizard } from "@/components/onboarding/setup-wizard";
 import { AppShell } from "@/components/layout/app-shell";
 import { getBookAuthorDisplay } from "@/lib/books/status";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-
-export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   if (!hasSupabaseEnv()) {
@@ -29,7 +30,7 @@ export default async function DashboardPage() {
     );
   }
 
-  const [{ data: books }, { data: reports }] = await Promise.all([
+  const [{ data: books }, { data: reports }, { data: userSettings }] = await Promise.all([
     supabase
       .from("books")
       .select("id,title,author_name,genre,status,finished_export_id,created_at")
@@ -40,6 +41,11 @@ export default async function DashboardPage() {
       .select("id,book_id,report_type,created_at")
       .order("created_at", { ascending: false })
       .limit(6),
+    supabase
+      .from("user_settings")
+      .select("onboarding_completed_steps, primary_rewrite_model, llm_api_key, llm_provider")
+      .eq("user_id", user.id)
+      .maybeSingle(),
   ]);
 
   const finishedExportIds = (books || [])
@@ -56,16 +62,32 @@ export default async function DashboardPage() {
       )
     : [];
   const finishedByBook = Object.fromEntries(finishedExports.map((fe) => [fe.bookId, fe]));
+  const freshnessFetchedAt = new Date().toISOString();
 
   return (
     <AppShell>
       <Container size="xl">
+        <DataFreshnessBanner routeKey="dashboard" fetchedAt={freshnessFetchedAt} label="Dashboard data" />
         <Group justify="space-between" mb="xl">
           <div>
             <Title>Author Dashboard</Title>
             <Text c="dimmed">Projects, books, revision progress, and recent critic activity.</Text>
           </div>
           <Group>
+            {(() => {
+              const s = userSettings as { onboarding_completed_steps?: string[]; primary_rewrite_model?: string; llm_api_key?: string } | null;
+              const completedSteps = s?.onboarding_completed_steps ?? [];
+              const hasLmStudio = Boolean(s?.primary_rewrite_model);
+              const hasCloud = Boolean(s?.llm_api_key);
+              const needsSetup = !hasLmStudio && !hasCloud;
+              return (
+                <SetupWizard
+                  userId={user.id}
+                  completedSteps={completedSteps}
+                  needsSetup={needsSetup}
+                />
+              );
+            })()}
             <Button component="a" href="/books/create" color="grape">
               Create From Idea
             </Button>
@@ -75,10 +97,17 @@ export default async function DashboardPage() {
           </Group>
         </Group>
 
+        <OnboardingChecklist completedSteps={(userSettings as { onboarding_completed_steps?: string[] } | null)?.onboarding_completed_steps || []} />
+
         <SimpleGrid cols={{ base: 1, md: 3 }} mb="xl">
           <Metric label="Books" value={books?.length || 0} />
           <Metric label="Critic reports" value={reports?.length || 0} />
-          <Metric label="AI engine" value="LM Studio" />
+          {(() => {
+            const s = userSettings as { llm_provider?: string; llm_api_key?: string } | null;
+            const provider = s?.llm_api_key ? (s.llm_provider ?? "cloud") : "lmstudio";
+            const labels: Record<string, string> = { lmstudio: "LM Studio", openai: "OpenAI", anthropic: "Anthropic", google: "Google Gemini" };
+            return <Metric label="AI engine" value={labels[provider] ?? "LM Studio"} />;
+          })()}
         </SimpleGrid>
 
         <Paper withBorder radius="md" p="xl" bg="#fbfaf8" mb="xl">
@@ -132,6 +161,11 @@ export default async function DashboardPage() {
                       leftSection={<span>↓</span>}
                     >
                       Download {finishedExport.format.toUpperCase()}
+                    </Button>
+                  )}
+                  {isFinished && (
+                    <Button component="a" href={`/books/${book.id}/publishing-lab`} color="orange" variant="light">
+                      Publishing Lab
                     </Button>
                   )}
                   <Group mt={isFinished ? "xs" : "sm"}>

@@ -22,11 +22,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Anchor component={Link} href="/books/new">
               Import
             </Anchor>
+            <Anchor component={Link} href="/series">
+              Series
+            </Anchor>
+            <Anchor component={Link} href="/analytics">
+              Analytics
+            </Anchor>
             <Anchor component={Link} href="/settings">
               Settings
             </Anchor>
+            <Anchor component={Link} href="/account">
+              Account
+            </Anchor>
             <Button component={Link} href="/auth" variant="light" color="grape" size="xs">
-              Auth
+              Sign In
             </Button>
           </Group>
         </Group>

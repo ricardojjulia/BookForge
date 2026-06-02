@@ -15,7 +15,7 @@ const driftFields = [
   ["timelineDrift", "Timeline drift"],
   ["characterDrift", "Character drift"],
   ["motifDrift", "Motif drift"],
-  ["theologyWorldviewDrift", "Theology / worldview drift"],
+  ["contemporaryViewDrift", "Contemporary View drift"],
   ["overExpansionWarnings", "Over-expansion warnings"],
   ["recommendedActions", "Recommended actions"],
 ] as const;

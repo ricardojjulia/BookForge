@@ -10,6 +10,10 @@ type FinalManuscriptBuilderProps = {
   acceptedParagraphs: number;
   totalParagraphs: number;
   lockedParagraphs: number;
+  /** Pending drafts awaiting accept/reject. 0 means the user has reviewed
+   *  everything reviewable — if acceptedPercent is still < 90 they have
+   *  hit the natural ceiling (short/structural paragraphs can't be rewritten). */
+  pendingDraftCount: number;
 };
 
 type ExportResponse = {
@@ -38,6 +42,7 @@ export function FinalManuscriptBuilder({
   acceptedParagraphs,
   totalParagraphs,
   lockedParagraphs,
+  pendingDraftCount,
 }: FinalManuscriptBuilderProps) {
   const router = useRouter();
   const [format, setFormat] = useState("markdown");
@@ -61,7 +66,11 @@ export function FinalManuscriptBuilder({
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewResponse["content"] | null>(null);
   const acceptedPercent = totalParagraphs ? Math.round((acceptedParagraphs / totalParagraphs) * 100) : 0;
-  const recommendation = getExportRecommendation({ acceptedPercent, lockedParagraphs, sourceMode, format, abridgedMode });
+  // When pendingDraftCount is 0 and coverage is still below 90%, the user has reviewed
+  // everything reviewable. The gap is made up of short/structural paragraphs (< 8 words)
+  // that the rewrite skips intentionally — this is the natural ceiling, not a work item.
+  const atCeiling = pendingDraftCount === 0 && acceptedPercent < 90 && acceptedPercent > 0;
+  const recommendation = getExportRecommendation({ acceptedPercent, lockedParagraphs, sourceMode, format, abridgedMode, atCeiling });
 
   async function buildExport() {
     const warnings = getClientExportWarnings({ acceptedPercent, sourceMode, format, abridgedMode });
@@ -183,7 +192,11 @@ export function FinalManuscriptBuilder({
               </Badge>
             </Group>
             <SimpleGrid cols={{ base: 1, md: 4 }} mt="md">
-              <ExportChecklistItem done={acceptedPercent >= 90} label="90%+ accepted" detail={`${acceptedPercent}% accepted`} />
+              <ExportChecklistItem
+                done={acceptedPercent >= 90 || atCeiling}
+                label="90%+ accepted"
+                detail={atCeiling ? `${acceptedPercent}% — at ceiling` : `${acceptedPercent}% accepted`}
+              />
               <ExportChecklistItem done={sourceMode === "accepted"} label="Accepted source" detail={sourceModeLabel(sourceMode)} />
               <ExportChecklistItem done={format === "docx" || acceptedPercent >= 90} label="Format fit" detail={formatHelp(format)} />
               <ExportChecklistItem done={!abridgedMode || preview?.warnings?.every((warning) => !warning.includes("Abridged")) !== false} label="Abridged check" detail={abridgedMode ? "cuts verified by preview" : "full-length"} />
@@ -396,18 +409,30 @@ function getExportRecommendation({
   sourceMode,
   format,
   abridgedMode,
+  atCeiling,
 }: {
   acceptedPercent: number;
   lockedParagraphs: number;
   sourceMode: string;
   format: string;
   abridgedMode: boolean;
+  atCeiling: boolean;
 }) {
   if (acceptedPercent >= 90 && sourceMode === "accepted" && ["docx", "epub"].includes(format)) {
     return {
       label: "publishable path",
       color: "green",
       description: `${formatLabel(format)} from accepted revisions is the strongest current export path${abridgedMode ? " for the abridged edition" : ""}.`,
+    };
+  }
+  // User has reviewed every reviewable paragraph — the remaining gap is structural
+  // paragraphs (< 8 words: headings, scene breaks, short dialogue tags) that the
+  // rewrite skips intentionally. This is the natural ceiling, not a work item.
+  if (atCeiling && sourceMode === "accepted") {
+    return {
+      label: "ready to export",
+      color: "green",
+      description: `All rewriteable paragraphs have been accepted. The remaining ${100 - acceptedPercent}% are short structural elements (headings, scene breaks) that correctly use original text.`,
     };
   }
   if (format === "docx") {

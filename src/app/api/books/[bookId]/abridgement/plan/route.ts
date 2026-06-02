@@ -102,7 +102,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           }),
         },
       ],
-      response_format: { type: "text" },
+      
     });
 
     const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({

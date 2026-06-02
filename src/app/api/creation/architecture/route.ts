@@ -88,7 +88,7 @@ export async function POST(request: Request) {
       top_p: settings.topP,
       max_tokens: Math.min(settings.maxOutputTokens, 5000),
       messages: [{ role: "user", content: prompt }],
-      response_format: { type: "text" },
+      
     });
 
     const architecture = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({
