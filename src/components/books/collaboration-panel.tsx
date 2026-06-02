@@ -78,7 +78,12 @@ export function CollaborationPanel({ bookId }: { bookId: string }) {
     }
   }, [bookId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [load]);
 
   async function sendInvite() {
     setInviting(true);
@@ -96,7 +101,7 @@ export function CollaborationPanel({ bookId }: { bookId: string }) {
       setInviteUrl(data.inviteUrl);
       setInviteEmailSent(data.emailSent ?? false);
       setEmail("");
-      load();
+      void load();
     } catch (e) {
       setInviteError(e instanceof Error ? e.message : "Failed to send invite.");
     } finally {
@@ -110,13 +115,13 @@ export function CollaborationPanel({ bookId }: { bookId: string }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role: newRole }),
     });
-    load();
+    void load();
   }
 
   async function removeCollaborator(collaboratorId: string) {
     if (!confirm("Remove this collaborator?")) return;
     await fetch(`/api/books/${bookId}/collaborators/${collaboratorId}`, { method: "DELETE" });
-    load();
+    void load();
   }
 
   if (loading) return <Loader size="sm" />;

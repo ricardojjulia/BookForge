@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ActionIcon, Badge, Button, Group, Paper, Stack, Text, Textarea, Title } from "@mantine/core";
-import { IconCheck, IconMessage, IconX } from "@tabler/icons-react";
+import { IconCheck, IconMessage } from "@tabler/icons-react";
 import { fetchJson } from "@/lib/http/fetch-json";
 
 type Chapter = { id: string; chapter_number: number; title: string | null };

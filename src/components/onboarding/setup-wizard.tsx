@@ -332,7 +332,8 @@ export function SetupWizard({
 
   useEffect(() => {
     if (needsSetup && !completedSteps.includes("ai_setup")) {
-      setOpened(true);
+      const timeoutId = window.setTimeout(() => setOpened(true), 0);
+      return () => window.clearTimeout(timeoutId);
     }
   }, [needsSetup, completedSteps]);
 
@@ -425,7 +426,7 @@ export function SetupWizard({
           <Stack>
             {engine === "lmstudio" ? (
               <LmStudioStep
-                onConnected={(url, _models) => {
+                onConnected={(url) => {
                   setLmBaseUrl(url);
                   setConnected(true);
                 }}

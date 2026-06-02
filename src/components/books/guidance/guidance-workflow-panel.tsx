@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Alert,
   Badge,
@@ -151,10 +151,12 @@ function RewriteModal({
 
   useEffect(() => {
     if (item) {
-      setStrategy(item.suggestedStrategy as RewriteStrategyId);
-      setInstructions(item.detail || item.title);
-      setResult(null);
-      setRewriteAccepted(false);
+      queueMicrotask(() => {
+        setStrategy(item.suggestedStrategy as RewriteStrategyId);
+        setInstructions(item.detail || item.title);
+        setResult(null);
+        setRewriteAccepted(false);
+      });
     }
   }, [item]);
 
@@ -409,18 +411,26 @@ export function GuidanceWorkflowPanel({
   const fit = (content?.modelFit && typeof content.modelFit === "object" ? content.modelFit : {}) as Record<string, unknown>;
   const fitScore = typeof fit.score === "number" ? fit.score : null;
 
-  const loadTasks = useCallback(async () => {
-    if (!latest) return;
-    try {
-      const res = await fetch(`/api/books/${bookId}/guidance-tasks`);
-      const data = await res.json();
-      setTasks(data.tasks ?? []);
-    } catch {
-      // non-critical — UI falls back to "todo" for all items
-    }
-  }, [bookId, latest]);
+  useEffect(() => {
+    let active = true;
 
-  useEffect(() => { loadTasks(); }, [loadTasks]);
+    async function loadTasks() {
+      if (!latest) return;
+      try {
+        const res = await fetch(`/api/books/${bookId}/guidance-tasks`);
+        const data = await res.json();
+        if (!active) return;
+        setTasks(data.tasks ?? []);
+      } catch {
+        // non-critical — UI falls back to "todo" for all items
+      }
+    }
+
+    void loadTasks();
+    return () => {
+      active = false;
+    };
+  }, [bookId, latest]);
 
   function statusFor(key: string): TaskStatus {
     return tasks.find((t) => t.item_key === key && t.report_id === latest?.id)?.status ?? "todo";

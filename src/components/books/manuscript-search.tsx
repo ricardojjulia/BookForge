@@ -28,11 +28,7 @@ export function ManuscriptSearch({ bookId, onNavigate }: Props) {
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (query.length < 2) {
-      setResults([]);
-      setSearched(false);
-      return;
-    }
+    if (query.length < 2) return;
     debounceRef.current = setTimeout(async () => {
       setLoading(true);
       try {
@@ -67,7 +63,14 @@ export function ManuscriptSearch({ bookId, onNavigate }: Props) {
       <TextInput
         placeholder="Search manuscript…"
         value={query}
-        onChange={(e) => setQuery(e.currentTarget.value)}
+        onChange={(e) => {
+          const nextQuery = e.currentTarget.value;
+          setQuery(nextQuery);
+          if (nextQuery.length < 2) {
+            setResults([]);
+            setSearched(false);
+          }
+        }}
         leftSection={loading ? <Loader size="xs" /> : <IconSearch size={16} />}
         rightSection={
           query ? (

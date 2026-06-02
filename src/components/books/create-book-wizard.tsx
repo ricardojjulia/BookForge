@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Badge,
@@ -105,9 +105,7 @@ export function CreateBookWizard() {
   const [architecture, setArchitecture] = useState<ChapterArchitecture | null>(null);
   const [error, setError] = useState("");
 
-  useEffect(() => { runModelPreflight(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function runModelPreflight() {
+  const runModelPreflight = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -122,7 +120,14 @@ export function CreateBookWizard() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void runModelPreflight();
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [runModelPreflight]);
 
   async function acceptConceptAndGenerateArchitecture() {
     if (!creationProjectId || !concept) return;

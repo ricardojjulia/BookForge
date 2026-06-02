@@ -216,7 +216,9 @@ export async function createManagedChatCompletion(
   },
 ) {
   try {
-    const { top_p, ...paramsWithoutTopP } = params;
+    const paramsWithoutTopP = Object.fromEntries(
+      Object.entries(params).filter(([key]) => key !== "top_p"),
+    ) as typeof params;
     const safeParams = prepared.isCloud ? paramsWithoutTopP : params;
     return await client.chat.completions.create({
       ...safeParams,

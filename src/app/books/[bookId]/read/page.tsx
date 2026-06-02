@@ -1,4 +1,4 @@
-import { Alert, Badge, Container, Paper, Stack, Text, Title } from "@mantine/core";
+import { Alert, Badge, Container, Stack, Text, Title } from "@mantine/core";
 import { AppShell } from "@/components/layout/app-shell";
 import { ReaderView } from "@/components/books/reader/reader-view";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
