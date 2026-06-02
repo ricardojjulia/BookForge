@@ -13,6 +13,8 @@ import { createClient } from "@/lib/supabase/server";
 
 const schema = z.object({
   retryJobId: z.string().uuid().optional(),
+  jobId: z.string().uuid().optional(),
+  serverManaged: z.boolean().optional(),
 });
 
 type RetryJobSettings = {
@@ -79,42 +81,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       ? allChunks.filter((_, index) => retryChunkNumbers.has(index + 1))
       : allChunks;
     const startedAt = new Date().toISOString();
-    const { data: job, error: jobError } = await supabase
-      .from("revision_jobs")
-      .insert({
-        book_id: bookId,
-        mode: "manuscript_blueprint",
-        status: "running",
-        settings: {
-          model,
-          preparedModel,
-          modelSource: modelSelection.source,
-          configuredModelFallbackOrder: modelSelection.configuredModels,
-          availableModels: modelSelection.availableModels,
-          usedLoadedFallback: modelSelection.usedLoadedFallback,
-          unit: "analysis_chunk",
-          retryJobId: body.retryJobId || null,
-          retryChunkNumbers: retryChunkNumbers ? Array.from(retryChunkNumbers) : null,
-          progress: buildJobProgress({
-            taskName: "Generate Manuscript Blueprint",
-            currentUnit: chunks.length ? `Analysis chunk 1 of ${chunks.length}` : "No chunks",
-            totalUnits: chunks.length,
-            attempted: 0,
-            successful: 0,
-            failed: 0,
-            skipped: 0,
-            startedAt,
-            estimatedSecondsPerUnit: plan.estimatedSecondsPerCall,
-          }),
-        },
-        prompt_snapshot: "Manuscript Blueprint analysis: chunked manuscript extraction with no invented full-book facts.",
-        created_by: user.id,
-        started_at: startedAt,
-      })
-      .select("id")
-      .single();
-    if (jobError) throw jobError;
-
+    let jobId = body.jobId || "";
+    let jobStatus = "running";
     let jobSettings: unknown = {
       model,
       preparedModel,
@@ -125,18 +93,86 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       unit: "analysis_chunk",
       retryJobId: body.retryJobId || null,
     };
+
+    if (jobId) {
+      const { data: existingJob, error: existingJobError } = await supabase
+        .from("revision_jobs")
+        .select("id,status,settings")
+        .eq("id", jobId)
+        .eq("book_id", bookId)
+        .eq("created_by", user.id)
+        .single();
+      if (existingJobError) throw existingJobError;
+      if (!existingJob) return NextResponse.json({ error: "Blueprint job not found." }, { status: 404 });
+      if (existingJob.status === "completed") return NextResponse.json({ ok: true, message: "Blueprint job already completed." });
+      if (existingJob.status === "failed") return NextResponse.json({ ok: true, message: "Blueprint job already failed." });
+      jobStatus = String(existingJob.status || "running");
+      jobSettings = existingJob.settings || jobSettings;
+    } else {
+      const status = body.serverManaged ? "queued" : "running";
+      const { data: job, error: jobError } = await supabase
+        .from("revision_jobs")
+        .insert({
+          book_id: bookId,
+          mode: "manuscript_blueprint",
+          status,
+          settings: {
+            model,
+            preparedModel,
+            modelSource: modelSelection.source,
+            configuredModelFallbackOrder: modelSelection.configuredModels,
+            availableModels: modelSelection.availableModels,
+            usedLoadedFallback: modelSelection.usedLoadedFallback,
+            unit: "analysis_chunk",
+            retryJobId: body.retryJobId || null,
+            retryChunkNumbers: retryChunkNumbers ? Array.from(retryChunkNumbers) : null,
+            progress: buildJobProgress({
+              taskName: "Generate Manuscript Blueprint",
+              currentUnit: chunks.length ? `Analysis chunk 1 of ${chunks.length}` : "No chunks",
+              totalUnits: chunks.length,
+              attempted: 0,
+              successful: 0,
+              failed: 0,
+              skipped: 0,
+              startedAt,
+              estimatedSecondsPerUnit: plan.estimatedSecondsPerCall,
+            }),
+          },
+          prompt_snapshot: "Manuscript Blueprint analysis: chunked manuscript extraction with no invented full-book facts.",
+          created_by: user.id,
+          started_at: status === "running" ? startedAt : null,
+        })
+        .select("id")
+        .single();
+      if (jobError) throw jobError;
+      jobId = job.id;
+      jobStatus = status;
+
+      if (body.serverManaged) {
+        return NextResponse.json({ content: { jobId, queued: true, totalUnits: chunks.length } });
+      }
+    }
+
+    if (jobStatus !== "running") {
+      await supabase
+        .from("revision_jobs")
+        .update({ status: "running", started_at: startedAt })
+        .eq("id", jobId)
+        .eq("book_id", bookId)
+        .eq("created_by", user.id);
+    }
     const partials = [];
     let attempted = 0;
     let failed = 0;
 
     for (const [index, chunk] of chunks.entries()) {
-      const pauseStatus = await waitWhileRevisionJobPaused(supabase, job.id);
+      const pauseStatus = await waitWhileRevisionJobPaused(supabase, jobId);
       if (pauseStatus === "cancelled") break;
-      const currentStatus = await getRevisionJobStatus(supabase, job.id);
+      const currentStatus = await getRevisionJobStatus(supabase, jobId);
       if (currentStatus === "cancelled") break;
 
       attempted += 1;
-      jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+      jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
         currentUnit: `Analysis chunk ${index + 1} of ${chunks.length} · chapters ${chunk.chapterRange}`,
         totalUnits: chunks.length,
         attempted,
@@ -144,7 +180,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         failed,
         skipped: 0,
       });
-      const heartbeat = createRevisionJobHeartbeat(supabase, job.id, jobSettings, {
+      const heartbeat = createRevisionJobHeartbeat(supabase, jobId, jobSettings, {
         currentUnit: `Analysis chunk ${index + 1} of ${chunks.length} · chapters ${chunk.chapterRange}`,
         totalUnits: chunks.length,
         attempted,
@@ -175,7 +211,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           chapterRange: chunk.chapterRange,
           content: parseBookBibleModelResponse(content),
         });
-        jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+        jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
           currentUnit: index + 1 >= chunks.length ? "Merging blueprint" : `Analysis chunk ${index + 2} of ${chunks.length}`,
           totalUnits: chunks.length,
           attempted,
@@ -192,7 +228,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           modelSource: modelSelection.source,
           configuredModels: modelSelection.configuredModels,
         });
-        await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+        await updateRevisionJobProgress(supabase, jobId, jobSettings, {
           currentUnit: `Failed at analysis chunk ${chunk.chunkNumber}`,
           totalUnits: chunks.length,
           attempted,
@@ -241,7 +277,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     if (bibleError) throw bibleError;
 
     const completedAt = new Date().toISOString();
-    const finalStatus = await getRevisionJobStatus(supabase, job.id);
+    const finalStatus = await getRevisionJobStatus(supabase, jobId);
     const completedStatus = finalStatus === "cancelled" ? "cancelled" : "completed";
     const { error: finalJobError } = await supabase
       .from("revision_jobs")
@@ -275,7 +311,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           }),
         },
       })
-      .eq("id", job.id);
+      .eq("id", jobId);
     if (finalJobError) throw finalJobError;
 
     return NextResponse.json({ content: contentWithPlan });
