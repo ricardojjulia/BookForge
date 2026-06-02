@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { buildJobProgress, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
+import { buildJobProgress, createRevisionJobHeartbeat, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
 import { criticLenses } from "@/lib/critic/prompts";
 import { runCriticLens } from "@/lib/critic/run";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
@@ -81,6 +81,14 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         failed,
         skipped: 0,
       });
+      const heartbeat = createRevisionJobHeartbeat(supabase, job.id, jobSettings, {
+        currentUnit: `${criticLenses[lens].label} (${index + 1}/${lenses.length})`,
+        totalUnits: lenses.length,
+        attempted,
+        successful: results.length,
+        failed,
+        skipped: 0,
+      });
       try {
         const content = await runCriticLens({ supabase, bookId, userId: user.id, lens, stage });
         results.push({ lens, score: content.score });
@@ -107,6 +115,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           failedUnits: [{ id: lens, type: "critic_lens", label: criticLenses[lens].label, error: message }],
         });
         throw criticError;
+      } finally {
+        heartbeat.stop();
       }
     }
 

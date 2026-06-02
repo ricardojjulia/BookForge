@@ -46,6 +46,50 @@ export function isStaleRunningJob(status: string | null, progress: AiJobProgress
   return Date.now() - new Date(progress.lastHeartbeatAt).getTime() > staleAfterSeconds * 1000;
 }
 
+export type RevisionJobHeartbeat = {
+  touch: (progress?: Partial<AiJobProgress>) => Promise<void>;
+  stop: () => void;
+};
+
+export function createRevisionJobHeartbeat(
+  supabase: SupabaseClient,
+  jobId: string,
+  settings: unknown,
+  progress: Partial<AiJobProgress>,
+  intervalMs = 30000,
+): RevisionJobHeartbeat {
+  let latestSettings = settings;
+  let latestProgress = buildJobProgress(progress);
+  let stopped = false;
+
+  const touch = async (progressPatch: Partial<AiJobProgress> = {}) => {
+    if (stopped) return latestSettings;
+    latestProgress = buildJobProgress({
+      ...extractJobProgress(latestSettings),
+      ...latestProgress,
+      ...progressPatch,
+      lastHeartbeatAt: new Date().toISOString(),
+    });
+    latestSettings = mergeJobSettings(latestSettings, latestProgress);
+    const { error } = await supabase.from("revision_jobs").update({ settings: latestSettings }).eq("id", jobId);
+    if (error) throw error;
+    return latestSettings;
+  };
+
+  const interval = setInterval(() => {
+    void touch();
+  }, intervalMs);
+  if (typeof interval.unref === "function") interval.unref();
+
+  return {
+    touch,
+    stop: () => {
+      stopped = true;
+      clearInterval(interval);
+    },
+  };
+}
+
 export type RevisionJobVisibilitySummary = {
   total: number;
   active: number;

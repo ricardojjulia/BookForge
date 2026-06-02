@@ -46,6 +46,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - FINISHED book status with signed export download.
 - Persistent AI Jobs panel.
 - AI Jobs History page with stale-running visibility and priority ordering.
+- Long-running analysis, chapter summary, critic, and draft-generation routes now persist periodic job heartbeats during model calls.
 - Collaboration panel (invite, roles).
 - Publishing Lab gateway: post-finish ultimate critic, consensus reporting, generated assets, and cover variants.
 - Freshness UX foundation on key pages with stale/expired messaging and manual refresh controls.
@@ -57,14 +58,14 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 
 ## Known Limits
 
-- Long AI jobs are still request-bound; no durable background worker yet.
+- Long AI jobs still run in request-bound routes; the missing piece is a true durable background worker.
 - KPF/KCB support is best-effort.
 - Automated test coverage is minimal.
 - Freshness telemetry cleanup scheduling is currently function-based (`cleanup_freshness_events`) and still needs cron/job orchestration in production environments.
 
 ## What Is Next
 
-1. Durable background processing for long-running AI workflows.
+1. Durable background worker for long-running AI workflows.
 2. Export styling and metadata controls.
 3. Improved collaborator workflows.
 4. Automated tests for parsing, rewrite planning math, and export assembly.

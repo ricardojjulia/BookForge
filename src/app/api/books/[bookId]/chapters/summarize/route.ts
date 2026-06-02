@@ -163,6 +163,14 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         failed,
         skipped: 0,
       });
+        const heartbeat = createRevisionJobHeartbeat(supabase, job.id, jobSettings, {
+          currentUnit: `Chapter ${chapter.chapter_number}: ${chapter.title || `Chapter ${chapter.chapter_number}`} (${index + 1}/${chapterRows.length})`,
+          totalUnits: chapterRows.length,
+          attempted,
+          successful: results.length,
+          failed,
+          skipped: 0,
+        });
       const title = chapter.title || `Chapter ${chapter.chapter_number}`;
       try {
         const prompt = buildChapterSummaryPrompt({ title, text: chapter.original_text || "" });
@@ -231,6 +239,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           ],
         });
         throw chapterError;
+        } finally {
+          heartbeat.stop();
       }
     }
 

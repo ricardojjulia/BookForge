@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { buildJobProgress, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
+import { buildJobProgress, createRevisionJobHeartbeat, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
 import { estimateAiCallPlan } from "@/lib/ai/call-planner";
 import { buildBookBiblePrompt } from "@/lib/prompts/builders";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
@@ -144,6 +144,14 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         failed,
         skipped: 0,
       });
+      const heartbeat = createRevisionJobHeartbeat(supabase, job.id, jobSettings, {
+        currentUnit: `Analysis chunk ${index + 1} of ${chunks.length} · chapters ${chunk.chapterRange}`,
+        totalUnits: chunks.length,
+        attempted,
+        successful: partials.length,
+        failed,
+        skipped: 0,
+      });
 
       try {
         const prompt = buildBookBiblePrompt(
@@ -202,6 +210,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           ],
         });
         throw chunkError;
+      } finally {
+        heartbeat.stop();
       }
     }
 
