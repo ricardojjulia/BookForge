@@ -29,6 +29,7 @@ Last updated: 2026-06-02
 - [x] Add auto-review wizard regression test for launch-handshake failure path.
 - [x] Add auto-review wizard regression test for resume-path launch-handshake failure.
 - [x] Add auto-review wizard success-path regression test for launch-token reuse.
+- [x] Add auto-review wizard resume success-path regression test for launch-token reuse.
 - [x] Split rewrite execution (main panel) into queue + worker handoff.
 - [x] Move rewrite-related UI callers to queue handoff (guidance/review/jobs panel).
 - [x] Convert Publishing Lab run to queue + worker handoff.

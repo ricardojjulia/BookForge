@@ -252,4 +252,95 @@ describe("AutoReviewWizard", () => {
     expect(workerPayload.launchOnly).toBeUndefined();
     expect(workerPayload.launchToken).toBe(launchToken);
   });
+
+  it("reuses the same launch token for resumable handshake and worker launch", async () => {
+    const launchToken = "66666666-6666-4666-8666-666666666666";
+    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => launchToken) });
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.includes("/auto-review") && (!init || init.method === undefined)) {
+        return new Response(
+          JSON.stringify({
+            job: {
+              id: "77777777-7777-4777-8777-777777777777",
+              mode: "full_review",
+              status: "failed",
+              stages_completed: ["analyze"],
+              error: "Needs resume",
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      if (url.endsWith("/auto-review") && init?.method === "POST") {
+        return new Response(JSON.stringify({ content: { jobId: "77777777-7777-4777-8777-777777777777" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.endsWith("/auto-review/process") && init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true, accepted: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderWizard();
+
+    await userEvent.click(screen.getByRole("button", { name: "Auto-Review Wizard" }));
+    await screen.findByText("Previous run can be resumed");
+    await userEvent.click(screen.getByRole("button", { name: /Resume/i }));
+
+    await waitFor(() => {
+      const processCalls = mockFetch.mock.calls.filter(
+        ([requestInput]) => String(requestInput).endsWith("/auto-review/process"),
+      );
+      expect(processCalls).toHaveLength(2);
+    });
+
+    const autoReviewStartCalls = mockFetch.mock.calls.filter(
+      ([requestInput, requestInit]) =>
+        String(requestInput).endsWith("/auto-review") && requestInit?.method === "POST",
+    );
+    expect(autoReviewStartCalls).toHaveLength(1);
+    const startPayload = JSON.parse(String(autoReviewStartCalls[0][1]?.body)) as { jobId?: string };
+    expect(startPayload.jobId).toBe("77777777-7777-4777-8777-777777777777");
+
+    const processCalls = mockFetch.mock.calls.filter(
+      ([requestInput]) => String(requestInput).endsWith("/auto-review/process"),
+    );
+
+    const handshakePayload = JSON.parse(String(processCalls[0][1]?.body)) as {
+      launchOnly?: boolean;
+      launchToken?: string;
+      jobId?: string;
+    };
+    const workerPayload = JSON.parse(String(processCalls[1][1]?.body)) as {
+      launchOnly?: boolean;
+      launchToken?: string;
+      jobId?: string;
+    };
+
+    expect(handshakePayload.launchOnly).toBe(true);
+    expect(handshakePayload.launchToken).toBe(launchToken);
+    expect(handshakePayload.jobId).toBe("77777777-7777-4777-8777-777777777777");
+    expect(workerPayload.launchOnly).toBeUndefined();
+    expect(workerPayload.launchToken).toBe(launchToken);
+    expect(workerPayload.jobId).toBe("77777777-7777-4777-8777-777777777777");
+  });
 });

@@ -80,6 +80,7 @@ Acceptance:
 
 ## Change Log (Factory)
 
+- 2026-06-02: Added auto-review wizard resume success-path regression coverage to verify launch-token reuse and consistent job-id propagation across handshake and worker-launch calls.
 - 2026-06-02: Added auto-review wizard success-path regression coverage that verifies launch-token reuse between `launchOnly` handshake and worker-launch calls, and stabilized wizard tests by mocking the runner dependency.
 - 2026-06-02: Added auto-review wizard regression coverage for resume-path launch-handshake failure, verifying inline error surfacing and single process-launch attempt semantics.
 - 2026-06-02: Added a second auto-review wizard regression test that validates launch-handshake failure messaging and verifies no duplicate worker-launch call is attempted after failed acknowledgement.
