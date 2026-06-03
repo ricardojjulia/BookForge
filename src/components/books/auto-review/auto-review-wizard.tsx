@@ -66,6 +66,7 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
   const [completedStages, setCompletedStages] = useState<string[] | undefined>(undefined);
   const [resumableJob, setResumableJob] = useState<ResumableJob | null>(null);
   const [checkingResume, setCheckingResume] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   async function checkForResumableJob() {
     setCheckingResume(true);
@@ -86,6 +87,7 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
   async function start(resumeFrom?: ResumableJob) {
     const mode = resumeFrom?.mode ?? selected;
     if (!mode) return;
+    setStartError(null);
 
     const res = await fetch(`/api/books/${bookId}/auto-review`, {
       method: "POST",
@@ -97,18 +99,15 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
       }),
     });
     const data = await res.json() as { jobId?: string; content?: { jobId?: string }; error?: string };
-    if (data.error) { alert(data.error); return; }
-    const activeJobId = data.content?.jobId || data.jobId;
-    if (!activeJobId) {
-      alert("Failed to queue auto-review run.");
+    if (data.error) {
+      setStartError(data.error);
       return;
     }
-
-    setJobId(activeJobId);
-    setSelected(mode);
-    setCompletedStages(resumeFrom?.stages_completed);
-    setRunning(true);
-    setResumableJob(null);
+    const activeJobId = data.content?.jobId || data.jobId;
+    if (!activeJobId) {
+      setStartError("Failed to queue auto-review run.");
+      return;
+    }
 
     const launchToken = crypto.randomUUID();
 
@@ -119,9 +118,15 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
     });
     const launchData = await launchAck.json().catch(() => ({} as { error?: string }));
     if (!launchAck.ok || launchData?.error) {
-      alert(launchData?.error || "Failed to launch auto-review worker.");
+      setStartError(launchData?.error || "Failed to launch auto-review worker.");
       return;
     }
+
+    setJobId(activeJobId);
+    setSelected(mode);
+    setCompletedStages(resumeFrom?.stages_completed);
+    setRunning(true);
+    setResumableJob(null);
 
     void fetch(`/api/books/${bookId}/auto-review/process`, {
       method: "POST",
@@ -136,10 +141,12 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
     setJobId(null);
     setCompletedStages(undefined);
     setResumableJob(null);
+    setStartError(null);
     setOpen(false);
   }
 
   function openWizard() {
+    setStartError(null);
     setOpen(true);
     checkForResumableJob();
   }
@@ -177,6 +184,12 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
           />
         ) : (
           <Stack gap="md">
+            {startError && (
+              <Alert color="red" title="Unable to start auto-review">
+                <Text size="sm">{startError}</Text>
+              </Alert>
+            )}
+
             {resumableJob && (
               <Alert color="orange" icon={<IconPlayerPlay size={16} />} title="Previous run can be resumed">
                 <Text size="sm" mb="xs">
