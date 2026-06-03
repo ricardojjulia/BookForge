@@ -61,6 +61,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Auto-review process launch now supports idempotent launch acknowledgements via `launchToken` + `launchOnly` handshake.
 - Auto-review wizard now surfaces start/launch failures inline instead of browser alerts, and only enters runner mode after a successful launch acknowledgement.
 - Auto-review wizard regression coverage now includes queued-start and launch-handshake failure paths.
+- Auto-review wizard regression coverage now also validates resume-path launch-handshake failures.
 - Rewrite execution now supports queue-first job creation with worker-resume processing in the main rewrite execution panel.
 - Publishing Lab runs now support queue-first job creation with worker-resume processing and persistent job visibility.
 - Guidance rewrites, revision-level rewrite-again actions, and persistent jobs retry/replacement flows now use queue handoff for queue-capable routes.

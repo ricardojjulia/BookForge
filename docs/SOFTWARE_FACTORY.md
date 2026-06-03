@@ -80,6 +80,7 @@ Acceptance:
 
 ## Change Log (Factory)
 
+- 2026-06-02: Added auto-review wizard regression coverage for resume-path launch-handshake failure, verifying inline error surfacing and single process-launch attempt semantics.
 - 2026-06-02: Added a second auto-review wizard regression test that validates launch-handshake failure messaging and verifies no duplicate worker-launch call is attempted after failed acknowledgement.
 - 2026-06-02: Replaced auto-review wizard launch/start `alert` failures with inline error state and delayed runner activation until launch handshake succeeds, with a regression test for queued-start failure messaging.
 - 2026-06-02: Added an idempotent auto-review process launch handshake (`launchToken` + `launchOnly`) so retries can receive fast worker-launch acknowledgements without duplicate launches, plus process-route test coverage.
