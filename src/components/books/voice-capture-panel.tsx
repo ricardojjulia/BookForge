@@ -36,10 +36,22 @@ export function VoiceCapturePanel({ bookId, chapters, existingProfile }: Props) 
     setLoading(true);
     setError(null);
     try {
+      const queued = await fetchJson<{ content?: { jobId?: string } }>(
+        `/api/books/${bookId}/voice-capture`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chapterIds: selected, serverManaged: true }),
+        },
+        "Queue voice capture",
+      );
+      const jobId = queued.content?.jobId;
+      if (!jobId) throw new Error("Voice capture queue handoff failed.");
+
       const res = await fetchJson<{ voiceProfile: VoiceProfile }>(`/api/books/${bookId}/voice-capture`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chapterIds: selected }),
+        body: JSON.stringify({ chapterIds: selected, jobId }),
       });
       setProfile(res.voiceProfile);
     } catch (err) {

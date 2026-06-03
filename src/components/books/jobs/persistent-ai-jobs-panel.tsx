@@ -425,6 +425,10 @@ function replacementEndpoint(bookId: string, job: PersistedAiJob) {
   if (job.mode === "full_book_rewrite") return { path: `/api/books/${bookId}/rewrite-execute`, body: {} };
   if (job.mode === "rewrite_plan") return { path: `/api/books/${bookId}/rewrite-plan`, body: {} };
   if (job.mode === "rewrite_drift_check") return { path: `/api/books/${bookId}/drift-check`, body: {} };
+  if (job.mode === "voice_capture") {
+    const chapterIds = stringArraySetting(job.settings, "chapterIds");
+    if (chapterIds.length) return { path: `/api/books/${bookId}/voice-capture`, body: { chapterIds } };
+  }
   if (job.mode === "chapter_summaries") return { path: `/api/books/${bookId}/chapters/summarize`, body: {} };
   if (job.mode === "manuscript_blueprint") return { path: `/api/books/${bookId}/analyze`, body: {} };
   if (job.mode === "publishing_lab") return { path: `/api/books/${bookId}/publishing-lab`, body: { action: "run" } };
@@ -443,11 +447,18 @@ function supportsServerManagedHandoff(path: string) {
     path.includes("/rewrite-execute") ||
     path.includes("/rewrite-plan") ||
     path.includes("/drift-check") ||
+    path.includes("/voice-capture") ||
     path.includes("/chapters/summarize") ||
     path.endsWith("/analyze") ||
     path.includes("/critic") ||
     path.includes("/publishing-lab")
   );
+}
+
+function stringArraySetting(settings: Record<string, unknown> | null | undefined, key: string) {
+  const value = settings?.[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.length > 0);
 }
 
 function stringSetting(settings: Record<string, unknown> | null | undefined, key: string) {
