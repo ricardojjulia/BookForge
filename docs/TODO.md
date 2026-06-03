@@ -34,8 +34,9 @@ Last updated: 2026-06-02
 
 ### Phase 3 — Admin/Course Delivery
 
-- Map accepted book artifacts into course assets.
-- Define admin controls and freshness SLAs by screen.
+- [x] Map accepted book artifacts into course assets.
+- [x] Add initial course read surfaces (catalog/detail) and navigation entry points.
+- [ ] Define admin controls and freshness SLAs by screen.
 - Split ADR-0001 into implementable slices with explicit dependencies.
 
 ## Prior Cycle: Reliability and Freshness

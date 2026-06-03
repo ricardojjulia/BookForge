@@ -97,6 +97,7 @@ Acceptance:
 
 ## Change Log (Factory)
 
+- 2026-06-02: Added initial course read surfaces (`/courses`, `/courses/[courseId]`) with freshness banners, app-shell navigation, and dashboard shortcuts to generated courses.
 - 2026-06-02: Implemented first admin/course pipeline slice: Publishing Lab can publish finished-book artifacts into new course entities (`courses`, `course_modules`, `course_lessons`, `course_assets`) with source traceability.
 - 2026-06-02: Expanded deterministic test coverage for parsing/defaulting and rewrite planning math (`plan-defaults`, `call-planner`).
 - 2026-06-02: Added actionable workflow notifications (mark one/mark all read) and rewrite approval route tests for permission and assignment transitions.
