@@ -18,6 +18,7 @@ Last updated: 2026-06-02
 - [x] Split chapter summaries into queue + worker handoff.
 - [x] Split Manuscript Blueprint generation into queue + worker handoff.
 - [x] Split Critic batch generation into queue + worker handoff.
+- [x] Convert single-lens Critic route to queue + worker handoff.
 - [x] Split rewrite execution (main panel) into queue + worker handoff.
 - [x] Move rewrite-related UI callers to queue handoff (guidance/review/jobs panel).
 - [x] Convert Publishing Lab run to queue + worker handoff.

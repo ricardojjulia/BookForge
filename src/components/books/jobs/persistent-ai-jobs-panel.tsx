@@ -413,7 +413,7 @@ function retryEndpoint(bookId: string, job: PersistedAiJob) {
   }
   if (job.mode === "bookforge_critic" || job.mode === "bookforge_critic_batch") {
     const lens = job.progress?.failedUnits?.find((unit) => unit.type === "critic_lens")?.id;
-    if (lens) return { path: `/api/books/${bookId}/critic`, body: { lens } };
+    if (lens) return { path: `/api/books/${bookId}/critic`, body: { lens, stage: stringSetting(job.settings, "stage") || "baseline" } };
   }
   if (job.mode === "manuscript_blueprint") {
     return { path: `/api/books/${bookId}/analyze`, body: { retryJobId: job.id } };
@@ -441,7 +441,7 @@ function supportsServerManagedHandoff(path: string) {
     path.includes("/rewrite-execute") ||
     path.includes("/chapters/summarize") ||
     path.endsWith("/analyze") ||
-    path.includes("/critic/all") ||
+    path.includes("/critic") ||
     path.includes("/publishing-lab")
   );
 }

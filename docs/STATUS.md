@@ -52,6 +52,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Chapter summary generation now supports the same queue-first handoff pattern with job-resume processing.
 - Manuscript Blueprint generation now supports queue-first job creation with worker-resume processing.
 - Critic batch generation now supports queue-first job creation with worker-resume processing.
+- Single-lens BookForge Critic runs now support queue-first job creation with worker-resume processing.
 - Rewrite execution now supports queue-first job creation with worker-resume processing in the main rewrite execution panel.
 - Publishing Lab runs now support queue-first job creation with worker-resume processing and persistent job visibility.
 - Guidance rewrites, revision-level rewrite-again actions, and persistent jobs retry/replacement flows now use queue handoff for queue-capable routes.
