@@ -60,6 +60,8 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Collaborator workflow now supports reviewer assignment and status transitions for revision review and rewrite approval (unassigned → assigned → in_review → approved/changes_requested).
 - Collaboration notification hooks are now in place with in-app workflow notifications and optional email delivery when Resend is configured.
 - Added test coverage for export metadata persistence, final manuscript builder prefill/reset/reapply behavior, and revision review assignment route transitions.
+- Workflow notifications now support mark-read actions (single and mark-all) directly in the revisions page panel.
+- Added route-test coverage for rewrite approval workflow permissions and assignment transitions.
 - Collaboration panel (invite, roles).
 - Publishing Lab gateway: post-finish ultimate critic, consensus reporting, generated assets, and cover variants.
 - Freshness UX foundation on key pages with stale/expired messaging and manual refresh controls.

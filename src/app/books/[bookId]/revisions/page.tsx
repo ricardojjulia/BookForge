@@ -208,6 +208,7 @@ export default async function RevisionsPage({
         />
 
         <WorkflowNotificationsPanel
+          bookId={bookId}
           notifications={
             (notifications || []) as Array<{
               id: string;
