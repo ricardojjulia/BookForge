@@ -3,6 +3,7 @@ import Link from "next/link";
 import { AppShell } from "@/components/layout/app-shell";
 import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { RewriteExecutionPanel } from "@/components/books/rewrite/rewrite-execution-panel";
+import { RewriteApprovalPanel } from "@/components/books/rewrite/rewrite-approval-panel";
 import { RewriteModelEvaluator } from "@/components/books/rewrite/rewrite-model-evaluator";
 import { RewritePlanActions } from "@/components/books/rewrite/rewrite-plan-actions";
 import { RewritePlanView } from "@/components/books/rewrite/rewrite-plan-view";
@@ -45,6 +46,8 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
     { data: recentRewriteJobs },
     { data: latestDriftReport },
     { data: workflow },
+    { data: collaborators },
+    { data: currentUserData },
   ] = await Promise.all([
     supabase.from("books").select("title,genre,target_audience").eq("id", bookId).single(),
     supabase.from("chapters").select("id,chapter_number,title,summary,original_text").eq("book_id", bookId).order("chapter_number"),
@@ -127,6 +130,12 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
         .select("*")
         .eq("book_id", bookId)
         .maybeSingle(),
+      supabase
+        .from("book_collaborators")
+        .select("user_id,role,profiles(display_name,email)")
+        .eq("book_id", bookId)
+        .in("role", ["editor", "admin"]),
+      supabase.auth.getUser(),
   ]);
 
   if (bookError || !book) {
@@ -153,6 +162,12 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
     rewriteCoverage,
   });
   const workflowState = (workflow as RewriteWorkflowRow | null) || getDefaultRewriteWorkflow(bookId);
+  const reviewerOptions = ((collaborators || []) as Array<{ user_id: string; profiles?: { display_name?: string | null; email?: string | null } | null }>)
+    .map((row) => ({
+      value: row.user_id,
+      label: row.profiles?.display_name || row.profiles?.email || row.user_id,
+    }));
+  const currentUserId = currentUserData?.user?.id || null;
   const readiness = getRewriteReadiness({
     bookId,
     hasBlueprint: Boolean(bible),
@@ -234,6 +249,14 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
         <RewritePlanView
           content={(rewritePlan?.content as Record<string, unknown> | null) || null}
           chapters={chapters || []}
+        />
+
+        <RewriteApprovalPanel
+          bookId={bookId}
+          reviewerId={workflowState.reviewer_id || null}
+          reviewStatus={workflowState.review_status || "unassigned"}
+          reviewerOptions={reviewerOptions}
+          currentUserId={currentUserId}
         />
 
         <RewriteExecutionPanel

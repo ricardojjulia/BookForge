@@ -27,9 +27,10 @@ Last updated: 2026-06-02
 ### Phase 2 — Product Quality
 
 - [x] Persist and prefill export metadata/style controls from latest export.
-- Refine export styling and metadata controls.
-- Improve collaborator workflows where they still require manual coordination.
-- Expand tests around parsing, rewrite planning math, and export assembly.
+- [x] Refine export styling and metadata controls.
+- [x] Improve collaborator workflows where they still require manual coordination.
+- [x] Expand tests around export assembly and review-assignment workflows.
+- Expand tests around parsing and rewrite planning math.
 
 ### Phase 3 — Admin/Course Delivery
 

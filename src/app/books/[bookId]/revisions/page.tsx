@@ -4,6 +4,7 @@ import { AppShell } from "@/components/layout/app-shell";
 import { ChapterSnapshotPanel } from "@/components/books/chapter-snapshot-panel";
 import { RevisionStatsPanel } from "@/components/books/revision-stats-panel";
 import { RevisionReviewList } from "@/components/books/revisions/revision-review-list";
+import { WorkflowNotificationsPanel } from "@/components/books/collaboration/workflow-notifications-panel";
 import { ResetRewriteButton } from "@/components/books/rewrite/reset-rewrite-button";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -24,6 +25,10 @@ type RawVersion = {
   chapters?: { title?: string | null; chapter_number?: number | null } | null;
   paragraphs?: { paragraph_number?: number | null; is_locked?: boolean | null } | null;
   paragraph_id: string | null;
+  reviewer_id: string | null;
+  review_status: "unassigned" | "assigned" | "in_review" | "approved" | "changes_requested" | null;
+  review_notes: string | null;
+  review_updated_at: string | null;
 };
 
 export default async function RevisionsPage({
@@ -53,13 +58,16 @@ export default async function RevisionsPage({
     { data: rewritePlan },
     { count: pending },
     { count: accepted },
+    { data: collaborators },
+    { data: notifications },
+    { data: currentUserData },
   ] =
     await Promise.all([
       supabase.from("books").select("title").eq("id", bookId).single(),
       supabase
         .from("revision_versions")
         .select(
-          "id,revision_job_id,paragraph_id,original_text,revised_text,revision_notes,accepted,rejected,created_at,continuity_warnings,revision_jobs(id,mode,created_at),chapters(title,chapter_number),paragraphs(paragraph_number,is_locked)",
+          "id,revision_job_id,paragraph_id,original_text,revised_text,revision_notes,accepted,rejected,created_at,continuity_warnings,reviewer_id,review_status,review_notes,review_updated_at,revision_jobs(id,mode,created_at),chapters(title,chapter_number),paragraphs(paragraph_number,is_locked)",
         )
         .eq("book_id", bookId)
         .order("created_at", { ascending: false })
@@ -91,6 +99,18 @@ export default async function RevisionsPage({
         .select("id", { count: "exact", head: true })
         .eq("book_id", bookId)
         .eq("accepted", true),
+      supabase
+        .from("book_collaborators")
+        .select("user_id,role,profiles(display_name,email)")
+        .eq("book_id", bookId)
+        .in("role", ["editor", "admin"]),
+      supabase
+        .from("collaboration_notifications")
+        .select("id,event_type,title,body,metadata,read_at,created_at")
+        .eq("book_id", bookId)
+        .order("created_at", { ascending: false })
+        .limit(20),
+      supabase.auth.getUser(),
     ]);
 
   if (bookError || !book) {
@@ -123,7 +143,19 @@ export default async function RevisionsPage({
     paragraphNumber: version.paragraphs?.paragraph_number || null,
     jobMode: version.revision_jobs?.mode || "revision",
     jobCreatedAt: version.revision_jobs?.created_at || null,
+    reviewerId: version.reviewer_id,
+    reviewStatus: (version.review_status || "unassigned") as "unassigned" | "assigned" | "in_review" | "approved" | "changes_requested",
+    reviewNotes: version.review_notes,
+    reviewUpdatedAt: version.review_updated_at,
   }));
+
+  const reviewerOptions = ((collaborators || []) as Array<{ user_id: string; profiles?: { display_name?: string | null; email?: string | null } | null }>)
+    .map((row) => ({
+      value: row.user_id,
+      label: row.profiles?.display_name || row.profiles?.email || row.user_id,
+    }));
+
+  const currentUserId = currentUserData?.user?.id || null;
 
   return (
     <AppShell>
@@ -171,6 +203,22 @@ export default async function RevisionsPage({
           hasRewritePlan={Boolean(rewritePlan)}
           latestRewriteJobStatus={latestRewriteJob?.status || null}
           initialJobFilter={requestedJob === "latest" ? latestRewriteJob?.id || null : requestedJob || null}
+          reviewerOptions={reviewerOptions}
+          currentUserId={currentUserId}
+        />
+
+        <WorkflowNotificationsPanel
+          notifications={
+            (notifications || []) as Array<{
+              id: string;
+              event_type: string;
+              title: string;
+              body: string;
+              metadata?: Record<string, unknown> | null;
+              read_at: string | null;
+              created_at: string;
+            }>
+          }
         />
       </Container>
     </AppShell>

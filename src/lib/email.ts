@@ -43,3 +43,33 @@ export async function sendCollaboratorInvite({
 
   return { sent: true };
 }
+
+export async function sendWorkflowNotification({
+  toEmail,
+  bookTitle,
+  title,
+  body,
+  actorLabel,
+}: {
+  toEmail: string;
+  bookTitle: string;
+  title: string;
+  body: string;
+  actorLabel: string;
+}): Promise<{ sent: boolean }> {
+  if (!resend) return { sent: false };
+
+  await resend.emails.send({
+    from: FROM,
+    to: toEmail,
+    subject: `${title} · ${bookTitle}`,
+    html: `
+      <p><strong>${actorLabel}</strong> updated a workflow item on <em>${bookTitle}</em>.</p>
+      <p><strong>${title}</strong></p>
+      <p>${body}</p>
+    `,
+    text: `${actorLabel} updated a workflow item on ${bookTitle}.\n\n${title}\n${body}`,
+  });
+
+  return { sent: true };
+}

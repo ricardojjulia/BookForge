@@ -11,6 +11,8 @@ import {
 import { markBookExported } from "@/lib/books/status";
 import { createClient } from "@/lib/supabase/server";
 
+const languageCodeSchema = z.string().trim().regex(/^[a-z]{2}(-[A-Z]{2})?$/);
+
 const schema = z.object({
   format: z.enum(["markdown", "docx", "epub", "pdf"]).default("markdown"),
   sourceMode: z.enum(["accepted", "latest", "original"]).default("accepted"),
@@ -21,10 +23,10 @@ const schema = z.object({
   preview: z.boolean().default(false),
   epubMetadata: z
     .object({
-      language: z.string().optional(),
-      publisher: z.string().optional(),
-      copyright: z.string().optional(),
-      description: z.string().optional(),
+      language: z.union([languageCodeSchema, z.literal("")]).optional(),
+      publisher: z.string().trim().optional(),
+      copyright: z.string().trim().optional(),
+      description: z.string().trim().optional(),
     })
     .optional(),
   pdfOptions: z
@@ -57,6 +59,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
   try {
     const { bookId } = await context.params;
     const options = schema.parse(await request.json());
+    const normalizedEpubMetadata = normalizeEpubMetadata(options.epubMetadata);
+    const normalizedPdfOptions = normalizePdfOptions(options.pdfOptions);
+
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -158,13 +163,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           }
         : options.format === "epub"
           ? {
-              body: await buildFinalManuscriptEpub(exportInput, options.epubMetadata),
+              body: await buildFinalManuscriptEpub(exportInput, normalizedEpubMetadata || {}),
               extension: "epub",
               contentType: "application/epub+zip",
             }
           : options.format === "pdf"
             ? {
-                body: await buildFinalManuscriptPdf(exportInput, options.pdfOptions),
+                body: await buildFinalManuscriptPdf(exportInput, normalizedPdfOptions || {}),
                 extension: "pdf",
                 contentType: "application/pdf",
               }
@@ -186,8 +191,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           includeBackMatter: options.includeBackMatter,
           useOriginalForLocked: options.useOriginalForLocked,
           abridgedMode: options.abridgedMode,
-          epubMetadata: options.epubMetadata || null,
-          pdfOptions: options.pdfOptions || null,
+          epubMetadata: normalizedEpubMetadata,
+          pdfOptions: normalizedPdfOptions,
           approvedCutCount: approvedCuts?.count || 0,
           paragraphCount: paragraphs?.length || 0,
           exportedParagraphCount: exportParagraphs.length,
@@ -249,6 +254,52 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     console.error("Final manuscript export failed", error);
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
+}
+
+function normalizeOptionalText(value: string | undefined) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function normalizeEpubMetadata(
+  metadata:
+    | {
+        language?: string;
+        publisher?: string;
+        copyright?: string;
+        description?: string;
+      }
+    | undefined,
+) {
+  if (!metadata) return null;
+  const normalized = {
+    language: normalizeOptionalText(metadata.language),
+    publisher: normalizeOptionalText(metadata.publisher),
+    copyright: normalizeOptionalText(metadata.copyright),
+    description: normalizeOptionalText(metadata.description),
+  };
+  return Object.values(normalized).some(Boolean) ? normalized : null;
+}
+
+function normalizePdfOptions(
+  options:
+    | {
+        fontSize?: number;
+        lineGap?: number;
+        pageNumbers?: boolean;
+        pageSize?: "LETTER" | "A4";
+      }
+    | undefined,
+) {
+  if (!options) return null;
+  const normalized = {
+    fontSize: typeof options.fontSize === "number" ? options.fontSize : undefined,
+    lineGap: typeof options.lineGap === "number" ? options.lineGap : undefined,
+    pageNumbers: typeof options.pageNumbers === "boolean" ? options.pageNumbers : undefined,
+    pageSize: options.pageSize,
+  };
+  return Object.values(normalized).some((value) => value !== undefined) ? normalized : null;
 }
 
 async function getApprovedAbridgementCuts(supabase: Awaited<ReturnType<typeof createClient>>, bookId: string) {

@@ -11,6 +11,7 @@ import {
   Collapse,
   Group,
   Paper,
+  Select,
   SegmentedControl,
   SimpleGrid,
   Stack,
@@ -39,6 +40,10 @@ type RevisionVersion = {
   paragraphNumber: number | null;
   jobMode: string;
   jobCreatedAt: string | null;
+  reviewerId: string | null;
+  reviewStatus: "unassigned" | "assigned" | "in_review" | "approved" | "changes_requested";
+  reviewNotes: string | null;
+  reviewUpdatedAt: string | null;
 };
 
 type ReviewFilter = "needs_review" | "accepted" | "rejected" | "all";
@@ -50,6 +55,8 @@ export function RevisionReviewList({
   hasRewritePlan,
   latestRewriteJobStatus,
   initialJobFilter,
+  reviewerOptions,
+  currentUserId,
 }: {
   bookId: string;
   versions: RevisionVersion[];
@@ -57,6 +64,8 @@ export function RevisionReviewList({
   hasRewritePlan?: boolean;
   latestRewriteJobStatus?: string | null;
   initialJobFilter?: string | null;
+  reviewerOptions: Array<{ value: string; label: string }>;
+  currentUserId: string | null;
 }) {
   const router = useRouter();
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -68,6 +77,7 @@ export function RevisionReviewList({
   const [jobFilter, setJobFilter] = useState<string>(initialJobFilter || "all");
   const [latestOnly, setLatestOnly] = useState(true);
   const [openTextIds, setOpenTextIds] = useState<string[]>([]);
+  const [reviewWorkflowLoadingId, setReviewWorkflowLoadingId] = useState<string | null>(null);
 
   async function updateRevision(versionId: string, action: "accept" | "reject") {
     setLoadingId(versionId);
@@ -254,6 +264,48 @@ export function RevisionReviewList({
       setError(err instanceof Error ? err.message : "Unable to update passage lock.");
     } finally {
       setLoadingId(null);
+    }
+  }
+
+  async function updateReviewWorkflow(
+    version: RevisionVersion,
+    action: "assign" | "start" | "approve" | "request_changes" | "unassign",
+    reviewerId?: string,
+  ) {
+    if (action === "assign" && !reviewerId) {
+      setError("Choose a reviewer before assigning.");
+      return;
+    }
+
+    setReviewWorkflowLoadingId(`${action}:${version.id}`);
+    setMessage("");
+    setError("");
+    try {
+      await fetchJson(
+        `/api/revisions/${version.id}/review-workflow`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action, reviewerId }),
+        },
+        "Update review assignment",
+      );
+      setMessage(
+        action === "assign"
+          ? "Reviewer assigned."
+          : action === "start"
+            ? "Review marked in progress."
+            : action === "approve"
+              ? "Review approved."
+              : action === "request_changes"
+                ? "Changes requested for this revision."
+                : "Reviewer assignment cleared.",
+      );
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update reviewer workflow.");
+    } finally {
+      setReviewWorkflowLoadingId(null);
     }
   }
 
@@ -471,6 +523,9 @@ export function RevisionReviewList({
                                     >
                                       {version.accepted ? "Accepted" : version.rejected ? "Rejected" : "Needs review"}
                                     </Badge>
+                                    <Badge color={reviewStatusColor(version.reviewStatus)} variant="light">
+                                      {reviewStatusLabel(version.reviewStatus)}
+                                    </Badge>
                                     {version.isLocked && (
                                       <Badge color="gray" variant="light">
                                         Locked
@@ -485,6 +540,60 @@ export function RevisionReviewList({
                                   </Text>
                                 </div>
                                 <Group>
+                                  <Select
+                                    placeholder="Assign reviewer"
+                                    data={reviewerOptions}
+                                    value={version.reviewerId || null}
+                                    onChange={(value) => {
+                                      if (value) void updateReviewWorkflow(version, "assign", value);
+                                    }}
+                                    w={210}
+                                  />
+                                  {version.reviewerId && (
+                                    <Button
+                                      size="xs"
+                                      variant="light"
+                                      color="dark"
+                                      loading={reviewWorkflowLoadingId === `unassign:${version.id}`}
+                                      onClick={() => updateReviewWorkflow(version, "unassign")}
+                                    >
+                                      Unassign
+                                    </Button>
+                                  )}
+                                  {(version.reviewStatus === "assigned" || version.reviewStatus === "changes_requested") &&
+                                    (!version.reviewerId || version.reviewerId === currentUserId) && (
+                                      <Button
+                                        size="xs"
+                                        variant="light"
+                                        color="blue"
+                                        loading={reviewWorkflowLoadingId === `start:${version.id}`}
+                                        onClick={() => updateReviewWorkflow(version, "start")}
+                                      >
+                                        Start review
+                                      </Button>
+                                    )}
+                                  {version.reviewStatus === "in_review" && (
+                                    <>
+                                      <Button
+                                        size="xs"
+                                        variant="light"
+                                        color="green"
+                                        loading={reviewWorkflowLoadingId === `approve:${version.id}`}
+                                        onClick={() => updateReviewWorkflow(version, "approve")}
+                                      >
+                                        Approve review
+                                      </Button>
+                                      <Button
+                                        size="xs"
+                                        variant="outline"
+                                        color="orange"
+                                        loading={reviewWorkflowLoadingId === `request_changes:${version.id}`}
+                                        onClick={() => updateReviewWorkflow(version, "request_changes")}
+                                      >
+                                        Request changes
+                                      </Button>
+                                    </>
+                                  )}
                                   <Button variant="subtle" color="dark" onClick={() => toggleText(version.id)}>
                                     {isOpen ? "Hide text" : "Compare text"}
                                   </Button>
@@ -528,6 +637,12 @@ export function RevisionReviewList({
                               {version.revision_notes && (
                                 <Text size="sm">
                                   <strong>Notes:</strong> {version.revision_notes}
+                                </Text>
+                              )}
+
+                              {version.reviewNotes && (
+                                <Text size="sm" c="dimmed">
+                                  <strong>Review note:</strong> {version.reviewNotes}
                                 </Text>
                               )}
 
@@ -680,4 +795,20 @@ function DiffText({ original, revised }: { original: string; revised: string }) 
       </Text>
     </Paper>
   );
+}
+
+function reviewStatusLabel(status: RevisionVersion["reviewStatus"]) {
+  if (status === "in_review") return "In review";
+  if (status === "changes_requested") return "Changes requested";
+  if (status === "approved") return "Review approved";
+  if (status === "assigned") return "Assigned";
+  return "Unassigned";
+}
+
+function reviewStatusColor(status: RevisionVersion["reviewStatus"]) {
+  if (status === "in_review") return "blue";
+  if (status === "changes_requested") return "orange";
+  if (status === "approved") return "teal";
+  if (status === "assigned") return "grape";
+  return "gray";
 }

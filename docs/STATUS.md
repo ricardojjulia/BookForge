@@ -56,6 +56,10 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Rewrite execution now supports queue-first job creation with worker-resume processing in the main rewrite execution panel.
 - Guidance rewrites, revision-level rewrite-again actions, and persistent jobs retry/replacement flows now use queue handoff for queue-capable routes.
 - Final manuscript export controls now persist EPUB/PDF metadata and style options in export records and prefill the builder from the latest export.
+- Final manuscript builder now includes explicit "Use last export settings" and "Reset to recommended defaults" actions plus client/server guardrail validation for EPUB and PDF settings.
+- Collaborator workflow now supports reviewer assignment and status transitions for revision review and rewrite approval (unassigned → assigned → in_review → approved/changes_requested).
+- Collaboration notification hooks are now in place with in-app workflow notifications and optional email delivery when Resend is configured.
+- Added test coverage for export metadata persistence, final manuscript builder prefill/reset/reapply behavior, and revision review assignment route transitions.
 - Collaboration panel (invite, roles).
 - Publishing Lab gateway: post-finish ultimate critic, consensus reporting, generated assets, and cover variants.
 - Freshness UX foundation on key pages with stale/expired messaging and manual refresh controls.
@@ -75,7 +79,6 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 ## What Is Next
 
 1. Extend the durable worker pattern to the remaining long AI routes.
-2. Export styling and metadata controls.
-3. Improved collaborator workflows.
-4. Automated tests for parsing, rewrite planning math, and export assembly.
-5. Admin/course domain implementation from ADR-0001.
+2. Expand collaborator workflows beyond rewrite/revision approvals (deeper handoff automation).
+3. Automated tests for parsing and rewrite planning math.
+4. Admin/course domain implementation from ADR-0001.
