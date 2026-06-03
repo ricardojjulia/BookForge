@@ -58,6 +58,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Voice capture now supports queue-first job creation with worker-resume processing.
 - Auto revision now supports queue-first job creation with worker-resume processing.
 - Auto-review job start now supports queue-first handoff and true resume via existing job ids.
+- Auto-review process launch now supports idempotent launch acknowledgements via `launchToken` + `launchOnly` handshake.
 - Rewrite execution now supports queue-first job creation with worker-resume processing in the main rewrite execution panel.
 - Publishing Lab runs now support queue-first job creation with worker-resume processing and persistent job visibility.
 - Guidance rewrites, revision-level rewrite-again actions, and persistent jobs retry/replacement flows now use queue handoff for queue-capable routes.

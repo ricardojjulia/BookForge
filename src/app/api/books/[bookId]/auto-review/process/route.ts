@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 const schema = z.object({
   jobId: z.string().uuid(),
   mode: z.enum(["full_review", "make_shorter", "make_longer"]),
+  launchToken: z.string().uuid().optional(),
+  launchOnly: z.boolean().optional(),
 });
 
 const CRITIC_LENSES = [
@@ -48,6 +50,11 @@ type AutoReviewJobRow = {
   completed_at: string | null;
 };
 
+type AutoReviewLogEntry = Record<string, unknown> & {
+  type?: string;
+  launchToken?: string;
+};
+
 type AutoReviewJobUpdate = {
   stage?: string;
   iteration?: number;
@@ -89,6 +96,43 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     const baseUrl = new URL(request.url);
     const currentJob = job as AutoReviewJobRow;
 
+    if (body.launchOnly) {
+      return NextResponse.json({
+        ok: true,
+        accepted: true,
+        launch: {
+          jobId: currentJob.id,
+          status: currentJob.status,
+          currentStage: currentJob.current_stage || "analyze",
+          iteration: currentJob.iteration || 0,
+          completedStages: (currentJob.stages_completed || []).length,
+          launchToken: body.launchToken || null,
+        },
+      });
+    }
+
+    if (body.launchToken) {
+      const hasLaunch = (currentJob.log || []).some((entry) => {
+        const parsed = entry as AutoReviewLogEntry;
+        return parsed.type === "worker_launch" && parsed.launchToken === body.launchToken;
+      });
+      if (hasLaunch) {
+        return NextResponse.json({
+          ok: true,
+          accepted: true,
+          alreadyAccepted: true,
+          launch: {
+            jobId: currentJob.id,
+            status: currentJob.status,
+            currentStage: currentJob.current_stage || "analyze",
+            iteration: currentJob.iteration || 0,
+            completedStages: (currentJob.stages_completed || []).length,
+            launchToken: body.launchToken,
+          },
+        });
+      }
+    }
+
     const updateJob = async (updates: AutoReviewJobUpdate) => {
       const { data: latest } = await supabase
         .from("auto_review_jobs")
@@ -122,6 +166,16 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       const { error } = await supabase.from("auto_review_jobs").update(payload).eq("id", body.jobId);
       if (error) throw error;
     };
+
+    if (body.launchToken) {
+      await updateJob({
+        logEntry: {
+          type: "worker_launch",
+          launchToken: body.launchToken,
+          message: "Auto-review worker launch accepted.",
+        },
+      });
+    }
 
     const callStage = async (path: string, payload?: unknown) => {
       const bodyPayload = payload as Record<string, unknown> | undefined;

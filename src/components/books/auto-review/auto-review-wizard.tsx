@@ -110,10 +110,23 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
     setRunning(true);
     setResumableJob(null);
 
+    const launchToken = crypto.randomUUID();
+
+    const launchAck = await fetch(`/api/books/${bookId}/auto-review/process`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId: activeJobId, mode, launchToken, launchOnly: true }),
+    });
+    const launchData = await launchAck.json().catch(() => ({} as { error?: string }));
+    if (!launchAck.ok || launchData?.error) {
+      alert(launchData?.error || "Failed to launch auto-review worker.");
+      return;
+    }
+
     void fetch(`/api/books/${bookId}/auto-review/process`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId: activeJobId, mode }),
+      body: JSON.stringify({ jobId: activeJobId, mode, launchToken }),
     });
   }
 
