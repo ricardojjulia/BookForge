@@ -30,7 +30,7 @@ Last updated: 2026-06-02
 - [x] Refine export styling and metadata controls.
 - [x] Improve collaborator workflows where they still require manual coordination.
 - [x] Expand tests around export assembly and review-assignment/approval workflows.
-- Expand tests around parsing and rewrite planning math.
+- [x] Expand tests around parsing and rewrite planning math.
 
 ### Phase 3 — Admin/Course Delivery
 
