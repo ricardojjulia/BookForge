@@ -86,14 +86,25 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
   async function start(resumeFrom?: ResumableJob) {
     const mode = resumeFrom?.mode ?? selected;
     if (!mode) return;
+
     const res = await fetch(`/api/books/${bookId}/auto-review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode }),
+      body: JSON.stringify({
+        mode,
+        serverManaged: true,
+        jobId: resumeFrom?.id,
+      }),
     });
-    const data = await res.json() as { jobId?: string; error?: string };
+    const data = await res.json() as { jobId?: string; content?: { jobId?: string }; error?: string };
     if (data.error) { alert(data.error); return; }
-    setJobId(data.jobId!);
+    const activeJobId = data.content?.jobId || data.jobId;
+    if (!activeJobId) {
+      alert("Failed to queue auto-review run.");
+      return;
+    }
+
+    setJobId(activeJobId);
     setSelected(mode);
     setCompletedStages(resumeFrom?.stages_completed);
     setRunning(true);
@@ -102,7 +113,7 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
     void fetch(`/api/books/${bookId}/auto-review/process`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId: data.jobId, mode }),
+      body: JSON.stringify({ jobId: activeJobId, mode }),
     });
   }
 

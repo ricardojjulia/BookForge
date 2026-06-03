@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 const schema = z.object({
   mode: z.enum(["full_review", "make_shorter", "make_longer"]),
   reviewStrategy: z.string().optional(),
+  jobId: z.string().uuid().optional(),
+  serverManaged: z.boolean().optional(),
 });
 
 function getError(e: unknown) {
@@ -30,12 +32,47 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     ]);
     const bookStats = { chapters: chapterCount ?? 0, paragraphs: paragraphCount ?? 0 };
 
-    // Cancel any previous running job for this book
+    const status = body.serverManaged ? "queued" : "running";
+
+    if (body.jobId) {
+      const { data: existingJob, error: existingJobError } = await supabase
+        .from("auto_review_jobs")
+        .select("id,status,mode")
+        .eq("id", body.jobId)
+        .eq("book_id", bookId)
+        .eq("user_id", user.id)
+        .single();
+      if (existingJobError) throw existingJobError;
+      if (!existingJob) return NextResponse.json({ error: "Job not found." }, { status: 404 });
+      if (existingJob.mode !== body.mode) {
+        return NextResponse.json({ error: "Mode does not match existing job." }, { status: 400 });
+      }
+
+      if (existingJob.status !== "completed") {
+        const updatePayload: Record<string, unknown> = {
+          status,
+          error: null,
+          completed_at: null,
+        };
+        if (status === "running") {
+          updatePayload.current_stage = "analyze";
+        }
+        const { error: resumeError } = await supabase.from("auto_review_jobs").update(updatePayload).eq("id", existingJob.id);
+        if (resumeError) throw resumeError;
+      }
+
+      if (body.serverManaged) {
+        return NextResponse.json({ content: { jobId: existingJob.id, queued: true, totalUnits: 1 } });
+      }
+      return NextResponse.json({ jobId: existingJob.id });
+    }
+
+    // Cancel any previous in-flight job for this book.
     await supabase
       .from("auto_review_jobs")
       .update({ status: "cancelled", completed_at: new Date().toISOString() })
       .eq("book_id", bookId)
-      .eq("status", "running");
+      .in("status", ["running", "queued"]);
 
     const { data: job, error } = await supabase
       .from("auto_review_jobs")
@@ -43,7 +80,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         book_id: bookId,
         user_id: user.id,
         mode: body.mode,
-        status: "running",
+        status,
         current_stage: "analyze",
         config: { reviewStrategy: body.reviewStrategy || "all" },
         book_stats: bookStats,
@@ -52,6 +89,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       .single();
     if (error) throw error;
 
+    if (body.serverManaged) {
+      return NextResponse.json({ content: { jobId: job.id, queued: true, totalUnits: 1 } });
+    }
     return NextResponse.json({ jobId: job.id });
   } catch (e) {
     return NextResponse.json({ error: getError(e) }, { status: 500 });

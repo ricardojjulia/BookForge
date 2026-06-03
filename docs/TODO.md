@@ -23,6 +23,7 @@ Last updated: 2026-06-02
 - [x] Convert rewrite drift-check route to queue + worker handoff.
 - [x] Convert voice-capture route to queue + worker handoff.
 - [x] Convert auto-revision route to queue + worker handoff.
+- [x] Convert auto-review start flow to queue handoff + true job resume.
 - [x] Split rewrite execution (main panel) into queue + worker handoff.
 - [x] Move rewrite-related UI callers to queue handoff (guidance/review/jobs panel).
 - [x] Convert Publishing Lab run to queue + worker handoff.
