@@ -80,6 +80,7 @@ Acceptance:
 
 ## Change Log (Factory)
 
+- 2026-06-02: Converted auto-revision execution to queue-first handoff (`serverManaged` + `jobId`), updated auto-review callers to use queue→worker stage calls, and added persistent job resume support for `auto_revision`.
 - 2026-06-02: Converted voice-capture execution to queue-first handoff (`serverManaged` + `jobId`), updated Voice Capture panel calls, and added persistent job resume support for `voice_capture`.
 - 2026-06-02: Converted rewrite drift-check execution to queue-first handoff (`serverManaged` + `jobId`), updated quality-gate/execution-panel callers, and added persistent job resume support for `rewrite_drift_check`.
 - 2026-06-02: Converted Rewrite Architect planning to queue-first handoff (`serverManaged` + `jobId`) and updated planning UI/persistent job resume wiring for `rewrite_plan` runs.

@@ -124,6 +124,46 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     };
 
     const callStage = async (path: string, payload?: unknown) => {
+      const bodyPayload = payload as Record<string, unknown> | undefined;
+      const isAutoRevisionPreview =
+        path.includes("/auto-revision") &&
+        !!bodyPayload &&
+        bodyPayload.action === "preview";
+
+      if (payload !== undefined && supportsServerManagedHandoff(path) && !isAutoRevisionPreview) {
+        const queueRes = await fetch(new URL(path, baseUrl).toString(), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            cookie,
+          },
+          body: JSON.stringify({ ...bodyPayload, serverManaged: true }),
+        });
+        const queueData = await queueRes.json().catch(() => ({}));
+        if (!queueRes.ok || queueData.error) {
+          throw new Error(String(queueData.error || `Stage queue failed: ${path}`));
+        }
+        const queuedContent = queueData.content as { jobId?: string } | undefined;
+        const stageJobId = queuedContent?.jobId;
+        if (!stageJobId) {
+          throw new Error(`Stage queue handoff missing job id: ${path}`);
+        }
+
+        const runRes = await fetch(new URL(path, baseUrl).toString(), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            cookie,
+          },
+          body: JSON.stringify({ ...bodyPayload, jobId: stageJobId }),
+        });
+        const runData = await runRes.json().catch(() => ({}));
+        if (!runRes.ok || runData.error) {
+          throw new Error(String(runData.error || `Stage request failed: ${path}`));
+        }
+        return runData as Record<string, unknown>;
+      }
+
       const res = await fetch(new URL(path, baseUrl).toString(), {
         method: payload !== undefined ? "POST" : "GET",
         headers: {
@@ -138,6 +178,15 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       }
       return data as Record<string, unknown>;
     };
+
+    const supportsServerManagedHandoff = (path: string) =>
+      path.includes("/analyze") ||
+      path.includes("/chapters/summarize") ||
+      path.includes("/critic") ||
+      path.includes("/rewrite-plan") ||
+      path.includes("/rewrite-execute") ||
+      path.includes("/auto-revision") ||
+      path.includes("/drift-check");
 
     const stageStatus = new Set(currentJob.stages_completed || []);
     const addStage = async (stage: string, message: string, extra?: Record<string, unknown>) => {

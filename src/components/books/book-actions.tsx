@@ -409,17 +409,60 @@ export function BookActions({
 
     async function post<T = { content?: Record<string, unknown> }>(path: string, body: unknown, label: string) {
       setAutoQueue(label);
+      const payload = (body || {}) as Record<string, unknown>;
+      const isAutoRevisionPreview = path.includes("/auto-revision") && payload.action === "preview";
+
+      if (supportsServerManagedHandoff(path) && !isAutoRevisionPreview) {
+        const queued = await fetchJson<{ content?: { jobId?: string } }>(
+          path,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...payload, serverManaged: true }),
+          },
+          `${label} (queue)`,
+        );
+        const jobId = queued.content?.jobId;
+        if (!jobId) {
+          throw new Error(`Queue handoff failed for ${label}.`);
+        }
+
+        const resumed = await fetchJson<T>(
+          path,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...payload, jobId }),
+          },
+          label,
+        );
+        completedUnits = Math.min(totalUnits, completedUnits + 1);
+        return resumed;
+      }
+
       const result = await fetchJson<T>(
         path,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(body || {}),
+          body: JSON.stringify(payload),
         },
         label,
       );
       completedUnits = Math.min(totalUnits, completedUnits + 1);
       return result;
+    }
+
+    function supportsServerManagedHandoff(path: string) {
+      return (
+        path.includes("/analyze") ||
+        path.includes("/chapters/summarize") ||
+        path.includes("/critic") ||
+        path.includes("/rewrite-plan") ||
+        path.includes("/rewrite-execute") ||
+        path.includes("/auto-revision") ||
+        path.includes("/drift-check")
+      );
     }
 
     function skipCompleted(label: string) {

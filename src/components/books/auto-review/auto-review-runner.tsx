@@ -189,6 +189,35 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
   }
 
   async function callApi(path: string, body?: unknown): Promise<{ ok: boolean; data: Record<string, unknown> }> {
+    const isAutoRevisionPreview =
+      path.includes("/auto-revision") &&
+      !!body &&
+      typeof body === "object" &&
+      "action" in (body as Record<string, unknown>) &&
+      (body as Record<string, unknown>).action === "preview";
+
+    if (body !== undefined && supportsServerManagedHandoff(path) && !isAutoRevisionPreview) {
+      const queued = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...(body as Record<string, unknown>), serverManaged: true }),
+      });
+      const queuedData: Record<string, unknown> = await queued.json().catch(() => ({}));
+      if (!queued.ok || queuedData.error) return { ok: false, data: queuedData };
+      const queuedContent = queuedData.content as { jobId?: string } | undefined;
+      const jobId = queuedContent?.jobId;
+      if (!jobId) return { ok: false, data: { error: "Queue handoff failed." } };
+
+      const resumed = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...(body as Record<string, unknown>), jobId }),
+      });
+      const resumedData: Record<string, unknown> = await resumed.json().catch(() => ({}));
+      if (!resumed.ok || resumedData.error) return { ok: false, data: resumedData };
+      return { ok: true, data: resumedData };
+    }
+
     const res = await fetch(path, {
       method: body !== undefined ? "POST" : "GET",
       headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
@@ -197,6 +226,18 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
     const data: Record<string, unknown> = await res.json().catch(() => ({}));
     if (!res.ok || data.error) return { ok: false, data };
     return { ok: true, data };
+  }
+
+  function supportsServerManagedHandoff(path: string) {
+    return (
+      path.includes("/analyze") ||
+      path.includes("/chapters/summarize") ||
+      path.includes("/critic") ||
+      path.includes("/rewrite-plan") ||
+      path.includes("/rewrite-execute") ||
+      path.includes("/auto-revision") ||
+      path.includes("/drift-check")
+    );
   }
 
   /**
