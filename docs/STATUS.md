@@ -63,6 +63,8 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 - Workflow notifications now support mark-read actions (single and mark-all) directly in the revisions page panel.
 - Added route-test coverage for rewrite approval workflow permissions and assignment transitions.
 - Added deterministic unit tests for rewrite plan parsing/default defaults and AI call-planner math/strategy behavior.
+- Added first admin/course delivery slice: finished books can now publish mapped artifacts into course entities (courses/modules/lessons/assets) from Publishing Lab.
+- Book-to-course mapping now includes chapter-summary lessons and course assets built from completed exports, matter sections, and chapter summaries with source traceability.
 - Collaboration panel (invite, roles).
 - Publishing Lab gateway: post-finish ultimate critic, consensus reporting, generated assets, and cover variants.
 - Freshness UX foundation on key pages with stale/expired messaging and manual refresh controls.
@@ -84,4 +86,4 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 1. Extend the durable worker pattern to the remaining long AI routes.
 2. Expand collaborator workflows beyond rewrite/revision approvals (deeper handoff automation).
 3. Automated tests for parsing and rewrite planning math.
-4. Admin/course domain implementation from ADR-0001.
+4. Continue admin/course domain implementation from ADR-0001 (enrollments/progress/admin screens).

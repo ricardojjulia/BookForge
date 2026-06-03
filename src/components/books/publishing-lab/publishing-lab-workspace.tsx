@@ -63,6 +63,7 @@ export function PublishingLabWorkspace({
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [savingAssets, setSavingAssets] = useState(false);
+  const [publishingCourseAssets, setPublishingCourseAssets] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [error, setError] = useState("");
   const [bundle, setBundle] = useState<PublishingLabBundle | null>(initialBundle);
@@ -130,6 +131,36 @@ export function PublishingLabWorkspace({
     }
   }
 
+  async function publishToCourseAssets() {
+    setPublishingCourseAssets(true);
+    setError("");
+    setSaveMessage("");
+    try {
+      const response = await fetchJson<{
+        courseId: string;
+        modulesPublished: number;
+        lessonsPublished: number;
+        assetsPublished: number;
+      }>(
+        `/api/books/${bookId}/publishing-lab`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "publish_course_assets" }),
+        },
+        "Publish book artifacts to course assets",
+      );
+      setSaveMessage(
+        `Published course assets (course ${response.courseId.slice(0, 8)}…): ${response.modulesPublished} module(s), ${response.lessonsPublished} lesson(s), ${response.assetsPublished} asset(s).`,
+      );
+      router.refresh();
+    } catch (publishError) {
+      setError(publishError instanceof Error ? publishError.message : "Unable to publish course assets.");
+    } finally {
+      setPublishingCourseAssets(false);
+    }
+  }
+
   function selectHistoryItem(item: PublishingLabHistoryItem) {
     setSelectedReportId(item.id);
     setBundle(item.content);
@@ -174,15 +205,25 @@ export function PublishingLabWorkspace({
             <Title order={3}>Run History</Title>
             <Text size="sm" c="dimmed">Open any prior run or save the selected run assets into matter sections.</Text>
           </div>
-          <Button
-            variant="light"
-            color="teal"
-            disabled={!selectedReportId || !bundle}
-            loading={savingAssets}
-            onClick={saveAssetsToMatter}
-          >
-            Save Assets to Matter Sections
-          </Button>
+          <Group>
+            <Button
+              variant="light"
+              color="teal"
+              disabled={!selectedReportId || !bundle}
+              loading={savingAssets}
+              onClick={saveAssetsToMatter}
+            >
+              Save Assets to Matter Sections
+            </Button>
+            <Button
+              variant="light"
+              color="grape"
+              loading={publishingCourseAssets}
+              onClick={publishToCourseAssets}
+            >
+              Publish to Course Assets
+            </Button>
+          </Group>
         </Group>
 
         {!history.length ? (

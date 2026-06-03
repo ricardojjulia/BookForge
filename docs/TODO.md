@@ -66,7 +66,7 @@ Last updated: 2026-06-02
 ## Domain Shift (Admin + Courses)
 
 - [x] Draft ADR for course domain (courses/modules/lessons/progress/admin).
-- [ ] Define how book outputs map into course assets.
+- [x] Define and implement how book outputs map into course assets.
 - [ ] Define admin controls and refresh policy SLAs by screen.
 
 ## Documentation
