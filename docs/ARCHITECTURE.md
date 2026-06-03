@@ -14,11 +14,6 @@ Primary domain today:
 - Critic and rewrite workflows
 - Exports and finished-book publishing
 
-Emerging direction:
-
-- Admin-first operational controls
-- Course-aware domain (planned) layered on top of core book outputs
-
 ## 2. System Overview
 
 ```mermaid
@@ -150,19 +145,7 @@ Quality gates:
 - Sensitive operations scoped to book ownership.
 - Cloud provider usage is explicit and configurable by user settings.
 
-## 9. Planned Domain Expansion (Admin + Courses)
-
-Future entities:
-
-- `courses`, `course_modules`, `course_lessons`, `course_assets`, `course_enrollments`.
-
-Integration approach:
-
-- Keep book production as upstream content pipeline.
-- Publish accepted book artifacts into course assets via explicit admin actions.
-- Apply same freshness policy and refresh UX to admin dashboards.
-
-## 10. Technical Debt Watchlist
+## 9. Technical Debt Watchlist
 
 - Reduce broad dynamic rendering where not required.
 - Move long-running request-bound jobs toward durable background processing.

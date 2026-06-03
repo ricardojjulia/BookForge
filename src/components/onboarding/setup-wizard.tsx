@@ -381,7 +381,7 @@ export function SetupWizard({
       <Modal
         opened={opened}
         onClose={close}
-        title={<Title order={3}>Set up your AI engine</Title>}
+        title={<Text fw={700}>Set up your AI engine</Text>}
         size="lg"
         closeOnClickOutside={false}
       >

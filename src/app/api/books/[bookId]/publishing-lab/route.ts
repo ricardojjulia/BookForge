@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { publishBookToCourseAssets } from "@/lib/course/publish";
 import { createClient } from "@/lib/supabase/server";
 import { runPublishingLab } from "@/lib/publishing-lab/run";
 
 const postSchema = z.object({
-  action: z.enum(["run", "save_assets", "publish_course_assets"]).default("run"),
+  action: z.enum(["run", "save_assets"]).default("run"),
   reportId: z.string().uuid().optional(),
 });
 
@@ -79,11 +78,6 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
       const count = await saveBundleAssetsToMatter(supabase, bookId, report.content as Record<string, unknown>);
       return NextResponse.json({ ok: true, savedSections: count, reportId: report.id });
-    }
-
-    if (body.action === "publish_course_assets") {
-      const publication = await publishBookToCourseAssets(supabase, bookId, user.id);
-      return NextResponse.json({ ok: true, ...publication });
     }
 
     const content = await runPublishingLab({ supabase, bookId, userId: user.id });

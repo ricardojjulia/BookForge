@@ -63,7 +63,6 @@ const targetAudienceOptions = [
   "Church Leaders",
   "Pastors",
   "Small Groups",
-  "Students",
   "Professionals",
   "Academics",
   "New Believers",

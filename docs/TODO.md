@@ -32,13 +32,6 @@ Last updated: 2026-06-02
 - [x] Expand tests around export assembly and review-assignment/approval workflows.
 - [x] Expand tests around parsing and rewrite planning math.
 
-### Phase 3 — Admin/Course Delivery
-
-- [x] Map accepted book artifacts into course assets.
-- [x] Add initial course read surfaces (catalog/detail) and navigation entry points.
-- [ ] Define admin controls and freshness SLAs by screen.
-- Split ADR-0001 into implementable slices with explicit dependencies.
-
 ## Prior Cycle: Reliability and Freshness
 
 - [x] Rebuild `docs/ARCHITECTURE.md` to remove corrupted content.
@@ -63,12 +56,6 @@ Last updated: 2026-06-02
 - [x] Add freshness reliability SLO cards (success/failure/forced rates with thresholds).
 - [x] Add retention cleanup policy for freshness telemetry (`cleanup_freshness_events`).
 - [x] Add critical failure alert hooks (`repeated_refresh_failures`, `forced_refresh_loop`).
-
-## Domain Shift (Admin + Courses)
-
-- [x] Draft ADR for course domain (courses/modules/lessons/progress/admin).
-- [x] Define and implement how book outputs map into course assets.
-- [ ] Define admin controls and refresh policy SLAs by screen.
 
 ## Documentation
 

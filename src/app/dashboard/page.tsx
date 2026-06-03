@@ -62,11 +62,6 @@ export default async function DashboardPage() {
       )
     : [];
   const finishedByBook = Object.fromEntries(finishedExports.map((fe) => [fe.bookId, fe]));
-  const finishedBookIds = (books || []).filter((book) => book.status === "finished").map((book) => book.id);
-  const { data: courses } = finishedBookIds.length
-    ? await supabase.from("courses").select("id,source_book_id").in("source_book_id", finishedBookIds)
-    : { data: [] };
-  const courseIdByBook = Object.fromEntries(((courses || []) as Array<{ id: string; source_book_id: string }>).map((course) => [course.source_book_id, course.id]));
   const freshnessFetchedAt = new Date().toISOString();
 
   return (
@@ -171,11 +166,6 @@ export default async function DashboardPage() {
                   {isFinished && (
                     <Button component="a" href={`/books/${book.id}/publishing-lab`} color="orange" variant="light">
                       Publishing Lab
-                    </Button>
-                  )}
-                  {isFinished && courseIdByBook[book.id] && (
-                    <Button component="a" href={`/courses/${courseIdByBook[book.id]}`} color="blue" variant="light">
-                      Open Course
                     </Button>
                   )}
                   <Group mt={isFinished ? "xs" : "sm"}>

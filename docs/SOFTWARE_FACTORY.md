@@ -13,7 +13,6 @@ Execute the v0.3.0 software-factory cycle with traceable phases, explicit accept
 - Lock the v0.3.0 release slice.
 - Design durable background processing and job-history visibility.
 - Improve collaborator and export workflows.
-- Split the admin/course direction into implementable slices.
 - Keep status, TODO, and factory documentation in sync with delivery.
 
 ## v0.3.0 Workstreams
@@ -35,12 +34,6 @@ Execute the v0.3.0 software-factory cycle with traceable phases, explicit accept
 - Status: Planned
 - Owner: App UI + Platform
 - Deliverable: Export metadata controls, collaborator workflow refinements, and test expansion.
-
-1. Admin/course delivery
-
-- Status: Planned
-- Owner: Product + Platform
-- Deliverable: ADR-0001 slices for course assets, admin controls, and freshness SLAs.
 
 ## Execution Phases
 
@@ -77,16 +70,6 @@ Acceptance:
 - The highest-friction author workflows are easier to complete.
 - Test coverage increases in the riskier core paths.
 
-### Phase D — Admin + Course Delivery
-
-- [ ] Map accepted book artifacts into course assets.
-- [ ] Define admin controls and freshness SLAs by screen.
-- [ ] Split ADR-0001 into implementable slices.
-
-Acceptance:
-
-- The admin/course path is ready for implementation without re-litigating the domain model.
-
 ## Risk Register
 
 - Risk: Scope creep can turn v0.3.0 into an unfocused release.
@@ -97,8 +80,6 @@ Acceptance:
 
 ## Change Log (Factory)
 
-- 2026-06-02: Added initial course read surfaces (`/courses`, `/courses/[courseId]`) with freshness banners, app-shell navigation, and dashboard shortcuts to generated courses.
-- 2026-06-02: Implemented first admin/course pipeline slice: Publishing Lab can publish finished-book artifacts into new course entities (`courses`, `course_modules`, `course_lessons`, `course_assets`) with source traceability.
 - 2026-06-02: Expanded deterministic test coverage for parsing/defaulting and rewrite planning math (`plan-defaults`, `call-planner`).
 - 2026-06-02: Added actionable workflow notifications (mark one/mark all read) and rewrite approval route tests for permission and assignment transitions.
 - 2026-06-02: Added collaborator workflow ownership for revision review and rewrite approval (reviewer assignment + status transitions) with in-app notifications and optional email hooks.
@@ -117,7 +98,6 @@ Acceptance:
 - 2026-06-02: Reframed the factory log for the v0.3.0 cycle and updated branch context.
 - 2026-06-01: Created software-factory execution log and phased plan.
 - 2026-06-01: Completed High-finding architecture doc fix and rolled freshness UX to dashboard/book/rewrite/final/analytics routes.
-- 2026-06-01: Added ADR-0001 for admin/course-aware domain strategy and refreshed changelog/status/howto/readme docs.
 - 2026-06-01: Implemented freshness telemetry sink (`/api/telemetry/freshness`) and added Vitest coverage for freshness policy and banner lifecycle behavior.
 - 2026-06-01: Added durable `freshness_events` storage + analytics page 24h reliability section (event counts, route success rates, latest failures).
 - 2026-06-01: Added filterable freshness telemetry panel with 24h/7d window controls, route filter, and mini trend bars.
