@@ -4,6 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AutoReviewWizard } from "@/components/books/auto-review/auto-review-wizard";
 
+vi.mock("@/components/books/auto-review/auto-review-runner", () => ({
+  AutoReviewRunner: () => null,
+}));
+
 const mockFetch = vi.fn<typeof fetch>();
 
 function renderWizard() {
@@ -178,5 +182,74 @@ describe("AutoReviewWizard", () => {
       ([requestInput]) => String(requestInput).endsWith("/auto-review/process"),
     );
     expect(processCalls).toHaveLength(1);
+  });
+
+  it("reuses the same launch token for handshake and worker launch", async () => {
+    const launchToken = "44444444-4444-4444-8444-444444444444";
+    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => launchToken) });
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.includes("/auto-review") && (!init || init.method === undefined)) {
+        return new Response(JSON.stringify({ job: null }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.endsWith("/auto-review") && init?.method === "POST") {
+        return new Response(JSON.stringify({ content: { jobId: "55555555-5555-4555-8555-555555555555" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.endsWith("/auto-review/process") && init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true, accepted: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderWizard();
+
+    await userEvent.click(screen.getByRole("button", { name: "Auto-Review Wizard" }));
+    await screen.findByText("Full autonomous review cycle");
+    await userEvent.click(screen.getByText("Full autonomous review cycle"));
+    await userEvent.click(screen.getByRole("button", { name: /Start/i }));
+
+    await waitFor(() => {
+      const processCalls = mockFetch.mock.calls.filter(
+        ([requestInput]) => String(requestInput).endsWith("/auto-review/process"),
+      );
+      expect(processCalls).toHaveLength(2);
+    });
+
+    const processCalls = mockFetch.mock.calls.filter(
+      ([requestInput]) => String(requestInput).endsWith("/auto-review/process"),
+    );
+
+    const handshakePayload = JSON.parse(String(processCalls[0][1]?.body)) as {
+      launchOnly?: boolean;
+      launchToken?: string;
+    };
+    const workerPayload = JSON.parse(String(processCalls[1][1]?.body)) as {
+      launchOnly?: boolean;
+      launchToken?: string;
+    };
+
+    expect(handshakePayload.launchOnly).toBe(true);
+    expect(handshakePayload.launchToken).toBe(launchToken);
+    expect(workerPayload.launchOnly).toBeUndefined();
+    expect(workerPayload.launchToken).toBe(launchToken);
   });
 });
