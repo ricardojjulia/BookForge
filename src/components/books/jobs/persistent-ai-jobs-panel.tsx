@@ -423,6 +423,7 @@ function retryEndpoint(bookId: string, job: PersistedAiJob) {
 
 function replacementEndpoint(bookId: string, job: PersistedAiJob) {
   if (job.mode === "full_book_rewrite") return { path: `/api/books/${bookId}/rewrite-execute`, body: {} };
+  if (job.mode === "rewrite_plan") return { path: `/api/books/${bookId}/rewrite-plan`, body: {} };
   if (job.mode === "chapter_summaries") return { path: `/api/books/${bookId}/chapters/summarize`, body: {} };
   if (job.mode === "manuscript_blueprint") return { path: `/api/books/${bookId}/analyze`, body: {} };
   if (job.mode === "publishing_lab") return { path: `/api/books/${bookId}/publishing-lab`, body: { action: "run" } };
@@ -439,6 +440,7 @@ function replacementEndpoint(bookId: string, job: PersistedAiJob) {
 function supportsServerManagedHandoff(path: string) {
   return (
     path.includes("/rewrite-execute") ||
+    path.includes("/rewrite-plan") ||
     path.includes("/chapters/summarize") ||
     path.endsWith("/analyze") ||
     path.includes("/critic") ||
