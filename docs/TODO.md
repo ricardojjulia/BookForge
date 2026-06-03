@@ -20,6 +20,7 @@ Last updated: 2026-06-02
 - [x] Split Critic batch generation into queue + worker handoff.
 - [x] Split rewrite execution (main panel) into queue + worker handoff.
 - [x] Move rewrite-related UI callers to queue handoff (guidance/review/jobs panel).
+- [x] Convert Publishing Lab run to queue + worker handoff.
 - Design durable background processing for the remaining long-running AI workflows.
 - [x] Add a job-history screen so users can inspect queued, running, and completed work.
 - Establish the retry, cancellation, and visibility policy for those jobs.

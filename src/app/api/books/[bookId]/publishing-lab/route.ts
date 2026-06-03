@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { buildJobProgress, createRevisionJobHeartbeat, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
 import { createClient } from "@/lib/supabase/server";
 import { runPublishingLab } from "@/lib/publishing-lab/run";
 
 const postSchema = z.object({
   action: z.enum(["run", "save_assets"]).default("run"),
   reportId: z.string().uuid().optional(),
+  jobId: z.string().uuid().optional(),
+  serverManaged: z.boolean().optional(),
 });
 
 function getErrorMessage(error: unknown) {
@@ -80,18 +83,215 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       return NextResponse.json({ ok: true, savedSections: count, reportId: report.id });
     }
 
-    const content = await runPublishingLab({ supabase, bookId, userId: user.id });
+    const startedAt = new Date().toISOString();
+    const totalUnits = 3;
+    let jobId = body.jobId || "";
+    let jobStatus = "running";
+    let jobSettings: unknown = {
+      unit: "publishing_lab_phase",
+      progress: buildJobProgress({
+        taskName: "Run Publishing Lab",
+        currentUnit: "Preparing Publishing Lab run",
+        totalUnits,
+        attempted: 0,
+        successful: 0,
+        failed: 0,
+        skipped: 0,
+        startedAt,
+        estimatedSecondsPerUnit: 25,
+      }),
+    };
 
-    const { data: latestReport } = await supabase
-      .from("coherence_reports")
-      .select("id,created_at")
-      .eq("book_id", bookId)
-      .eq("report_type", "publishing_lab_bundle")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    if (jobId) {
+      const { data: existingJob, error: existingJobError } = await supabase
+        .from("revision_jobs")
+        .select("id,status,settings")
+        .eq("id", jobId)
+        .eq("book_id", bookId)
+        .eq("created_by", user.id)
+        .single();
+      if (existingJobError) throw existingJobError;
+      if (!existingJob) return NextResponse.json({ error: "Publishing Lab job not found." }, { status: 404 });
+      if (existingJob.status === "completed") {
+        return NextResponse.json({ ok: true, message: "Publishing Lab job already completed." });
+      }
+      if (existingJob.status === "failed") {
+        return NextResponse.json({ ok: true, message: "Publishing Lab job already failed." });
+      }
+      jobStatus = String(existingJob.status || "running");
+      jobSettings = existingJob.settings || jobSettings;
+    } else {
+      const status = body.serverManaged ? "queued" : "running";
+      const { data: job, error: jobError } = await supabase
+        .from("revision_jobs")
+        .insert({
+          book_id: bookId,
+          mode: "publishing_lab",
+          status,
+          settings: {
+            unit: "publishing_lab_phase",
+            progress: buildJobProgress({
+              taskName: "Run Publishing Lab",
+              currentUnit: status === "queued" ? "Queued" : "Preparing Publishing Lab run",
+              totalUnits,
+              attempted: 0,
+              successful: 0,
+              failed: 0,
+              skipped: 0,
+              startedAt: status === "running" ? startedAt : null,
+              estimatedSecondsPerUnit: 25,
+            }),
+          },
+          prompt_snapshot: "Publishing Lab: post-finish consensus + assets + covers.",
+          created_by: user.id,
+          started_at: status === "running" ? startedAt : null,
+        })
+        .select("id")
+        .single();
+      if (jobError) throw jobError;
+      jobId = job.id;
+      jobStatus = status;
 
-    return NextResponse.json({ content, reportId: latestReport?.id || null, createdAt: latestReport?.created_at || null });
+      if (body.serverManaged) {
+        return NextResponse.json({ content: { jobId, queued: true, totalUnits } });
+      }
+    }
+
+    if (jobStatus !== "running") {
+      await supabase
+        .from("revision_jobs")
+        .update({ status: "running", started_at: startedAt })
+        .eq("id", jobId)
+        .eq("book_id", bookId)
+        .eq("created_by", user.id);
+    }
+
+    const pauseStatus = await waitWhileRevisionJobPaused(supabase, jobId);
+    if (pauseStatus === "cancelled") {
+      const completedAt = new Date().toISOString();
+      await supabase
+        .from("revision_jobs")
+        .update({
+          status: "cancelled",
+          completed_at: completedAt,
+          settings: {
+            unit: "publishing_lab_phase",
+            progress: buildJobProgress({
+              taskName: "Run Publishing Lab",
+              currentUnit: "Cancelled",
+              totalUnits,
+              attempted: 0,
+              successful: 0,
+              failed: 0,
+              skipped: totalUnits,
+              startedAt,
+              completedAt,
+              estimatedSecondsPerUnit: 25,
+              message: "Publishing Lab run was cancelled before execution started.",
+            }),
+          },
+        })
+        .eq("id", jobId);
+      return NextResponse.json({ ok: true, message: "Publishing Lab job cancelled." });
+    }
+
+    jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+      currentUnit: "Running judges and generating publishing assets",
+      totalUnits,
+      attempted: 1,
+      successful: 0,
+      failed: 0,
+      skipped: 0,
+    });
+
+    const heartbeat = createRevisionJobHeartbeat(supabase, jobId, jobSettings, {
+      currentUnit: "Running judges and generating publishing assets",
+      totalUnits,
+      attempted: 1,
+      successful: 0,
+      failed: 0,
+      skipped: 0,
+    });
+
+    try {
+      const content = await runPublishingLab({ supabase, bookId, userId: user.id });
+
+      const { data: latestReport } = await supabase
+        .from("coherence_reports")
+        .select("id,created_at")
+        .eq("book_id", bookId)
+        .eq("report_type", "publishing_lab_bundle")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const completedAt = new Date().toISOString();
+      const finalStatus = await getRevisionJobStatus(supabase, jobId);
+      const completedStatus = finalStatus === "cancelled" ? "cancelled" : "completed";
+      await supabase
+        .from("revision_jobs")
+        .update({
+          status: completedStatus,
+          completed_at: completedAt,
+          settings: {
+            unit: "publishing_lab_phase",
+            progress: buildJobProgress({
+              taskName: "Run Publishing Lab",
+              currentUnit: completedStatus === "cancelled" ? "Cancelled" : "Complete",
+              totalUnits,
+              attempted: 1,
+              successful: completedStatus === "cancelled" ? 0 : 1,
+              failed: 0,
+              skipped: completedStatus === "cancelled" ? totalUnits - 1 : 0,
+              startedAt,
+              completedAt,
+              estimatedSecondsPerUnit: 25,
+              message:
+                completedStatus === "cancelled"
+                  ? "Publishing Lab run was cancelled during execution."
+                  : "Publishing Lab bundle generated and saved.",
+            }),
+          },
+        })
+        .eq("id", jobId);
+
+      return NextResponse.json({
+        content,
+        reportId: latestReport?.id || null,
+        createdAt: latestReport?.created_at || null,
+        revisionJobId: jobId,
+      });
+    } catch (runError) {
+      const completedAt = new Date().toISOString();
+      const message = getErrorMessage(runError);
+      await supabase
+        .from("revision_jobs")
+        .update({
+          status: "failed",
+          completed_at: completedAt,
+          error_message: message,
+          settings: {
+            unit: "publishing_lab_phase",
+            progress: buildJobProgress({
+              taskName: "Run Publishing Lab",
+              currentUnit: "Failed",
+              totalUnits,
+              attempted: 1,
+              successful: 0,
+              failed: 1,
+              skipped: 0,
+              startedAt,
+              completedAt,
+              estimatedSecondsPerUnit: 25,
+              message,
+            }),
+          },
+        })
+        .eq("id", jobId);
+      throw runError;
+    } finally {
+      heartbeat.stop();
+    }
   } catch (error) {
     console.error("Publishing Lab POST failed", error);
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
