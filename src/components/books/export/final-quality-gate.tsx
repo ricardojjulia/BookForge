@@ -59,14 +59,26 @@ export function FinalQualityGate({
         setMessage(`Post-rewrite Critic completed ${result.content?.completed || 0} lens evaluation(s).`);
       }
       if (action === "drift") {
+        const queued = await fetchJson<{ content?: { jobId?: string } }>(
+          `/api/books/${bookId}/drift-check`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ revisionJobId: latestRewriteJobId || undefined, serverManaged: true }),
+          },
+          "Queue final drift check",
+        );
+        const jobId = queued.content?.jobId;
+        if (!jobId) throw new Error("Final drift check queue handoff failed.");
+
         await fetchJson(
           `/api/books/${bookId}/drift-check`,
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ revisionJobId: latestRewriteJobId || undefined }),
+            body: JSON.stringify({ revisionJobId: latestRewriteJobId || undefined, jobId }),
           },
-          "Run final drift check",
+          "Run final drift check worker",
         );
         setMessage("Final drift check saved.");
       }

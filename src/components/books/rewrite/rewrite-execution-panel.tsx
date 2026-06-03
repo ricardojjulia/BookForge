@@ -383,14 +383,26 @@ export function RewriteExecutionPanel({
     setMessage("");
     setError("");
     try {
+      const queued = await fetchJson<{ content?: { jobId?: string } }>(
+        `/api/books/${bookId}/drift-check`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ revisionJobId: jobId, serverManaged: true }),
+        },
+        "Queue campaign drift check",
+      );
+      const durableJobId = queued.content?.jobId;
+      if (!durableJobId) throw new Error("Campaign drift-check queue handoff failed.");
+
       const result = await fetchJson<{ content?: { overallDriftRisk?: string; sampleCount?: number; reportId?: string | null } }>(
         `/api/books/${bookId}/drift-check`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ revisionJobId: jobId }),
+          body: JSON.stringify({ revisionJobId: jobId, jobId: durableJobId }),
         },
-        "Run campaign drift check",
+        "Run campaign drift check worker",
       );
       setMessage(
         `Campaign drift check saved. Risk: ${result.content?.overallDriftRisk || "unknown"} · samples checked: ${

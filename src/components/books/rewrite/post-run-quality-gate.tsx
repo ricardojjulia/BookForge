@@ -64,14 +64,26 @@ export function PostRunQualityGate({
     setError("");
     try {
       if (action === "drift") {
+        const queued = await fetchJson<{ content?: { jobId?: string } }>(
+          `/api/books/${bookId}/drift-check`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ revisionJobId: latestRewriteJob?.id, serverManaged: true }),
+          },
+          "Queue drift check",
+        );
+        const jobId = queued.content?.jobId;
+        if (!jobId) throw new Error("Drift check queue handoff failed.");
+
         await fetchJson(
           `/api/books/${bookId}/drift-check`,
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ revisionJobId: latestRewriteJob?.id }),
+            body: JSON.stringify({ revisionJobId: latestRewriteJob?.id, jobId }),
           },
-          "Run drift check",
+          "Run drift check worker",
         );
         setMessage("Drift check saved.");
       } else if (action === "critic") {

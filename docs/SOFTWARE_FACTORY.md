@@ -80,6 +80,7 @@ Acceptance:
 
 ## Change Log (Factory)
 
+- 2026-06-02: Converted rewrite drift-check execution to queue-first handoff (`serverManaged` + `jobId`), updated quality-gate/execution-panel callers, and added persistent job resume support for `rewrite_drift_check`.
 - 2026-06-02: Converted Rewrite Architect planning to queue-first handoff (`serverManaged` + `jobId`) and updated planning UI/persistent job resume wiring for `rewrite_plan` runs.
 - 2026-06-02: Converted single-lens BookForge Critic runs to queue-first handoff (`serverManaged` + `jobId`) and updated critic recheck UI + persistent jobs retries to use durable worker resume.
 - 2026-06-02: Converted Publishing Lab execution to queue-first handoff (`serverManaged` + `jobId`) and wired persistent jobs resume support for `publishing_lab` runs.
