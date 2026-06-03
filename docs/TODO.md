@@ -26,6 +26,7 @@ Last updated: 2026-06-02
 - [x] Convert auto-review start flow to queue handoff + true job resume.
 - [x] Add idempotent auto-review process launch handshake (`launchToken` + `launchOnly`).
 - [x] Replace auto-review wizard launch/start `alert` failures with inline error messaging.
+- [x] Add auto-review wizard regression test for launch-handshake failure path.
 - [x] Split rewrite execution (main panel) into queue + worker handoff.
 - [x] Move rewrite-related UI callers to queue handoff (guidance/review/jobs panel).
 - [x] Convert Publishing Lab run to queue + worker handoff.

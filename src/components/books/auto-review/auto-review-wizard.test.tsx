@@ -58,4 +58,56 @@ describe("AutoReviewWizard", () => {
       expect(screen.getByText("Queue unavailable")).toBeInTheDocument();
     });
   });
+
+  it("shows inline error when launch handshake fails", async () => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.includes("/auto-review") && (!init || init.method === undefined)) {
+        return new Response(JSON.stringify({ job: null }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.endsWith("/auto-review") && init?.method === "POST") {
+        return new Response(JSON.stringify({ content: { jobId: "11111111-1111-4111-8111-111111111111" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.endsWith("/auto-review/process") && init?.method === "POST" && String(init.body).includes("\"launchOnly\":true")) {
+        return new Response(JSON.stringify({ error: "Launch handshake failed" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderWizard();
+
+    await userEvent.click(screen.getByRole("button", { name: "Auto-Review Wizard" }));
+    await screen.findByText("Full autonomous review cycle");
+    await userEvent.click(screen.getByText("Full autonomous review cycle"));
+    await userEvent.click(screen.getByRole("button", { name: /Start/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Unable to start auto-review")).toBeInTheDocument();
+      expect(screen.getByText("Launch handshake failed")).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("button", { name: /Start/i })).toBeInTheDocument();
+    const processCalls = mockFetch.mock.calls.filter(
+      ([requestInput]) => String(requestInput).endsWith("/auto-review/process"),
+    );
+    expect(processCalls).toHaveLength(1);
+  });
 });
