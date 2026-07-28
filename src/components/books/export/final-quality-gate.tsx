@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { criticLenses } from "@/lib/critic/prompts";
 import { buildCriticComparisons, summarizeStrategyOutcome } from "@/lib/critic/comparison";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 
 type CriticReport = {
   report_type: string;
@@ -52,7 +53,7 @@ export function FinalQualityGate({
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ stage: "post_rewrite" }),
+            body: JSON.stringify(mergeMetadataSnapshotBody({ stage: "post_rewrite" })),
           },
           "Run post-rewrite Critic",
         );
@@ -64,7 +65,9 @@ export function FinalQualityGate({
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ revisionJobId: latestRewriteJobId || undefined, serverManaged: true }),
+            body: JSON.stringify(
+              mergeMetadataSnapshotBody({ revisionJobId: latestRewriteJobId || undefined, serverManaged: true }),
+            ),
           },
           "Queue final drift check",
         );
@@ -76,7 +79,7 @@ export function FinalQualityGate({
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ revisionJobId: latestRewriteJobId || undefined, jobId }),
+            body: JSON.stringify(mergeMetadataSnapshotBody({ revisionJobId: latestRewriteJobId || undefined, jobId })),
           },
           "Run final drift check worker",
         );

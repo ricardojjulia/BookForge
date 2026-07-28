@@ -9,6 +9,7 @@ import { AiTaskPreflight, type AiTaskPreflightData } from "@/components/ai/ai-ta
 import { estimateAiCallPlan } from "@/lib/ai/call-planner";
 import { criticLenses } from "@/lib/critic/prompts";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 import type { CriticLens } from "@/lib/types";
 
 type AiDashboardTask = "book-bible" | "critic" | "critic-all" | "chapter-summaries" | "generate-draft" | "auto-review";
@@ -445,7 +446,7 @@ export function BookActions({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(mergeMetadataSnapshotBody((payload || {}) as Record<string, unknown>)),
         },
         label,
       );
@@ -614,7 +615,7 @@ export function BookActions({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ limit: totalUnits, serverManaged: true }),
+          body: JSON.stringify(mergeMetadataSnapshotBody({ limit: totalUnits, serverManaged: true })),
         },
         "Queue Planned Draft generation",
       );
@@ -637,7 +638,7 @@ export function BookActions({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ jobId, limit: totalUnits }),
+          body: JSON.stringify(mergeMetadataSnapshotBody({ jobId, limit: totalUnits })),
         },
         "Generate Planned Draft worker",
       )
@@ -723,7 +724,7 @@ export function BookActions({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ serverManaged: true }),
+          body: JSON.stringify(mergeMetadataSnapshotBody({ serverManaged: true })),
         },
         "Queue chapter summary generation",
       );
@@ -746,7 +747,7 @@ export function BookActions({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ jobId }),
+          body: JSON.stringify(mergeMetadataSnapshotBody({ jobId })),
         },
         "Generate chapter summaries worker",
       )
@@ -832,7 +833,7 @@ export function BookActions({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ serverManaged: true }),
+          body: JSON.stringify(mergeMetadataSnapshotBody({ serverManaged: true })),
         },
         "Queue manuscript blueprint generation",
       );
@@ -855,7 +856,7 @@ export function BookActions({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ jobId }),
+          body: JSON.stringify(mergeMetadataSnapshotBody({ jobId })),
         },
         "Generate manuscript blueprint worker",
       )
@@ -943,7 +944,7 @@ export function BookActions({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ stage, serverManaged: true }),
+          body: JSON.stringify(mergeMetadataSnapshotBody({ stage, serverManaged: true })),
         },
         "Queue critic batch generation",
       );
@@ -966,7 +967,7 @@ export function BookActions({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ jobId, stage }),
+          body: JSON.stringify(mergeMetadataSnapshotBody({ jobId, stage })),
         },
         "Run critic batch worker",
       )

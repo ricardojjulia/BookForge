@@ -16,6 +16,7 @@ import {
 } from "@mantine/core";
 import { IconRocket, IconScissors, IconArrowUp, IconPlayerPlay } from "@tabler/icons-react";
 import { AutoReviewRunner } from "./auto-review-runner";
+import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 
 type Mode = "full_review" | "make_shorter" | "make_longer";
 
@@ -96,6 +97,7 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
         mode,
         serverManaged: true,
         jobId: resumeFrom?.id,
+        ...mergeMetadataSnapshotBody(),
       }),
     });
     const data = await res.json() as { jobId?: string; content?: { jobId?: string }; error?: string };
@@ -114,7 +116,7 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
     const launchAck = await fetch(`/api/books/${bookId}/auto-review/process`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId: activeJobId, mode, launchToken, launchOnly: true }),
+      body: JSON.stringify({ jobId: activeJobId, mode, launchToken, launchOnly: true, ...mergeMetadataSnapshotBody() }),
     });
     const launchData = await launchAck.json().catch(() => ({} as { error?: string }));
     if (!launchAck.ok || launchData?.error) {
@@ -131,7 +133,7 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
     void fetch(`/api/books/${bookId}/auto-review/process`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId: activeJobId, mode, launchToken }),
+      body: JSON.stringify({ jobId: activeJobId, mode, launchToken, ...mergeMetadataSnapshotBody() }),
     });
   }
 

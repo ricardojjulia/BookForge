@@ -15,6 +15,7 @@ import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
 import { getReasoningModelCandidates } from "@/lib/lmstudio/model-selection";
 import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
+import { resolveMetadataSnapshotContext } from "@/lib/book-metadata/timeline";
 import { applyRewritePlanDefaults } from "@/lib/rewrite/plan-defaults";
 import { buildRewritePlanPrompt } from "@/lib/rewrite/plan-prompt";
 import { createClient } from "@/lib/supabase/server";
@@ -22,6 +23,8 @@ import { createClient } from "@/lib/supabase/server";
 const schema = z.object({
   jobId: z.string().uuid().optional(),
   serverManaged: z.boolean().optional(),
+  metadataSnapshotId: z.string().uuid().optional(),
+  metadataBranchName: z.string().min(1).max(80).optional(),
 });
 
 function getErrorMessage(error: unknown) {
@@ -43,6 +46,14 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
+    const metadataContext = await resolveMetadataSnapshotContext(supabase, bookId, {
+      metadataSnapshotId: body.metadataSnapshotId || null,
+      metadataBranchName: body.metadataBranchName || null,
+    });
+    const metadataSnapshotId = metadataContext.snapshot.id;
+    const metadataBranchName = metadataContext.branchName;
+    const metadataSelectionSource = metadataContext.sourceType;
 
     const startedAt = new Date().toISOString();
     const totalUnits = 1;
@@ -87,6 +98,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           status,
           settings: {
             unit: "rewrite_plan",
+            metadataSelectionSource,
             progress: buildJobProgress({
               taskName: "Generate Rewrite Architect plan",
               currentUnit: status === "queued" ? "Queued" : "Preparing rewrite plan context",
@@ -101,6 +113,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           },
           prompt_snapshot: "Rewrite Architect planning pass.",
           created_by: user.id,
+          metadata_snapshot_id: metadataSnapshotId,
           started_at: status === "running" ? startedAt : null,
         })
         .select("id")
@@ -110,7 +123,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       jobStatus = status;
 
       if (body.serverManaged) {
-        return NextResponse.json({ content: { jobId, queued: true, totalUnits } });
+        return NextResponse.json({ content: { jobId, queued: true, totalUnits, metadataSnapshotId, metadataBranchName, metadataSelectionSource } });
       }
     }
 
@@ -274,6 +287,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       const { error: insertError } = await supabase.from("coherence_reports").insert({
         book_id: bookId,
         report_type: "rewrite_plan",
+        metadata_snapshot_id: metadataSnapshotId,
         content,
       });
       if (insertError) throw insertError;
@@ -309,7 +323,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         .eq("id", jobId);
       if (finalJobError) throw finalJobError;
 
-      return NextResponse.json({ content, revisionJobId: jobId });
+      return NextResponse.json({ content: { ...content, metadataSnapshotId, metadataBranchName, metadataSelectionSource }, revisionJobId: jobId });
     } catch (runError) {
       const completedAt = new Date().toISOString();
       const message = getErrorMessage(runError);

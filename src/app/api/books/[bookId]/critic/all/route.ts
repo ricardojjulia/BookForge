@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildJobProgress, createRevisionJobHeartbeat, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
+import { resolveMetadataSnapshotContext } from "@/lib/book-metadata/timeline";
 import { criticLenses } from "@/lib/critic/prompts";
 import { runCriticLens } from "@/lib/critic/run";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
@@ -11,6 +12,8 @@ const schema = z.object({
   stage: z.enum(["baseline", "post_rewrite"]).default("post_rewrite"),
   jobId: z.string().uuid().optional(),
   serverManaged: z.boolean().optional(),
+  metadataSnapshotId: z.string().uuid().optional(),
+  metadataBranchName: z.string().min(1).max(80).optional(),
 });
 
 function getErrorMessage(error: unknown) {
@@ -33,6 +36,14 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
+    const metadataContext = await resolveMetadataSnapshotContext(supabase, bookId, {
+      metadataSnapshotId: body.metadataSnapshotId || null,
+      metadataBranchName: body.metadataBranchName || null,
+    });
+    const metadataSnapshotId = metadataContext.snapshot.id;
+    const metadataBranchName = metadataContext.branchName;
+    const metadataSelectionSource = metadataContext.sourceType;
 
     const lenses = Object.keys(criticLenses) as CriticLens[];
     const startedAt = new Date().toISOString();
@@ -72,6 +83,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           settings: {
             stage: batchStage,
             unit: "critic_lens",
+            metadataSelectionSource,
+            metadataSnapshotId,
+            metadataBranchName,
             progress: buildJobProgress({
               taskName: "Run all BookForge Critic lenses",
               currentUnit: `Critic lens 1 of ${lenses.length}`,
@@ -86,6 +100,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           },
           prompt_snapshot: "BookForge Critic batch: all prebuilt lenses.",
           created_by: user.id,
+          metadata_snapshot_id: metadataSnapshotId,
           started_at: status === "running" ? startedAt : null,
         })
         .select("id")
@@ -95,7 +110,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       jobStatus = status;
 
       if (body.serverManaged) {
-        return NextResponse.json({ content: { jobId, queued: true, totalUnits: lenses.length } });
+        return NextResponse.json({ content: { jobId, queued: true, totalUnits: lenses.length, metadataSnapshotId, metadataBranchName, metadataSelectionSource } });
       }
     }
 
@@ -167,9 +182,12 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     await supabase.from("coherence_reports").insert({
       book_id: bookId,
+      metadata_snapshot_id: metadataSnapshotId,
       report_type: batchStage === "post_rewrite" ? "critic_post_batch" : "critic_batch",
       content: {
         stage: batchStage,
+        metadataSnapshotId,
+        metadataBranchName,
         completedAt: new Date().toISOString(),
         results,
       },
@@ -186,6 +204,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         settings: {
           stage: batchStage,
           unit: "critic_lens",
+          metadataSelectionSource,
+          metadataSnapshotId,
+          metadataBranchName,
           progress: buildJobProgress({
             taskName: "Run all BookForge Critic lenses",
             currentUnit: completedStatus === "cancelled" ? "Cancelled" : "Complete",
@@ -208,7 +229,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       .eq("id", jobId);
     if (finalJobError) throw finalJobError;
 
-    return NextResponse.json({ content: { stage: batchStage, completed: results.length, results } });
+    return NextResponse.json({ content: { stage: batchStage, completed: results.length, results, metadataSnapshotId, metadataBranchName, metadataSelectionSource } });
   } catch (error) {
     console.error("BookForge Critic batch failed", error);
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });

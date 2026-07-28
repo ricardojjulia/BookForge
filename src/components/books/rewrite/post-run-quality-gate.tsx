@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { criticLenses } from "@/lib/critic/prompts";
 import { summarizeStrategyOutcome } from "@/lib/critic/comparison";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 
 type ReportRow = {
   id: string;
@@ -92,7 +93,7 @@ export function PostRunQualityGate({
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ stage: "post_rewrite" }),
+            body: JSON.stringify(mergeMetadataSnapshotBody({ stage: "post_rewrite" })),
           },
           "Run post-rewrite Critic",
         );

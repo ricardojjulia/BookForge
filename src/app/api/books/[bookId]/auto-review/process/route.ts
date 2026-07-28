@@ -50,6 +50,12 @@ type AutoReviewJobRow = {
   completed_at: string | null;
 };
 
+type MetadataSelection = {
+  metadataSnapshotId?: string | null;
+  metadataBranchName?: string | null;
+  metadataSelectionSource?: "explicit_snapshot" | "branch_active" | "active_snapshot" | null;
+};
+
 type AutoReviewLogEntry = Record<string, unknown> & {
   type?: string;
   launchToken?: string;
@@ -66,7 +72,18 @@ type AutoReviewJobUpdate = {
 };
 
 function getError(e: unknown) {
-  return e instanceof Error ? e.message : "Failed.";
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === "object") {
+    const candidate = e as { message?: unknown; error?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    const parts = [candidate.message, candidate.error, candidate.details, candidate.hint]
+      .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+      .map((v) => v.trim());
+    if (parts.length > 0) {
+      const suffix = typeof candidate.code === "string" && candidate.code.trim() ? ` (code: ${candidate.code.trim()})` : "";
+      return `${parts.join(" | ")}${suffix}`;
+    }
+  }
+  return "Failed.";
 }
 
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
@@ -95,6 +112,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     const baseUrl = new URL(request.url);
     const currentJob = job as AutoReviewJobRow;
+    const selection = (currentJob.config || {}) as MetadataSelection;
 
     if (body.launchOnly) {
       return NextResponse.json({
@@ -191,7 +209,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             "Content-Type": "application/json",
             cookie,
           },
-          body: JSON.stringify({ ...bodyPayload, serverManaged: true }),
+          body: JSON.stringify({
+            ...bodyPayload,
+            serverManaged: true,
+            metadataSnapshotId: selection.metadataSnapshotId || undefined,
+            metadataBranchName: selection.metadataBranchName || undefined,
+            metadataSelectionSource: selection.metadataSelectionSource || undefined,
+          }),
         });
         const queueData = await queueRes.json().catch(() => ({}));
         if (!queueRes.ok || queueData.error) {
@@ -209,7 +233,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             "Content-Type": "application/json",
             cookie,
           },
-          body: JSON.stringify({ ...bodyPayload, jobId: stageJobId }),
+          body: JSON.stringify({
+            ...bodyPayload,
+            jobId: stageJobId,
+            metadataSnapshotId: selection.metadataSnapshotId || undefined,
+            metadataBranchName: selection.metadataBranchName || undefined,
+            metadataSelectionSource: selection.metadataSelectionSource || undefined,
+          }),
         });
         const runData = await runRes.json().catch(() => ({}));
         if (!runRes.ok || runData.error) {
@@ -224,7 +254,15 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           "Content-Type": payload !== undefined ? "application/json" : undefined,
           cookie,
         } as Record<string, string>,
-        body: payload !== undefined ? JSON.stringify(payload) : undefined,
+        body:
+          payload !== undefined
+            ? JSON.stringify({
+                ...(payload as Record<string, unknown>),
+                metadataSnapshotId: selection.metadataSnapshotId || undefined,
+                metadataBranchName: selection.metadataBranchName || undefined,
+                metadataSelectionSource: selection.metadataSelectionSource || undefined,
+              })
+            : undefined,
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) {

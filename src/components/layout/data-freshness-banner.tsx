@@ -118,7 +118,7 @@ export function DataFreshnessBanner({
     <Alert color={color} title={title} variant="light" mb="md">
       <Group justify="space-between" align="center" wrap="wrap">
         <Text size="sm">
-          Data fetched {formatAge(freshness.ageMs)} ago. {freshness.status === "expired" ? "A forced refresh was triggered." : "Would you like to refresh now?"}
+          Data fetched <span suppressHydrationWarning>{formatAge(freshness.ageMs)}</span> ago. {freshness.status === "expired" ? "A forced refresh was triggered." : "Would you like to refresh now?"}
         </Text>
         <Button size="xs" color={color === "red" ? "orange" : "grape"} loading={refreshing} onClick={() => void refreshNow("manual")}>
           Refresh now

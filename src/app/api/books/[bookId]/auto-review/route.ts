@@ -7,10 +7,25 @@ const schema = z.object({
   reviewStrategy: z.string().optional(),
   jobId: z.string().uuid().optional(),
   serverManaged: z.boolean().optional(),
+  metadataSnapshotId: z.string().uuid().optional(),
+  metadataBranchName: z.string().min(1).max(80).optional(),
 });
 
+type MetadataSelectionSource = "explicit_snapshot" | "branch_active" | "active_snapshot";
+
 function getError(e: unknown) {
-  return e instanceof Error ? e.message : "Failed.";
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === "object") {
+    const candidate = e as { message?: unknown; error?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    const parts = [candidate.message, candidate.error, candidate.details, candidate.hint]
+      .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+      .map((v) => v.trim());
+    if (parts.length > 0) {
+      const suffix = typeof candidate.code === "string" && candidate.code.trim() ? ` (code: ${candidate.code.trim()})` : "";
+      return `${parts.join(" | ")}${suffix}`;
+    }
+  }
+  return "Failed.";
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ bookId: string }> }) {
@@ -32,7 +47,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     ]);
     const bookStats = { chapters: chapterCount ?? 0, paragraphs: paragraphCount ?? 0 };
 
-    const status = body.serverManaged ? "queued" : "running";
+    // auto_review_jobs currently accepts running/completed/failed/cancelled only.
+    // Keep serverManaged semantics at the API layer, but persist as running.
+    const status = "running";
+    const metadataSelectionSource: MetadataSelectionSource = body.metadataSnapshotId
+      ? "explicit_snapshot"
+      : body.metadataBranchName
+        ? "branch_active"
+        : "active_snapshot";
 
     if (body.jobId) {
       const { data: existingJob, error: existingJobError } = await supabase
@@ -72,7 +94,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       .from("auto_review_jobs")
       .update({ status: "cancelled", completed_at: new Date().toISOString() })
       .eq("book_id", bookId)
-      .in("status", ["running", "queued"]);
+      .in("status", ["running"]);
 
     const { data: job, error } = await supabase
       .from("auto_review_jobs")
@@ -82,7 +104,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         mode: body.mode,
         status,
         current_stage: "analyze",
-        config: { reviewStrategy: body.reviewStrategy || "all" },
+        config: {
+          reviewStrategy: body.reviewStrategy || "all",
+          metadataSnapshotId: body.metadataSnapshotId || null,
+          metadataBranchName: body.metadataBranchName || null,
+          metadataSelectionSource,
+        },
         book_stats: bookStats,
       })
       .select("id")
@@ -90,7 +117,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     if (error) throw error;
 
     if (body.serverManaged) {
-      return NextResponse.json({ content: { jobId: job.id, queued: true, totalUnits: 1 } });
+      return NextResponse.json({ content: { jobId: job.id, queued: true, totalUnits: 1, metadataSelectionSource } });
     }
     return NextResponse.json({ jobId: job.id });
   } catch (e) {

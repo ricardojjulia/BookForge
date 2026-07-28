@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Alert, Badge, Button, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { useRouter } from "next/navigation";
+import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 
 type Props = {
   bookId: string;
@@ -39,7 +40,9 @@ export function ReadinessStatusGrid({ bookId, summarized, chapterCount, hasBluep
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ ...(body && typeof body === "object" ? body : {}), serverManaged: true }),
+            body: JSON.stringify(
+              mergeMetadataSnapshotBody({ ...(body && typeof body === "object" ? body : {}), serverManaged: true }),
+            ),
           },
           `${key}:queue`,
         );
@@ -51,7 +54,9 @@ export function ReadinessStatusGrid({ bookId, summarized, chapterCount, hasBluep
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ ...(body && typeof body === "object" ? body : {}), jobId }),
+            body: JSON.stringify(
+              mergeMetadataSnapshotBody({ ...(body && typeof body === "object" ? body : {}), jobId }),
+            ),
           },
           `${key}:worker`,
         );
@@ -59,7 +64,7 @@ export function ReadinessStatusGrid({ bookId, summarized, chapterCount, hasBluep
         await fetchJson(path, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: body ? JSON.stringify(body) : undefined,
+          body: body ? JSON.stringify(mergeMetadataSnapshotBody(body && typeof body === "object" ? (body as Record<string, unknown>) : {})) : undefined,
         }, key);
       }
       router.refresh();

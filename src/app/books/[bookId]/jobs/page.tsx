@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Alert, Badge, Button, Container, Group, Paper, Progress, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
 import { AppShell } from "@/components/layout/app-shell";
+import { SelectedJobFocus } from "@/components/books/jobs/selected-job-focus";
 import { extractJobProgress, getJobProgressDisplay, isStaleRunningJob, summarizeRevisionJobs } from "@/lib/ai/job-state";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -19,7 +20,13 @@ type JobRow = {
   progress?: ReturnType<typeof extractJobProgress>;
 };
 
-export default async function JobsHistoryPage({ params }: { params: Promise<{ bookId: string }> }) {
+export default async function JobsHistoryPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ bookId: string }>;
+  searchParams: Promise<{ job?: string }>;
+}) {
   if (!hasSupabaseEnv()) {
     return (
       <AppShell>
@@ -30,7 +37,8 @@ export default async function JobsHistoryPage({ params }: { params: Promise<{ bo
     );
   }
 
-  const { bookId } = await params;
+  const [{ bookId }, query] = await Promise.all([params, searchParams]);
+  const selectedJobId = typeof query?.job === "string" ? query.job.trim() : "";
   const supabase = await createClient();
   const [{ data: book }, { data: jobs, error }] = await Promise.all([
     supabase.from("books").select("title").eq("id", bookId).single(),
@@ -68,6 +76,7 @@ export default async function JobsHistoryPage({ params }: { params: Promise<{ bo
   return (
     <AppShell>
       <Container size="xl">
+        {selectedJobId ? <SelectedJobFocus jobId={selectedJobId} /> : null}
         <Group justify="space-between" mb="xl" align="flex-start">
           <div>
             <Title>AI Jobs History</Title>
@@ -130,11 +139,25 @@ export default async function JobsHistoryPage({ params }: { params: Promise<{ bo
                 {sortedJobs.map((job) => {
                   const { completed, total, percent } = getJobProgressDisplay(job.progress || null, job.status);
                   const stale = isStaleRunningJob(job.status, job.progress || null);
+                  const isSelected = Boolean(selectedJobId) && selectedJobId === job.id;
                   return (
-                    <tr key={job.id}>
+                    <tr
+                      key={job.id}
+                      data-job-id={job.id}
+                      tabIndex={isSelected ? -1 : undefined}
+                      aria-selected={isSelected}
+                      style={isSelected ? { backgroundColor: "#f5f7ff" } : undefined}
+                    >
                       <td>
                         <Stack gap={2}>
-                          <Text fw={800}>{job.progress?.taskName || humanizeMode(job.mode)}</Text>
+                          <Group gap={6}>
+                            <Text fw={800}>{job.progress?.taskName || humanizeMode(job.mode)}</Text>
+                            {isSelected && (
+                              <Badge size="xs" color="blue" variant="light">
+                                selected
+                              </Badge>
+                            )}
+                          </Group>
                           <Text size="xs" c="dimmed">
                             {job.progress?.currentUnit || job.id}
                           </Text>

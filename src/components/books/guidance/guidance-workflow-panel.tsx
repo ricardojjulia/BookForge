@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Alert,
   Badge,
@@ -19,6 +19,10 @@ import {
 import { useRouter } from "next/navigation";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { getJobProgressDisplay } from "@/lib/ai/job-state";
+import { useAdaptivePolling } from "@/lib/hooks/use-adaptive-polling";
+
+const ACTIVE_POLL_MS = 4000;
+const IDLE_POLL_MS = 30000;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -363,32 +367,35 @@ type ActiveJob = {
 
 function RunningJobsStrip({ bookId, onAllDone }: { bookId: string; onAllDone: () => void }) {
   const [jobs, setJobs] = useState<ActiveJob[]>([]);
-  const prevAllDone = useRef(false);
+  const hasSeenRunningJobs = useRef(false);
 
-  useEffect(() => {
-    let active = true;
+  const pollJobs = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/books/${bookId}/jobs`, { cache: "no-store" });
+      const data = await res.json();
+      const all: ActiveJob[] = data.content?.jobs ?? [];
+      const running = all.filter((job) => ["running", "queued", "paused"].includes(job.status ?? ""));
+      setJobs(running);
 
-    async function poll() {
-      try {
-        const res = await fetch(`/api/books/${bookId}/jobs`, { cache: "no-store" });
-        const data = await res.json();
-        const all: ActiveJob[] = data.content?.jobs ?? [];
-        const running = all.filter((j) => ["running", "queued", "paused"].includes(j.status ?? ""));
-        if (!active) return;
-        setJobs(running);
-
-        const allDoneNow = running.length === 0;
-        if (allDoneNow && !prevAllDone.current) onAllDone();
-        prevAllDone.current = allDoneNow;
-      } catch {
-        // silent — non-critical
+      if (running.length > 0) {
+        hasSeenRunningJobs.current = true;
+      } else if (hasSeenRunningJobs.current) {
+        onAllDone();
+        hasSeenRunningJobs.current = false;
       }
+      return running.length > 0;
+    } catch {
+      // Back off when polling fails to avoid hammering the jobs endpoint.
+      return false;
     }
-
-    void poll();
-    const interval = window.setInterval(() => void poll(), 2500);
-    return () => { active = false; window.clearInterval(interval); };
   }, [bookId, onAllDone]);
+
+  useAdaptivePolling(pollJobs, {
+    activeIntervalMs: ACTIVE_POLL_MS,
+    idleIntervalMs: IDLE_POLL_MS,
+    pauseWhenHidden: true,
+    coordinatorKey: `book-jobs:${bookId}`,
+  });
 
   if (jobs.length === 0) return null;
 

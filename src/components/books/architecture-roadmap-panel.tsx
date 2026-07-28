@@ -216,6 +216,11 @@ export function ArchitectureRoadmapPanel({
               <Text size="sm" c="dimmed">
                 All chapters are drafted. Auto-Review will read the full manuscript, run the critic panel, generate a Blueprint, and build a rewrite plan — all in one click. Find it in Studio Actions below, or use the button in the Production Command Center.
               </Text>
+              <Group mt="xs">
+                <Button component="a" href="#studio-actions" size="xs" color="orange">
+                  Run Auto-Review
+                </Button>
+              </Group>
             </div>
           </Group>
         </Paper>

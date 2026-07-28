@@ -1,10 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Alert, Badge, Button, Group, Paper, Progress, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { useRouter } from "next/navigation";
 import { getJobProgressDisplay } from "@/lib/ai/job-state";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { useAdaptivePolling } from "@/lib/hooks/use-adaptive-polling";
+
+const ACTIVE_POLL_MS = 4000;
+const IDLE_POLL_MS = 30000;
 
 type PersistedAiJob = {
   id: string;
@@ -55,15 +59,11 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
     try {
       const result = await fetchJson<JobsResponse>(`/api/books/${bookId}/jobs`, { cache: "no-store" }, "Load AI jobs");
       const nextJobs = result.content?.jobs || [];
+      const hasActiveJobs = nextJobs.some((job) => ["running", "paused", "queued"].includes(job.status || ""));
       const shouldRefresh = nextJobs.some((job) => {
         const previous = previousStatuses.current.get(job.id);
         const newlyCompleted = previous && previous !== "completed" && job.status === "completed";
-        const recentlyCompleted =
-          !previous &&
-          job.status === "completed" &&
-          Boolean(job.completed_at) &&
-          Date.now() - new Date(job.completed_at || "").getTime() < 120000;
-        return (newlyCompleted || recentlyCompleted) && !refreshedCompletedJobs.current.has(job.id);
+        return newlyCompleted && !refreshedCompletedJobs.current.has(job.id);
       });
 
       nextJobs.forEach((job) => previousStatuses.current.set(job.id, job.status));
@@ -75,8 +75,11 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
         router.refresh();
       }
       setError("");
+      return hasActiveJobs;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load persistent AI jobs.");
+      // Back off when polling fails to avoid hammering the jobs endpoint.
+      return false;
     }
   }, [bookId, router]);
 
@@ -204,14 +207,12 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
     }
   }
 
-  useEffect(() => {
-    const initial = window.setTimeout(() => void loadJobs(), 0);
-    const interval = window.setInterval(() => void loadJobs(), 2500);
-    return () => {
-      window.clearTimeout(initial);
-      window.clearInterval(interval);
-    };
-  }, [loadJobs]);
+  useAdaptivePolling(loadJobs, {
+    activeIntervalMs: ACTIVE_POLL_MS,
+    idleIntervalMs: IDLE_POLL_MS,
+    pauseWhenHidden: true,
+    coordinatorKey: `book-jobs:${bookId}`,
+  });
 
   return (
     <Paper withBorder radius="md" p="xl" bg="#fbfaf8">
