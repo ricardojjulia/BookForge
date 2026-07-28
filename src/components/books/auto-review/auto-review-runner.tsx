@@ -34,6 +34,7 @@ import {
   IconPlayerPlay,
   IconTrophy,
 } from "@tabler/icons-react";
+import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 
 type Mode = "full_review" | "make_shorter" | "make_longer";
 type StageStatus = "pending" | "running" | "done" | "failed" | "skipped";
@@ -238,6 +239,11 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
       path.includes("/auto-revision") ||
       path.includes("/drift-check")
     );
+  }
+
+  function normalizeStageError(stageId: string, error: unknown) {
+    const fallback = `${stageId} failed`;
+    return getLmStudioErrorMessage(error, fallback, { task: stageId });
   }
 
   /**
@@ -519,7 +525,7 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
       return true;
 
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = normalizeStageError(stageId, e);
       setStatus(stageId, "failed", msg);
       addLog(`✗ Failed: ${stageId} — ${msg}`);
       // Record the deepest actual failing stage so the error banner shows the
