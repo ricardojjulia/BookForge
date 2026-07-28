@@ -16,6 +16,7 @@ import {
 } from "@mantine/core";
 import { IconRocket, IconScissors, IconArrowUp, IconPlayerPlay } from "@tabler/icons-react";
 import { AutoReviewRunner } from "./auto-review-runner";
+import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 
 type Mode = "full_review" | "make_shorter" | "make_longer";
 
@@ -66,6 +67,7 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
   const [completedStages, setCompletedStages] = useState<string[] | undefined>(undefined);
   const [resumableJob, setResumableJob] = useState<ResumableJob | null>(null);
   const [checkingResume, setCheckingResume] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   async function checkForResumableJob() {
     setCheckingResume(true);
@@ -86,18 +88,53 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
   async function start(resumeFrom?: ResumableJob) {
     const mode = resumeFrom?.mode ?? selected;
     if (!mode) return;
+    setStartError(null);
+
     const res = await fetch(`/api/books/${bookId}/auto-review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode }),
+      body: JSON.stringify({
+        mode,
+        serverManaged: true,
+        jobId: resumeFrom?.id,
+        ...mergeMetadataSnapshotBody(),
+      }),
     });
-    const data = await res.json() as { jobId?: string; error?: string };
-    if (data.error) { alert(data.error); return; }
-    setJobId(data.jobId!);
+    const data = await res.json() as { jobId?: string; content?: { jobId?: string }; error?: string };
+    if (data.error) {
+      setStartError(data.error);
+      return;
+    }
+    const activeJobId = data.content?.jobId || data.jobId;
+    if (!activeJobId) {
+      setStartError("Failed to queue auto-review run.");
+      return;
+    }
+
+    const launchToken = crypto.randomUUID();
+
+    const launchAck = await fetch(`/api/books/${bookId}/auto-review/process`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId: activeJobId, mode, launchToken, launchOnly: true, ...mergeMetadataSnapshotBody() }),
+    });
+    const launchData = await launchAck.json().catch(() => ({} as { error?: string }));
+    if (!launchAck.ok || launchData?.error) {
+      setStartError(launchData?.error || "Failed to launch auto-review worker.");
+      return;
+    }
+
+    setJobId(activeJobId);
     setSelected(mode);
     setCompletedStages(resumeFrom?.stages_completed);
     setRunning(true);
     setResumableJob(null);
+
+    void fetch(`/api/books/${bookId}/auto-review/process`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId: activeJobId, mode, launchToken, ...mergeMetadataSnapshotBody() }),
+    });
   }
 
   function reset() {
@@ -106,10 +143,12 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
     setJobId(null);
     setCompletedStages(undefined);
     setResumableJob(null);
+    setStartError(null);
     setOpen(false);
   }
 
   function openWizard() {
+    setStartError(null);
     setOpen(true);
     checkForResumableJob();
   }
@@ -143,9 +182,16 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
             mode={selected!}
             onDone={reset}
             completedStages={completedStages}
+            serverManaged
           />
         ) : (
           <Stack gap="md">
+            {startError && (
+              <Alert color="red" title="Unable to start auto-review">
+                <Text size="sm">{startError}</Text>
+              </Alert>
+            )}
+
             {resumableJob && (
               <Alert color="orange" icon={<IconPlayerPlay size={16} />} title="Previous run can be resumed">
                 <Text size="sm" mb="xs">

@@ -5,6 +5,7 @@ import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { BookActions } from "@/components/books/book-actions";
 import { ManuscriptSearch } from "@/components/books/manuscript-search";
 import { VoiceCapturePanel } from "@/components/books/voice-capture-panel";
+import { BookChatRail } from "@/components/books/chat/book-chat-rail";
 import { ChapterSummaryReview } from "@/components/books/chapter-summary-review";
 import { ChapterSummaryViewer } from "@/components/books/chapter-summary-viewer";
 import { ChapterMetadataPanel } from "@/components/books/chapter-metadata-panel";
@@ -24,6 +25,7 @@ import { BookConceptPanel } from "@/components/books/book-concept-panel";
 import { ArchitectureRoadmapPanel } from "@/components/books/architecture-roadmap-panel";
 import { SceneEditorPanel } from "@/components/books/scene-editor-panel";
 import { StructureAuditPanel } from "@/components/books/structure-audit-panel";
+import { BookMetadataTimelinePanel } from "@/components/books/metadata/book-metadata-timeline-panel";
 import { getBookAuthorDisplay } from "@/lib/books/status";
 import { getRewriteReadiness, type RewriteReadiness } from "@/lib/rewrite/readiness";
 import type { RewriteWorkflowRow } from "@/lib/rewrite/workflows";
@@ -315,6 +317,10 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           chapters={(chapters || []).map((c) => ({ id: c.id, chapter_number: c.chapter_number, title: c.title ?? null }))}
           existingProfile={(bible as { voice_profile?: unknown } | null)?.voice_profile as Record<string, unknown> | null}
         />
+
+        <BookChatRail bookId={bookId} />
+
+        <BookMetadataTimelinePanel bookId={bookId} />
 
         <Paper id="studio-actions" withBorder radius="md" p="xl" bg="white" mt="xl">
           <Group justify="space-between" mb="sm" align="flex-start" wrap="nowrap">

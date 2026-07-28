@@ -1,10 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Alert, Badge, Button, Group, Paper, Progress, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { useRouter } from "next/navigation";
 import { getJobProgressDisplay } from "@/lib/ai/job-state";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { useAdaptivePolling } from "@/lib/hooks/use-adaptive-polling";
+
+const ACTIVE_POLL_MS = 4000;
+const IDLE_POLL_MS = 30000;
 
 type PersistedAiJob = {
   id: string;
@@ -55,15 +59,11 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
     try {
       const result = await fetchJson<JobsResponse>(`/api/books/${bookId}/jobs`, { cache: "no-store" }, "Load AI jobs");
       const nextJobs = result.content?.jobs || [];
+      const hasActiveJobs = nextJobs.some((job) => ["running", "paused", "queued"].includes(job.status || ""));
       const shouldRefresh = nextJobs.some((job) => {
         const previous = previousStatuses.current.get(job.id);
         const newlyCompleted = previous && previous !== "completed" && job.status === "completed";
-        const recentlyCompleted =
-          !previous &&
-          job.status === "completed" &&
-          Boolean(job.completed_at) &&
-          Date.now() - new Date(job.completed_at || "").getTime() < 120000;
-        return (newlyCompleted || recentlyCompleted) && !refreshedCompletedJobs.current.has(job.id);
+        return newlyCompleted && !refreshedCompletedJobs.current.has(job.id);
       });
 
       nextJobs.forEach((job) => previousStatuses.current.set(job.id, job.status));
@@ -75,8 +75,11 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
         router.refresh();
       }
       setError("");
+      return hasActiveJobs;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load persistent AI jobs.");
+      // Back off when polling fails to avoid hammering the jobs endpoint.
+      return false;
     }
   }, [bookId, router]);
 
@@ -110,15 +113,41 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
     }
     setLoadingAction(`retry:${job.id}`);
     try {
-      await fetchJson(
-        endpoint.path,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(endpoint.body),
-        },
-        "Retry failed units",
-      );
+      if (supportsServerManagedHandoff(endpoint.path)) {
+        const queued = await fetchJson<{ content?: { jobId?: string; revisionJobId?: string } }>(
+          endpoint.path,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...endpoint.body, serverManaged: true }),
+          },
+          "Queue retry failed units",
+        );
+        const handoffJobId = queued.content?.jobId || queued.content?.revisionJobId;
+        if (handoffJobId) {
+          void fetchJson(
+            endpoint.path,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ ...endpoint.body, jobId: handoffJobId }),
+            },
+            "Retry failed units worker",
+          ).then(() => loadJobs()).catch(() => {
+            // best effort; poller will surface failure state
+          });
+        }
+      } else {
+        await fetchJson(
+          endpoint.path,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(endpoint.body),
+          },
+          "Retry failed units",
+        );
+      }
       await loadJobs();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to retry failed units.");
@@ -135,15 +164,41 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
     }
     setLoadingAction(`resume-interrupted:${job.id}`);
     try {
-      await fetchJson(
-        endpoint.path,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(endpoint.body),
-        },
-        "Resume interrupted job",
-      );
+      if (supportsServerManagedHandoff(endpoint.path)) {
+        const queued = await fetchJson<{ content?: { jobId?: string; revisionJobId?: string } }>(
+          endpoint.path,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...endpoint.body, serverManaged: true }),
+          },
+          "Queue interrupted replacement",
+        );
+        const handoffJobId = queued.content?.jobId || queued.content?.revisionJobId;
+        if (handoffJobId) {
+          void fetchJson(
+            endpoint.path,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ ...endpoint.body, jobId: handoffJobId }),
+            },
+            "Resume interrupted worker",
+          ).then(() => loadJobs()).catch(() => {
+            // best effort; poller will surface failure state
+          });
+        }
+      } else {
+        await fetchJson(
+          endpoint.path,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(endpoint.body),
+          },
+          "Resume interrupted job",
+        );
+      }
       await loadJobs();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to resume interrupted job.");
@@ -152,14 +207,12 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
     }
   }
 
-  useEffect(() => {
-    const initial = window.setTimeout(() => void loadJobs(), 0);
-    const interval = window.setInterval(() => void loadJobs(), 2500);
-    return () => {
-      window.clearTimeout(initial);
-      window.clearInterval(interval);
-    };
-  }, [loadJobs]);
+  useAdaptivePolling(loadJobs, {
+    activeIntervalMs: ACTIVE_POLL_MS,
+    idleIntervalMs: IDLE_POLL_MS,
+    pauseWhenHidden: true,
+    coordinatorKey: `book-jobs:${bookId}`,
+  });
 
   return (
     <Paper withBorder radius="md" p="xl" bg="#fbfaf8">
@@ -361,7 +414,7 @@ function retryEndpoint(bookId: string, job: PersistedAiJob) {
   }
   if (job.mode === "bookforge_critic" || job.mode === "bookforge_critic_batch") {
     const lens = job.progress?.failedUnits?.find((unit) => unit.type === "critic_lens")?.id;
-    if (lens) return { path: `/api/books/${bookId}/critic`, body: { lens } };
+    if (lens) return { path: `/api/books/${bookId}/critic`, body: { lens, stage: stringSetting(job.settings, "stage") || "baseline" } };
   }
   if (job.mode === "manuscript_blueprint") {
     return { path: `/api/books/${bookId}/analyze`, body: { retryJobId: job.id } };
@@ -371,8 +424,25 @@ function retryEndpoint(bookId: string, job: PersistedAiJob) {
 
 function replacementEndpoint(bookId: string, job: PersistedAiJob) {
   if (job.mode === "full_book_rewrite") return { path: `/api/books/${bookId}/rewrite-execute`, body: {} };
+  if (job.mode === "rewrite_plan") return { path: `/api/books/${bookId}/rewrite-plan`, body: {} };
+  if (job.mode === "rewrite_drift_check") return { path: `/api/books/${bookId}/drift-check`, body: {} };
+  if (job.mode === "auto_revision") {
+    return {
+      path: `/api/books/${bookId}/auto-revision`,
+      body: {
+        action: "run",
+        trustProfile: stringSetting(job.settings, "trustProfile") || "full_trust",
+        maxDecisions: numberSetting(job.settings, "maxDecisions") || 5000,
+      },
+    };
+  }
+  if (job.mode === "voice_capture") {
+    const chapterIds = stringArraySetting(job.settings, "chapterIds");
+    if (chapterIds.length) return { path: `/api/books/${bookId}/voice-capture`, body: { chapterIds } };
+  }
   if (job.mode === "chapter_summaries") return { path: `/api/books/${bookId}/chapters/summarize`, body: {} };
   if (job.mode === "manuscript_blueprint") return { path: `/api/books/${bookId}/analyze`, body: {} };
+  if (job.mode === "publishing_lab") return { path: `/api/books/${bookId}/publishing-lab`, body: { action: "run" } };
   if (job.mode === "bookforge_critic_batch") {
     return { path: `/api/books/${bookId}/critic/all`, body: { stage: stringSetting(job.settings, "stage") || "post_rewrite" } };
   }
@@ -381,6 +451,31 @@ function replacementEndpoint(bookId: string, job: PersistedAiJob) {
     if (lens) return { path: `/api/books/${bookId}/critic`, body: { lens, stage: stringSetting(job.settings, "stage") || "baseline" } };
   }
   return null;
+}
+
+function supportsServerManagedHandoff(path: string) {
+  return (
+    path.includes("/rewrite-execute") ||
+    path.includes("/rewrite-plan") ||
+    path.includes("/drift-check") ||
+    path.includes("/auto-revision") ||
+    path.includes("/voice-capture") ||
+    path.includes("/chapters/summarize") ||
+    path.endsWith("/analyze") ||
+    path.includes("/critic") ||
+    path.includes("/publishing-lab")
+  );
+}
+
+function stringArraySetting(settings: Record<string, unknown> | null | undefined, key: string) {
+  const value = settings?.[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+}
+
+function numberSetting(settings: Record<string, unknown> | null | undefined, key: string) {
+  const value = settings?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function stringSetting(settings: Record<string, unknown> | null | undefined, key: string) {

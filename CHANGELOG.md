@@ -26,7 +26,6 @@
 
 - Added detailed phased execution log at `docs/SOFTWARE_FACTORY.md`.
 - Added live engineering backlog at `docs/TODO.md`.
-- Added domain decision record for admin-first and course-aware evolution at `docs/ADR-0001-admin-course-domain.md`.
 
 ## 0.3.0 - (planned)
 

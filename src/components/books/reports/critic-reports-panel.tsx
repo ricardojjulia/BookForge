@@ -118,10 +118,21 @@ function RecheckCriticButton({ bookId, reportType }: { bookId: string; reportTyp
   async function recheck() {
     open();
     try {
+      const queuedResponse = await fetch(`/api/books/${bookId}/critic`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ lens, stage, serverManaged: true }),
+      });
+      const queuedResult = await queuedResponse.json();
+      if (!queuedResponse.ok) throw new Error(queuedResult.error || "Unable to queue critic recheck.");
+
+      const jobId = queuedResult?.content?.jobId;
+      if (!jobId) throw new Error("Critic recheck queue handoff failed.");
+
       const response = await fetch(`/api/books/${bookId}/critic`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ lens, stage }),
+        body: JSON.stringify({ lens, stage, jobId }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to recheck report.");

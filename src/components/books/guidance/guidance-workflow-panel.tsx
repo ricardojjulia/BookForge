@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Alert,
   Badge,
@@ -19,6 +19,10 @@ import {
 import { useRouter } from "next/navigation";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { getJobProgressDisplay } from "@/lib/ai/job-state";
+import { useAdaptivePolling } from "@/lib/hooks/use-adaptive-polling";
+
+const ACTIVE_POLL_MS = 4000;
+const IDLE_POLL_MS = 30000;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -124,6 +128,7 @@ function buildItems(content: Record<string, unknown>): ActionItem[] {
 
 type RewriteResult = {
   content?: {
+    revisionJobId?: string;
     attempted?: number;
     rewritten?: number;
     skippedAccepted?: number;
@@ -164,47 +169,74 @@ function RewriteModal({
     if (!item) return;
     setRunning(true);
     setResult(null);
+    const payload = {
+      strategyId: strategy,
+      authorInstructions: instructions.trim() || undefined,
+      maxUnits: 500,
+      coverageMode: "normal" as const,
+      rewriteAccepted,
+    };
     try {
-      const data = await fetchJson<RewriteResult>(
+      const queued = await fetchJson<RewriteResult>(
         `/api/books/${bookId}/rewrite-execute`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            strategyId: strategy,
-            authorInstructions: instructions.trim() || undefined,
-            maxUnits: 500,
-            coverageMode: "normal",
-            rewriteAccepted,
-          }),
+          body: JSON.stringify({ ...payload, serverManaged: true }),
         },
-        "Guidance rewrite",
+        "Queue guidance rewrite",
       );
-      const attempted = data?.content?.attempted ?? 0;
-      const rewritten = data?.content?.rewritten ?? 0;
-      const skippedAccepted = data?.content?.skippedAccepted ?? 0;
-
-      if (attempted === 0 && skippedAccepted > 0 && !rewriteAccepted) {
-        setResult({
-          type: "warning",
-          message: `All ${skippedAccepted} paragraph${skippedAccepted !== 1 ? "s" : ""} already have accepted revisions. Enable "Re-run on accepted paragraphs" below and try again to rewrite existing content.`,
-        });
-      } else if (attempted === 0) {
-        setResult({
-          type: "warning",
-          message: "No eligible paragraphs found. All paragraphs may be locked, too short, or already have pending drafts.",
-        });
-      } else {
-        setResult({
-          type: "success",
-          message: `${rewritten} of ${attempted} paragraph${attempted !== 1 ? "s" : ""} queued for rewrite. Review drafts in the Revisions page.`,
-        });
-        onSuccess(item.key);
-        router.refresh();
+      const revisionJobId = queued?.content?.revisionJobId;
+      if (!revisionJobId) {
+        throw new Error("Rewrite job was not created.");
       }
+
+      setResult({
+        type: "success",
+        message: "Rewrite was queued and is now running in the background.",
+      });
+
+      void fetchJson<RewriteResult>(
+        `/api/books/${bookId}/rewrite-execute`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...payload, jobId: revisionJobId }),
+        },
+        "Guidance rewrite worker",
+      )
+        .then((data) => {
+          const attempted = data?.content?.attempted ?? 0;
+          const rewritten = data?.content?.rewritten ?? 0;
+          const skippedAccepted = data?.content?.skippedAccepted ?? 0;
+
+          if (attempted === 0 && skippedAccepted > 0 && !rewriteAccepted) {
+            setResult({
+              type: "warning",
+              message: `All ${skippedAccepted} paragraph${skippedAccepted !== 1 ? "s" : ""} already have accepted revisions. Enable "Re-run on accepted paragraphs" below and try again to rewrite existing content.`,
+            });
+          } else if (attempted === 0) {
+            setResult({
+              type: "warning",
+              message: "No eligible paragraphs found. All paragraphs may be locked, too short, or already have pending drafts.",
+            });
+          } else {
+            setResult({
+              type: "success",
+              message: `${rewritten} of ${attempted} paragraph${attempted !== 1 ? "s" : ""} queued for rewrite. Review drafts in the Revisions page.`,
+            });
+            onSuccess(item.key);
+            router.refresh();
+          }
+        })
+        .catch((err) => {
+          setResult({ type: "error", message: err instanceof Error ? err.message : "Rewrite failed." });
+        })
+        .finally(() => {
+          setRunning(false);
+        });
     } catch (err) {
       setResult({ type: "error", message: err instanceof Error ? err.message : "Rewrite failed." });
-    } finally {
       setRunning(false);
     }
   }
@@ -335,32 +367,35 @@ type ActiveJob = {
 
 function RunningJobsStrip({ bookId, onAllDone }: { bookId: string; onAllDone: () => void }) {
   const [jobs, setJobs] = useState<ActiveJob[]>([]);
-  const prevAllDone = useRef(false);
+  const hasSeenRunningJobs = useRef(false);
 
-  useEffect(() => {
-    let active = true;
+  const pollJobs = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/books/${bookId}/jobs`, { cache: "no-store" });
+      const data = await res.json();
+      const all: ActiveJob[] = data.content?.jobs ?? [];
+      const running = all.filter((job) => ["running", "queued", "paused"].includes(job.status ?? ""));
+      setJobs(running);
 
-    async function poll() {
-      try {
-        const res = await fetch(`/api/books/${bookId}/jobs`, { cache: "no-store" });
-        const data = await res.json();
-        const all: ActiveJob[] = data.content?.jobs ?? [];
-        const running = all.filter((j) => ["running", "queued", "paused"].includes(j.status ?? ""));
-        if (!active) return;
-        setJobs(running);
-
-        const allDoneNow = running.length === 0;
-        if (allDoneNow && !prevAllDone.current) onAllDone();
-        prevAllDone.current = allDoneNow;
-      } catch {
-        // silent — non-critical
+      if (running.length > 0) {
+        hasSeenRunningJobs.current = true;
+      } else if (hasSeenRunningJobs.current) {
+        onAllDone();
+        hasSeenRunningJobs.current = false;
       }
+      return running.length > 0;
+    } catch {
+      // Back off when polling fails to avoid hammering the jobs endpoint.
+      return false;
     }
-
-    void poll();
-    const interval = window.setInterval(() => void poll(), 2500);
-    return () => { active = false; window.clearInterval(interval); };
   }, [bookId, onAllDone]);
+
+  useAdaptivePolling(pollJobs, {
+    activeIntervalMs: ACTIVE_POLL_MS,
+    idleIntervalMs: IDLE_POLL_MS,
+    pauseWhenHidden: true,
+    coordinatorKey: `book-jobs:${bookId}`,
+  });
 
   if (jobs.length === 0) return null;
 

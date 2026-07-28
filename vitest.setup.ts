@@ -15,3 +15,13 @@ if (typeof window !== "undefined" && !window.matchMedia) {
 		}),
 	});
 }
+
+if (typeof window !== "undefined" && !window.visualViewport) {
+	Object.defineProperty(window, "visualViewport", {
+		writable: true,
+		value: {
+			addEventListener: () => {},
+			removeEventListener: () => {},
+		},
+	});
+}

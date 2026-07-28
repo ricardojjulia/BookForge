@@ -25,6 +25,12 @@ type ArchitectureChapter = {
   partTitle?: string;
 };
 
+const schema = z.object({
+  jobId: z.string().uuid().optional(),
+  limit: z.number().int().min(1).max(5).optional(),
+  serverManaged: z.boolean().optional(),
+});
+
 function getErrorMessage(error: unknown, context: { model?: string; task?: string; modelSource?: string; configuredModels?: string[] } = {}) {
   const lmStudioMessage = getLmStudioErrorMessage(error, "", context);
   if (lmStudioMessage) return lmStudioMessage;
@@ -38,8 +44,8 @@ function getErrorMessage(error: unknown, context: { model?: string; task?: strin
 export async function POST(request: Request, { params }: { params: Promise<{ bookId: string }> }) {
   try {
     const { bookId } = await params;
-    const body = await request.json().catch(() => ({}));
-    const requestedLimit = Number(body?.limit || 3);
+    const body = schema.parse(await request.json().catch(() => ({})));
+    const requestedLimit = Number(body.limit || 3);
     const limit = Math.max(1, Math.min(5, Number.isFinite(requestedLimit) ? requestedLimit : 3));
 
     const supabase = await createClient();
@@ -116,6 +122,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     });
     const { client, model, preparedModel, modelSelection } = modelPlan;
     const generated: Array<{ chapterNumber: number; title: string | null; paragraphCount: number }> = [];
+    let jobId = body.jobId || "";
 
     const initialJobSettings = mergeJobSettings(
       {
@@ -140,57 +147,84 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       },
     );
 
-    const { data: job, error: jobError } = await supabase
-      .from("revision_jobs")
-      .insert({
-        book_id: bookId,
-        mode: "creation_draft_generation",
-        status: "running",
-        settings: initialJobSettings,
-        created_by: user.id,
-        started_at: new Date().toISOString(),
-      })
-      .select("id")
-      .single();
-    if (jobError) throw jobError;
-
     let currentJobSettings: unknown = initialJobSettings;
+
+    if (jobId) {
+      const { data: existingJob, error: existingJobError } = await supabase
+        .from("revision_jobs")
+        .select("id,status,settings")
+        .eq("id", jobId)
+        .eq("book_id", bookId)
+        .eq("created_by", user.id)
+        .single();
+      if (existingJobError) throw existingJobError;
+      if (!existingJob) return NextResponse.json({ error: "Draft job not found." }, { status: 404 });
+      if (existingJob.status === "completed") return NextResponse.json({ ok: true, message: "Draft job already completed." });
+      if (existingJob.status === "failed") return NextResponse.json({ ok: true, message: "Draft job already failed." });
+      currentJobSettings = existingJob.settings || initialJobSettings;
+    } else {
+      const { data: job, error: jobError } = await supabase
+        .from("revision_jobs")
+        .insert({
+          book_id: bookId,
+          mode: "creation_draft_generation",
+          status: "running",
+          settings: initialJobSettings,
+          created_by: user.id,
+          started_at: new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+      if (jobError) throw jobError;
+      jobId = job.id;
+
+      if (body.serverManaged) {
+        return NextResponse.json({ content: { jobId, queued: true, totalUnits: plannedChapters.length } });
+      }
+    }
     let successCount = 0;
 
     try {
       for (const chapter of plannedChapters) {
         const chapterLabel = `Chapter ${chapter.chapter_number}${chapter.title ? `: ${chapter.title}` : ""}`;
-        currentJobSettings = await updateRevisionJobProgress(supabase, job.id, currentJobSettings, {
+        currentJobSettings = await updateRevisionJobProgress(supabase, jobId, currentJobSettings, {
+          currentUnit: chapterLabel,
+          attempted: successCount,
+          successful: successCount,
+          totalUnits: plannedChapters.length,
+        });
+        const heartbeat = createRevisionJobHeartbeat(supabase, jobId, currentJobSettings, {
           currentUnit: chapterLabel,
           attempted: successCount,
           successful: successCount,
           totalUnits: plannedChapters.length,
         });
 
-        const architectureChapter =
-          architectureChapters.find((item) => item.chapterNumber === chapter.chapter_number) || {
-            chapterNumber: chapter.chapter_number,
-            title: chapter.title || `Chapter ${chapter.chapter_number}`,
-            purpose: chapter.summary || "",
-          };
-        const previousChapter = architectureChapters.find((item) => item.chapterNumber === chapter.chapter_number - 1);
-        const nextChapter = architectureChapters.find((item) => item.chapterNumber === chapter.chapter_number + 1);
-        const prompt = buildCreationDraftChapterPrompt({
-          workingTitle: creationProject.working_title || book.title,
-          genre: creationProject.genre || book.genre || "Unspecified",
-          targetAudience: creationProject.target_audience || book.target_audience || "Unspecified",
-          language: creationProject.language || "English",
-          targetPages: Number(creationProject.target_pages || 120),
-          tone: creationProject.tone || "",
-          boundaries: creationProject.boundaries || "",
-          concept,
-          architecture,
-          chapter: architectureChapter,
-          previousChapterSummary: summarizeArchitectureChapter(previousChapter),
-          nextChapterSummary: summarizeArchitectureChapter(nextChapter),
-        });
+        try {
+          const architectureChapter =
+            architectureChapters.find((item) => item.chapterNumber === chapter.chapter_number) || {
+              chapterNumber: chapter.chapter_number,
+              title: chapter.title || `Chapter ${chapter.chapter_number}`,
+              purpose: chapter.summary || "",
+            };
+          const previousChapter = architectureChapters.find((item) => item.chapterNumber === chapter.chapter_number - 1);
+          const nextChapter = architectureChapters.find((item) => item.chapterNumber === chapter.chapter_number + 1);
+          const prompt = buildCreationDraftChapterPrompt({
+            workingTitle: creationProject.working_title || book.title,
+            genre: creationProject.genre || book.genre || "Unspecified",
+            targetAudience: creationProject.target_audience || book.target_audience || "Unspecified",
+            language: creationProject.language || "English",
+            targetPages: Number(creationProject.target_pages || 120),
+            tone: creationProject.tone || "",
+            boundaries: creationProject.boundaries || "",
+            concept,
+            architecture,
+            chapter: architectureChapter,
+            previousChapterSummary: summarizeArchitectureChapter(previousChapter),
+            nextChapterSummary: summarizeArchitectureChapter(nextChapter),
+          });
 
-        const completion = await createManagedChatCompletion(client, preparedModel, {
+          const completion = await createManagedChatCompletion(client, preparedModel, {
             temperature: Math.min(Math.max(settings.temperature, 0.45), 0.8),
             top_p: settings.topP,
             max_tokens: Math.min(Math.max(settings.maxOutputTokens, 6000), 12000),
@@ -208,104 +242,107 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
             );
           });
 
-        const rawContent = completion.choices[0]?.message.content || "";
-        const parsed = parseModelJsonOrFallback(rawContent, (raw) => ({
-          chapterText: raw,
-          chapterSummary: "",
-          continuityNotes: [],
-          generationNotes: ["The model returned prose instead of JSON; BookForge preserved it as chapter text."],
-        })) as {
-          chapterText?: unknown;
-          chapter_text?: unknown;
-          text?: unknown;
-          content?: unknown;
-          chapterSummary?: unknown;
-          continuityNotes?: unknown;
-          generationNotes?: unknown;
-        };
+          const rawContent = completion.choices[0]?.message.content || "";
+          const parsed = parseModelJsonOrFallback(rawContent, (raw) => ({
+            chapterText: raw,
+            chapterSummary: "",
+            continuityNotes: [],
+            generationNotes: ["The model returned prose instead of JSON; BookForge preserved it as chapter text."],
+          })) as {
+            chapterText?: unknown;
+            chapter_text?: unknown;
+            text?: unknown;
+            content?: unknown;
+            chapterSummary?: unknown;
+            continuityNotes?: unknown;
+            generationNotes?: unknown;
+          };
 
-        const rawChapterText = String(
-          parsed.chapterText || parsed.chapter_text || parsed.text || parsed.content || "",
-        );
-        const chapterText = cleanGeneratedChapterText(rawChapterText, chapter.title || "");
-        const wordCount = chapterText.split(/\s+/).filter(Boolean).length;
-        if (wordCount < 80) {
-          const snippet = rawContent.slice(0, 300).replace(/\n/g, " ");
-          throw new Error(
-            `Chapter ${chapter.chapter_number} generation returned too little text (${wordCount} words). Raw response snippet: "${snippet}"`,
+          const rawChapterText = String(
+            parsed.chapterText || parsed.chapter_text || parsed.text || parsed.content || "",
           );
-        }
+          const chapterText = cleanGeneratedChapterText(rawChapterText, chapter.title || "");
+          const wordCount = chapterText.split(/\s+/).filter(Boolean).length;
+          if (wordCount < 80) {
+            const snippet = rawContent.slice(0, 300).replace(/\n/g, " ");
+            throw new Error(
+              `Chapter ${chapter.chapter_number} generation returned too little text (${wordCount} words). Raw response snippet: "${snippet}"`,
+            );
+          }
 
-        await supabase.from("paragraphs").delete().eq("chapter_id", chapter.id);
-        await supabase.from("scenes").delete().eq("chapter_id", chapter.id);
+          await supabase.from("paragraphs").delete().eq("chapter_id", chapter.id);
+          await supabase.from("scenes").delete().eq("chapter_id", chapter.id);
 
-        const { error: chapterUpdateError } = await supabase
-          .from("chapters")
-          .update({
-            original_text: chapterText,
-            current_text: chapterText,
-            summary: String(parsed.chapterSummary || chapter.summary || architectureChapter.purpose || ""),
-            status: "draft",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", chapter.id);
-        if (chapterUpdateError) throw chapterUpdateError;
+          const { error: chapterUpdateError } = await supabase
+            .from("chapters")
+            .update({
+              original_text: chapterText,
+              current_text: chapterText,
+              summary: String(parsed.chapterSummary || chapter.summary || architectureChapter.purpose || ""),
+              status: "draft",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", chapter.id);
+          if (chapterUpdateError) throw chapterUpdateError;
 
-        const scenes = parseChapterScenes(chapterText);
-        let paragraphCount = 0;
-        for (const scene of scenes) {
-          const { data: sceneRow, error: sceneError } = await supabase
-            .from("scenes")
-            .insert({
+          const scenes = parseChapterScenes(chapterText);
+          let paragraphCount = 0;
+          for (const scene of scenes) {
+            const { data: sceneRow, error: sceneError } = await supabase
+              .from("scenes")
+              .insert({
+                book_id: bookId,
+                chapter_id: chapter.id,
+                scene_number: scene.sceneNumber,
+                original_text: scene.text,
+                current_text: scene.text,
+                status: "draft",
+              })
+              .select("id")
+              .single();
+            if (sceneError) throw sceneError;
+
+            const paragraphRows = scene.paragraphs.map((paragraph) => ({
               book_id: bookId,
               chapter_id: chapter.id,
-              scene_number: scene.sceneNumber,
-              original_text: scene.text,
-              current_text: scene.text,
-              status: "draft",
-            })
-            .select("id")
-            .single();
-          if (sceneError) throw sceneError;
+              scene_id: sceneRow.id,
+              paragraph_number: paragraph.paragraphNumber,
+              original_text: paragraph.text,
+              current_text: paragraph.text,
+            }));
+            paragraphCount += paragraphRows.length;
+            if (paragraphRows.length) {
+              const { error: paragraphError } = await supabase.from("paragraphs").insert(paragraphRows);
+              if (paragraphError) throw paragraphError;
+            }
+          }
 
-          const paragraphRows = scene.paragraphs.map((paragraph) => ({
+          await supabase.from("coherence_reports").insert({
             book_id: bookId,
             chapter_id: chapter.id,
-            scene_id: sceneRow.id,
-            paragraph_number: paragraph.paragraphNumber,
-            original_text: paragraph.text,
-            current_text: paragraph.text,
-          }));
-          paragraphCount += paragraphRows.length;
-          if (paragraphRows.length) {
-            const { error: paragraphError } = await supabase.from("paragraphs").insert(paragraphRows);
-            if (paragraphError) throw paragraphError;
-          }
-        }
+            report_type: "creation_draft_generation",
+            content: {
+              chapterNumber: chapter.chapter_number,
+              model,
+              promptSnapshot: prompt,
+              continuityNotes: parsed.continuityNotes || [],
+              generationNotes: parsed.generationNotes || [],
+            },
+          });
 
-        await supabase.from("coherence_reports").insert({
-          book_id: bookId,
-          chapter_id: chapter.id,
-          report_type: "creation_draft_generation",
-          content: {
+          successCount++;
+          generated.push({
             chapterNumber: chapter.chapter_number,
-            model,
-            promptSnapshot: prompt,
-            continuityNotes: parsed.continuityNotes || [],
-            generationNotes: parsed.generationNotes || [],
-          },
-        });
-
-        successCount++;
-        generated.push({
-          chapterNumber: chapter.chapter_number,
-          title: chapter.title,
-          paragraphCount,
-        });
+            title: chapter.title,
+            paragraphCount,
+          });
+        } finally {
+          heartbeat.stop();
+        }
       }
 
       const remaining = Math.max(0, (chapters || []).filter((chapter) => chapter.status === "planned").length - generated.length);
-      currentJobSettings = await updateRevisionJobProgress(supabase, job.id, currentJobSettings, {
+      currentJobSettings = await updateRevisionJobProgress(supabase, jobId, currentJobSettings, {
         currentUnit: `${generated.length} chapter${generated.length === 1 ? "" : "s"} generated`,
         attempted: successCount,
         successful: successCount,
@@ -328,7 +365,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
             completedAt: new Date().toISOString(),
           }),
         })
-        .eq("id", job.id);
+        .eq("id", jobId);
 
       await supabase
         .from("creation_projects")
@@ -374,7 +411,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
           }),
           completed_at: new Date().toISOString(),
         })
-        .eq("id", job.id);
+        .eq("id", jobId);
       throw error;
     }
   } catch (error) {

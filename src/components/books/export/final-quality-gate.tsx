@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { criticLenses } from "@/lib/critic/prompts";
 import { buildCriticComparisons, summarizeStrategyOutcome } from "@/lib/critic/comparison";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 
 type CriticReport = {
   report_type: string;
@@ -52,21 +53,35 @@ export function FinalQualityGate({
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ stage: "post_rewrite" }),
+            body: JSON.stringify(mergeMetadataSnapshotBody({ stage: "post_rewrite" })),
           },
           "Run post-rewrite Critic",
         );
         setMessage(`Post-rewrite Critic completed ${result.content?.completed || 0} lens evaluation(s).`);
       }
       if (action === "drift") {
+        const queued = await fetchJson<{ content?: { jobId?: string } }>(
+          `/api/books/${bookId}/drift-check`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(
+              mergeMetadataSnapshotBody({ revisionJobId: latestRewriteJobId || undefined, serverManaged: true }),
+            ),
+          },
+          "Queue final drift check",
+        );
+        const jobId = queued.content?.jobId;
+        if (!jobId) throw new Error("Final drift check queue handoff failed.");
+
         await fetchJson(
           `/api/books/${bookId}/drift-check`,
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ revisionJobId: latestRewriteJobId || undefined }),
+            body: JSON.stringify(mergeMetadataSnapshotBody({ revisionJobId: latestRewriteJobId || undefined, jobId })),
           },
-          "Run final drift check",
+          "Run final drift check worker",
         );
         setMessage("Final drift check saved.");
       }

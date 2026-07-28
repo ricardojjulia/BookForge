@@ -16,7 +16,7 @@
  * lives in the expandable RunDetailPanel inside RunsTable.
  */
 
-import { Container, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { Badge, Container, Group, Paper, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
 import { AppShell } from "@/components/layout/app-shell";
 import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { RunsTable } from "@/components/analytics/runs-table";
@@ -36,6 +36,17 @@ type TelemetryEntry = {
   scores?: Record<string, number | null>;
   baselineScores?: Record<string, number | null>;
   metadata?: Record<string, unknown>;
+};
+
+type MetadataSelectionSource = "explicit_snapshot" | "branch_active" | "active_snapshot" | "unknown";
+
+type ProvenanceRunRecord = {
+  workflow: "auto_review" | "revision";
+  label: string;
+  source: MetadataSelectionSource;
+  hasSnapshot: boolean;
+  hasBranch: boolean;
+  createdAt: string;
 };
 
 function parseLog(raw: unknown[]): TelemetryEntry[] {
@@ -84,6 +95,25 @@ function avg(nums: number[]): number | null {
   return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
 }
 
+function normalizeSelectionSource(value: unknown): MetadataSelectionSource {
+  if (value === "explicit_snapshot" || value === "branch_active" || value === "active_snapshot") {
+    return value;
+  }
+  return "unknown";
+}
+
+function parseSelectionRecord(
+  record: Record<string, unknown> | null | undefined,
+  key: "config" | "settings",
+): { source: MetadataSelectionSource; hasSnapshot: boolean; hasBranch: boolean } {
+  const payload = record && typeof record === "object" ? (record[key] as Record<string, unknown> | null | undefined) : null;
+  return {
+    source: normalizeSelectionSource(payload?.metadataSelectionSource),
+    hasSnapshot: Boolean(payload?.metadataSnapshotId),
+    hasBranch: Boolean(payload?.metadataBranchName),
+  };
+}
+
 // ── Metric card ───────────────────────────────────────────────────────────────
 
 function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -114,8 +144,15 @@ export default async function AnalyticsPage() {
 
   const { data: jobs } = await supabase
     .from("auto_review_jobs")
-    .select("id, book_id, mode, status, iteration, created_at, completed_at, error, book_stats, log, books(title)")
+    .select("id, book_id, mode, status, iteration, created_at, completed_at, error, book_stats, log, config, metadata_snapshot_id, books(title)")
     .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  const { data: revisionJobs } = await supabase
+    .from("revision_jobs")
+    .select("id, book_id, mode, status, created_at, completed_at, settings, metadata_snapshot_id")
+    .eq("created_by", user.id)
     .order("created_at", { ascending: false })
     .limit(200);
 
@@ -151,6 +188,31 @@ export default async function AnalyticsPage() {
     };
   });
 
+  const provenanceRuns: ProvenanceRunRecord[] = [
+    ...(jobs ?? []).map((job) => {
+      const selection = parseSelectionRecord(job as Record<string, unknown>, "config");
+      return {
+        workflow: "auto_review",
+        label: `${job.mode} · ${(job.books as { title?: string } | null)?.title ?? "Unknown Book"}`,
+        source: selection.source,
+        hasSnapshot: selection.hasSnapshot || Boolean((job as { metadata_snapshot_id?: string | null }).metadata_snapshot_id),
+        hasBranch: selection.hasBranch,
+        createdAt: job.created_at,
+      };
+    }),
+    ...(revisionJobs ?? []).map((job) => {
+      const selection = parseSelectionRecord(job as Record<string, unknown>, "settings");
+      return {
+        workflow: "revision",
+        label: `${job.mode} · ${job.status}`,
+        source: selection.source,
+        hasSnapshot: selection.hasSnapshot || Boolean((job as { metadata_snapshot_id?: string | null }).metadata_snapshot_id),
+        hasBranch: selection.hasBranch,
+        createdAt: job.created_at,
+      };
+    }),
+  ];
+
   // ── Summary metrics ─────────────────────────────────────────────────────────
 
   const completed = runs.filter((r) => r.status === "completed");
@@ -174,6 +236,20 @@ export default async function AnalyticsPage() {
     make_shorter: "Make Shorter",
     make_longer: "Make Longer",
   };
+
+  const explicitRuns = provenanceRuns.filter((run) => run.source === "explicit_snapshot").length;
+  const branchRuns = provenanceRuns.filter((run) => run.source === "branch_active").length;
+  const fallbackRuns = provenanceRuns.filter((run) => run.source === "active_snapshot").length;
+  const unknownRuns = provenanceRuns.filter((run) => run.source === "unknown").length;
+  const provenanceCoverage = provenanceRuns.length ? Math.round((explicitRuns / provenanceRuns.length) * 100) : null;
+  const provenanceQualityLabel =
+    provenanceCoverage === null
+      ? "n/a"
+      : provenanceCoverage >= 80
+        ? "healthy"
+        : provenanceCoverage >= 50
+          ? "watch"
+          : "at risk";
 
   return (
     <AppShell>
@@ -218,6 +294,71 @@ export default async function AnalyticsPage() {
           </SimpleGrid>
 
           <FreshnessTelemetryPanel />
+
+          <Paper withBorder radius="md" p="md" bg="#fbfaf8">
+            <Stack gap="md">
+              <Group justify="space-between" align="flex-start">
+                <div>
+                  <Text fw={700}>Snapshot Provenance</Text>
+                  <Text size="sm" c="dimmed">
+                    Coverage for snapshot-driven runs across auto-review and revision workflows.
+                  </Text>
+                </div>
+                <Badge color={provenanceCoverage === null ? "gray" : provenanceCoverage >= 80 ? "green" : provenanceCoverage >= 50 ? "yellow" : "red"} variant="light">
+                  {provenanceQualityLabel}
+                </Badge>
+              </Group>
+
+              <SimpleGrid cols={{ base: 2, sm: 4 }}>
+                <MetricCard label="Tracked Runs" value={String(provenanceRuns.length)} sub="auto-review + revision jobs" />
+                <MetricCard label="Explicit Snapshot" value={String(explicitRuns)} sub={provenanceCoverage === null ? "no data" : `${provenanceCoverage}% coverage`} />
+                <MetricCard label="Branch Resolved" value={String(branchRuns)} sub="resolved from branch-active snapshot" />
+                <MetricCard label="Active Fallback" value={String(fallbackRuns)} sub={unknownRuns > 0 ? `${unknownRuns} unknown` : "directly recoverable"} />
+              </SimpleGrid>
+
+              <Paper withBorder radius="md" p="sm" bg="white">
+                <Group justify="space-between" align="flex-start" mb="xs">
+                  <div>
+                    <Text fw={600}>Coverage by workflow</Text>
+                    <Text size="xs" c="dimmed">
+                      Explicit snapshot selection is the strongest provenance signal. Branch resolution is still reproducible but less direct.
+                    </Text>
+                  </div>
+                  <Text size="xs" c="dimmed">
+                    {provenanceRuns.length} total
+                  </Text>
+                </Group>
+                <Table withTableBorder withColumnBorders striped fz="sm">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Workflow</Table.Th>
+                      <Table.Th>Total</Table.Th>
+                      <Table.Th>Explicit</Table.Th>
+                      <Table.Th>Branch</Table.Th>
+                      <Table.Th>Fallback</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {(["auto_review", "revision"] as const).map((workflow) => {
+                      const rows = provenanceRuns.filter((run) => run.workflow === workflow);
+                      const explicit = rows.filter((run) => run.source === "explicit_snapshot").length;
+                      const branch = rows.filter((run) => run.source === "branch_active").length;
+                      const fallback = rows.filter((run) => run.source === "active_snapshot").length;
+                      return (
+                        <Table.Tr key={workflow}>
+                          <Table.Td>{workflow === "auto_review" ? "Auto-review" : "Revision"}</Table.Td>
+                          <Table.Td>{rows.length}</Table.Td>
+                          <Table.Td>{explicit}</Table.Td>
+                          <Table.Td>{branch}</Table.Td>
+                          <Table.Td>{fallback}</Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
+                  </Table.Tbody>
+                </Table>
+              </Paper>
+            </Stack>
+          </Paper>
 
           {/* Per-run breakdown */}
           <div>
