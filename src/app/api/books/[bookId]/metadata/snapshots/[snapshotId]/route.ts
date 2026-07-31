@@ -6,6 +6,7 @@ import {
   snapshotSelectColumns,
   toBranchResponse,
   toSnapshotResponse,
+  type MetadataBranchRecord,
   type MetadataSnapshotRecord,
 } from "@/lib/book-metadata/timeline";
 
@@ -31,11 +32,13 @@ async function softDeleteSnapshot(bookId: string, snapshotId: string) {
     throw snapshotError;
   }
 
+  const snapshotRecord = snapshot as unknown as MetadataSnapshotRecord;
+
   const now = new Date().toISOString();
   const { data: deletedSnapshot, error: deleteError } = await supabase
     .from("book_metadata_snapshots")
     .update({ status: "archived", archived_at: now, updated_at: now })
-    .eq("id", snapshot.id)
+    .eq("id", snapshotRecord.id)
     .eq("book_id", bookId)
     .select(snapshotSelectColumns())
     .single();
@@ -47,9 +50,9 @@ async function softDeleteSnapshot(bookId: string, snapshotId: string) {
     .upsert(
       {
         book_id: bookId,
-        name: snapshot.branch_name,
-        head_snapshot_id: snapshot.id,
-        is_default: snapshot.branch_name === "main",
+        name: snapshotRecord.branch_name,
+        head_snapshot_id: snapshotRecord.id,
+        is_default: snapshotRecord.branch_name === "main",
         created_by: user.id,
         updated_at: now,
       },
@@ -60,7 +63,11 @@ async function softDeleteSnapshot(bookId: string, snapshotId: string) {
 
   if (branchError) throw branchError;
 
-  return NextResponse.json({ snapshot: toSnapshotResponse(deletedSnapshot as MetadataSnapshotRecord), branch: toBranchResponse(branch), deleted: true });
+  return NextResponse.json({
+    snapshot: toSnapshotResponse(deletedSnapshot as unknown as MetadataSnapshotRecord),
+    branch: toBranchResponse(branch as unknown as MetadataBranchRecord),
+    deleted: true,
+  });
 }
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ bookId: string; snapshotId: string }> }) {

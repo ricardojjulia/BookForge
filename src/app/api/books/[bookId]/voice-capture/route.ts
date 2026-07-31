@@ -234,15 +234,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         candidates: getExtractionModelCandidates(settings),
         expectedCalls: 1,
         latencyPreference: "quality",
+        telemetry: { supabase, userId: user.id },
       });
-      const { client, preparedModel } = modelPlan;
+      const { client, preparedModel, telemetryContext } = modelPlan;
 
-      const completion = await createManagedChatCompletion(client, preparedModel, {
-        temperature: 0.3,
-        top_p: settings.topP,
-        max_tokens: Math.min(settings.maxOutputTokens, 2000),
-        messages: [{ role: "user", content: VOICE_CAPTURE_PROMPT(sampleText) }],
-      });
+      const completion = await createManagedChatCompletion(
+        client,
+        preparedModel,
+        {
+          temperature: 0.3,
+          top_p: settings.topP,
+          max_tokens: Math.min(settings.maxOutputTokens, 2000),
+          messages: [{ role: "user", content: VOICE_CAPTURE_PROMPT(sampleText) }],
+        },
+        undefined,
+        telemetryContext,
+      );
 
       const voiceProfile = parseModelJsonOrFallback(
         completion.choices[0]?.message.content || "{}",

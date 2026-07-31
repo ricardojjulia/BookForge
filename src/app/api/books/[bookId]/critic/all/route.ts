@@ -3,7 +3,7 @@ import { z } from "zod";
 import { buildJobProgress, createRevisionJobHeartbeat, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
 import { resolveMetadataSnapshotContext } from "@/lib/book-metadata/timeline";
 import { criticLenses } from "@/lib/critic/prompts";
-import { runCriticLens } from "@/lib/critic/run";
+import { preloadCriticModelExecution, preloadCriticRunContext, runCriticLens } from "@/lib/critic/run";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { createClient } from "@/lib/supabase/server";
 import type { CriticLens } from "@/lib/types";
@@ -124,8 +124,16 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     }
 
     const results: Array<{ lens: CriticLens; score: unknown }> = [];
+    const failedUnits: Array<{ id: CriticLens; type: "critic_lens"; label: string; error: string }> = [];
     let attempted = 0;
     let failed = 0;
+    const preloadedContext = await preloadCriticRunContext({
+      supabase,
+      bookId,
+      stage: batchStage,
+    });
+    const modelExecution = await preloadCriticModelExecution(supabase, user.id);
+
     for (const [index, lens] of lenses.entries()) {
       const pauseStatus = await waitWhileRevisionJobPaused(supabase, jobId);
       if (pauseStatus === "cancelled") break;
@@ -150,7 +158,15 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         skipped: 0,
       });
       try {
-        const content = await runCriticLens({ supabase, bookId, userId: user.id, lens, stage: batchStage });
+        const content = await runCriticLens({
+          supabase,
+          bookId,
+          userId: user.id,
+          lens,
+          stage: batchStage,
+          preloadedContext,
+          modelExecution,
+        });
         results.push({ lens, score: content.score });
         jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
           currentUnit: index + 1 >= lenses.length ? "Finalizing critic batch" : `Critic lens ${index + 2} of ${lenses.length}`,
@@ -159,11 +175,12 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           successful: results.length,
           failed,
           skipped: 0,
-          failedUnits: [],
+          failedUnits,
         });
       } catch (criticError) {
         failed += 1;
         const message = getErrorMessage(criticError);
+        failedUnits.push({ id: lens, type: "critic_lens", label: criticLenses[lens].label, error: message });
         await updateRevisionJobProgress(supabase, jobId, jobSettings, {
           currentUnit: `Failed at ${criticLenses[lens].label}`,
           totalUnits: lenses.length,
@@ -172,12 +189,15 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           failed,
           skipped: 0,
           message,
-          failedUnits: [{ id: lens, type: "critic_lens", label: criticLenses[lens].label, error: message }],
+          failedUnits,
         });
-        throw criticError;
       } finally {
         heartbeat.stop();
       }
+    }
+
+    if (results.length === 0 && failed > 0) {
+      throw new Error(`All critic lenses failed (${failed}/${lenses.length}).`);
     }
 
     await supabase.from("coherence_reports").insert({
@@ -190,6 +210,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         metadataBranchName,
         completedAt: new Date().toISOString(),
         results,
+        failed,
+        failedUnits,
       },
     });
 
@@ -215,21 +237,34 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             successful: results.length,
             failed,
             skipped: completedStatus === "cancelled" ? Math.max(0, lenses.length - attempted) : 0,
-            failedUnits: [],
+            failedUnits,
             startedAt,
             completedAt,
             estimatedSecondsPerUnit: 35,
             message:
               completedStatus === "cancelled"
                 ? "Critic batch cancelled. Completed reports were saved."
-                : "All BookForge Critic reports saved.",
+                : failed > 0
+                  ? `${failed} critic lens(es) failed. Completed reports were saved.`
+                  : "All BookForge Critic reports saved.",
           }),
         },
       })
       .eq("id", jobId);
     if (finalJobError) throw finalJobError;
 
-    return NextResponse.json({ content: { stage: batchStage, completed: results.length, results, metadataSnapshotId, metadataBranchName, metadataSelectionSource } });
+    return NextResponse.json({
+      content: {
+        stage: batchStage,
+        completed: results.length,
+        failed,
+        failedUnits,
+        results,
+        metadataSnapshotId,
+        metadataBranchName,
+        metadataSelectionSource,
+      },
+    });
   } catch (error) {
     console.error("BookForge Critic batch failed", error);
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });

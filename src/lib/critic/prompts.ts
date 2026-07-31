@@ -1,3 +1,4 @@
+import { describeDialogueDensity } from "@/lib/dialogue-density";
 import type { CriticLens } from "@/lib/types";
 
 export const criticLenses: Record<CriticLens, { label: string; instruction: string }> = {
@@ -29,6 +30,11 @@ export const criticLenses: Record<CriticLens, { label: string; instruction: stri
     label: "Revision Priorities",
     instruction: "Rank the highest-leverage fixes by impact, effort, and recommended order of operations.",
   },
+  dialogue_density: {
+    label: "Dialogue Density",
+    instruction:
+      "Evaluate whether the proportion of dialogue in the manuscript matches the author's chosen Dialog Density setting, and whether that proportion is consistent chapter-to-chapter.",
+  },
 };
 
 export function buildCriticPrompt(input: {
@@ -39,6 +45,11 @@ export function buildCriticPrompt(input: {
   acceptedRevisionContext?: Array<{ title: string; acceptedTextSample: string; acceptedParagraphs: number; totalParagraphs: number }>;
   lens: CriticLens;
   promptCharBudget?: number;
+  dialogueMetrics?: {
+    perChapter: Array<{ title: string; ratio: number; wordCount: number }>;
+    overallRatio: number;
+  };
+  targetDialogDensity?: string | null;
 }) {
   const lens = criticLenses[input.lens];
   const stageLabel = input.rewriteStage === "post_rewrite" ? "POST-REWRITE EVALUATION" : "BASELINE EVALUATION";
@@ -51,6 +62,8 @@ export function buildCriticPrompt(input: {
   const acceptedRevisionContext = input.acceptedRevisionContext?.length
     ? limitAcceptedRevisionContext(input.acceptedRevisionContext, budget.acceptedRevisionContext)
     : "";
+  const dialogueDensitySection =
+    input.lens === "dialogue_density" ? buildDialogueDensitySection(input.targetDialogDensity, input.dialogueMetrics) : "";
 
   return `You are BookForge Critic, a direct but constructive book evaluator.
 
@@ -68,6 +81,8 @@ ${bookBible}
 
 Chapter summaries:
 ${chapterSummaries}
+
+${dialogueDensitySection}
 
 ${
   acceptedRevisionContext
@@ -100,6 +115,28 @@ Rules:
 - Do not rewrite the manuscript.
 - Flag issues and suggest fixes.
 - Preserve author voice, theological meaning, and intended audience.`;
+}
+
+function buildDialogueDensitySection(
+  targetDialogDensity: string | null | undefined,
+  dialogueMetrics?: { perChapter: Array<{ title: string; ratio: number; wordCount: number }>; overallRatio: number },
+) {
+  const perChapterLines = (dialogueMetrics?.perChapter || [])
+    .map((chapter) => `- ${chapter.title}: ${(chapter.ratio * 100).toFixed(1)}% dialogue (${chapter.wordCount} words)`)
+    .join("\n");
+
+  return `DIALOGUE DENSITY DATA:
+Author's target setting:
+${describeDialogueDensity(targetDialogDensity)}
+
+Measured dialogue share (word count inside quoted dialogue spans / total words):
+Book-wide average: ${dialogueMetrics ? `${(dialogueMetrics.overallRatio * 100).toFixed(1)}%` : "Not available."}
+${perChapterLines || "No per-chapter data available."}
+
+Rules for this lens:
+- Score how closely the book-wide average matches the target band above.
+- Flag any chapter whose dialogue share deviates sharply from the book-wide average as an internal-consistency risk, even if the book-wide average matches the target.
+- Do not treat the measured percentages as exact; they are a heuristic based on quoted text. Use them as evidence, not ground truth.`;
 }
 
 function splitCriticPromptBudget(totalBudget: number, hasAcceptedRevisionContext: boolean) {

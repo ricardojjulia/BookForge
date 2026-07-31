@@ -1,3 +1,5 @@
+import { repairCommonMojibake } from "@/lib/text/repair-mojibake";
+
 export type BookForExport = {
   title: string;
   author_name: string | null;
@@ -65,9 +67,9 @@ export function buildFinalManuscriptMarkdown(input: BuildMarkdownInput) {
     return a.section_type.localeCompare(b.section_type);
   });
 
-  lines.push(`# ${input.book.title.trim() || "Untitled Book"}`);
+  lines.push(`# ${normalizeExportText(input.book.title.trim() || "Untitled Book")}`);
   if (input.book.author_name) {
-    lines.push("", `by ${input.book.author_name}`);
+    lines.push("", `by ${normalizeExportText(input.book.author_name)}`);
   }
 
   if (input.includeFrontMatter) {
@@ -112,8 +114,8 @@ export function buildFinalManuscriptMarkdown(input: BuildMarkdownInput) {
 
 function appendMatter(lines: string[], sections: MatterSectionForExport[]) {
   sections.forEach((section) => {
-    const title = section.title?.trim() || humanizeSectionType(section.section_type);
-    lines.push("", `## ${title}`, "", section.content.trim(), "");
+    const title = normalizeExportText(section.title?.trim() || humanizeSectionType(section.section_type));
+    lines.push("", `## ${title}`, "", normalizeExportText(section.content.trim()), "");
   });
 }
 
@@ -126,23 +128,23 @@ export function selectExportParagraphText(
   },
 ) {
   if (input.useOriginalForLocked && paragraph.is_locked) {
-    return paragraph.original_text;
+    return normalizeExportText(paragraph.original_text);
   }
 
   if (input.sourceMode === "original") {
-    return paragraph.original_text;
+    return normalizeExportText(paragraph.original_text);
   }
 
   if (input.sourceMode === "latest") {
-    return (
+    return normalizeExportText(
       input.latestDraftsByParagraph?.[paragraph.id] ||
       paragraph.current_text ||
       paragraph.accepted_text ||
-      paragraph.original_text
+      paragraph.original_text,
     );
   }
 
-  return paragraph.accepted_text || paragraph.original_text;
+  return normalizeExportText(paragraph.accepted_text || paragraph.original_text);
 }
 
 export function humanizeSectionType(sectionType: string) {
@@ -158,4 +160,8 @@ function normalizeMarkdown(markdown: string) {
     .replace(/\n{4,}/g, "\n\n\n")
     .trim()
     .concat("\n");
+}
+
+function normalizeExportText(text: string) {
+  return repairCommonMojibake(text || "");
 }

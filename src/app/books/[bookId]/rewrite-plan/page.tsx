@@ -9,6 +9,7 @@ import { RewritePlanActions } from "@/components/books/rewrite/rewrite-plan-acti
 import { RewritePlanView } from "@/components/books/rewrite/rewrite-plan-view";
 import { ResetRewriteButton } from "@/components/books/rewrite/reset-rewrite-button";
 import { ReadinessStatusGrid } from "@/components/books/rewrite/readiness-status-grid";
+import { LiveProcessBanner } from "@/components/books/jobs/live-process-banner";
 import { criticLenses } from "@/lib/critic/prompts";
 import { getRewriteCampaignStats, type RewriteCampaignRow } from "@/lib/rewrite/campaigns";
 import { getRewriteReadiness } from "@/lib/rewrite/readiness";
@@ -187,6 +188,7 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
     <AppShell>
       <Container size="xl">
         <DataFreshnessBanner routeKey={`book:${bookId}:rewrite-plan`} fetchedAt={new Date().toISOString()} label="Rewrite planning data" />
+        <LiveProcessBanner bookId={bookId} />
         <Group justify="space-between" mb="xl" align="flex-start">
           <div>
             <Title>Rewrite Architect</Title>

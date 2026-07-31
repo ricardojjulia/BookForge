@@ -76,6 +76,7 @@ const CRITIC_LENSES = [
   "market_fit",
   "contemporary_view",
   "revision_priorities",
+  "dialogue_density",
 ] as const;
 
 const CRITIC_LABELS: Record<string, string> = {
@@ -86,6 +87,7 @@ const CRITIC_LABELS: Record<string, string> = {
   market_fit: "Market Fit",
   contemporary_view: "Contemporary View",
   revision_priorities: "Revision Priorities",
+  dialogue_density: "Dialogue Density",
 };
 
 function buildStages(): Stage[] {
@@ -106,7 +108,7 @@ function buildStages(): Stage[] {
       label: `Post-Critic · ${CRITIC_LABELS[lens]}`,
       group: "Post-Rewrite Critics",
     })),
-    { id: "critics_check", label: "Quality Gate", group: "Quality" },
+    { id: "critics_check", label: "Critic Threshold Check", group: "Quality" },
     { id: "export", label: "Export Manuscript", group: "Publish" },
     { id: "mark_finished", label: "Mark as Finished", group: "Publish" },
   ];
@@ -439,7 +441,7 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
           baselineScores: Record<string, number | null>;
         };
         addLog(
-          `Quality gate: ${greenCount}/${total} critics green · avg ${avgScore ?? "N/A"} — ${allGreen ? "ALL GREEN ✓" : "need another cycle"}`,
+          `Threshold check: ${greenCount}/${total} critics >= 70 · avg ${avgScore ?? "N/A"} — ${allGreen ? "ALL GREEN" : "another cycle required"}`,
         );
 
         if (!allGreen && iterationRef.current < MAX_ITERATIONS - 1) {
@@ -447,13 +449,13 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
           // Keep ref and state in sync so the next advanceJob sees the right iteration
           iterationRef.current = nextIteration;
           setIteration(nextIteration);
-          addLog(`Starting rewrite iteration ${nextIteration + 1}…`);
+          addLog(`Starting rewrite iteration ${nextIteration + 1}...`);
 
           setStatus(stageId, "skipped", `Loop → iteration ${nextIteration + 1}`);
           await advanceJob(stageId, {
             type: "info",
             durationMs: Date.now() - startMs,
-            message: `Quality gate: ${greenCount}/${total} green — looping (iteration ${nextIteration + 1})`,
+            message: `${greenCount}/${total} critics >= 70. Starting another rewrite cycle (iteration ${nextIteration + 1}).`,
             scores,
             baselineScores,
             metadata: { allGreen, greenCount, total, avgScore },
@@ -477,9 +479,9 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
         // Final quality gate result — log scores for analytics score-progression chart
         const detail = allGreen
           ? `${greenCount}/${total} green · avg ${avgScore}`
-          : `${greenCount}/${total} green after ${MAX_ITERATIONS} cycles`;
+          : `Threshold not fully met after ${MAX_ITERATIONS} cycles`;
         setStatus(stageId, "done", detail);
-        if (!allGreen) addLog(`Max iterations (${MAX_ITERATIONS}) reached — proceeding to export.`);
+        if (!allGreen) addLog(`Threshold not fully met after ${MAX_ITERATIONS} cycles. Proceeding to export by policy.`);
 
         await advanceJob(stageId, {
           durationMs: Date.now() - startMs,
@@ -615,6 +617,7 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
     if (!serverManaged) return;
 
     let cancelled = false;
+    let pollId: number | null = null;
 
     const syncFromJob = async () => {
       const res = await fetch(`/api/books/${bookId}/auto-review`);
@@ -645,15 +648,21 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
       setDone(job.status === "completed");
       setFailed(job.status === "failed");
       setErrorMsg(job.error || null);
+
+      // Stop polling once the worker reaches a terminal state.
+      if ((job.status === "completed" || job.status === "failed") && pollId !== null) {
+        window.clearInterval(pollId);
+        pollId = null;
+      }
     };
 
     void syncFromJob();
-    const interval = window.setInterval(() => {
+    pollId = window.setInterval(() => {
       void syncFromJob();
     }, 2000);
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      if (pollId !== null) window.clearInterval(pollId);
     };
   }, [bookId, serverManaged]);
 
@@ -661,6 +670,7 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
   const progress = Math.round((doneCount / stages.length) * 100);
   const currentStage = stageStates.find((s) => s.status === "running");
   const groups = Array.from(new Set(stages.map((s) => s.group)));
+  const likelyTransientFailure = /fetch failed|Failed to fetch|timeout|could not reach lm studio|ECONNREFUSED|ECONNRESET/i.test(errorMsg || "");
 
   return (
     <Stack gap="md">
@@ -686,7 +696,11 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
       )}
       {failed && (
         <Alert color="red" icon={<IconX size={18} />} title="Workflow failed">
-          <Text size="sm" mb="xs">{errorMsg}. Fix the issue (e.g., check LM Studio is running or internet is connected) then resume — completed stages will be skipped.</Text>
+          <Text size="sm" mb="xs">
+            {errorMsg}. {likelyTransientFailure
+              ? "This is often transient (LM Studio restart, brief network timeout, or provider hiccup). Resume to continue from the next unfinished stage."
+              : "Fix the issue, then resume. Completed stages will be skipped."}
+          </Text>
           <Button size="xs" color="orange" onClick={onDone}>
             Back to wizard to resume
           </Button>

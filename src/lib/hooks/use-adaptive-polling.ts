@@ -91,6 +91,7 @@ export function useAdaptivePolling(
   useEffect(() => {
     let active = true;
     let timeoutId: number | null = null;
+    const ownerId = ownerIdRef.current;
 
     const schedule = (delay: number) => {
       if (!active) return;
@@ -107,7 +108,7 @@ export function useAdaptivePolling(
       }
 
       if (coordinatorKey) {
-        const isCoordinator = tryAcquireLease(coordinatorKey, ownerIdRef.current, coordinatorTtlMs);
+        const isCoordinator = tryAcquireLease(coordinatorKey, ownerId, coordinatorTtlMs);
         if (!isCoordinator) {
           schedule(idleIntervalMs);
           return;
@@ -123,7 +124,7 @@ export function useAdaptivePolling(
     return () => {
       active = false;
       if (coordinatorKey) {
-        releaseLease(coordinatorKey, ownerIdRef.current);
+        releaseLease(coordinatorKey, ownerId);
       }
       if (timeoutId !== null) {
         window.clearTimeout(timeoutId);

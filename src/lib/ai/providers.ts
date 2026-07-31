@@ -3,17 +3,21 @@
  *
  * Supports:
  *   - LM Studio  (OpenAI-compatible local server)
- *   - OpenAI     (gpt-4o, gpt-4o-mini, o1, …)
- *   - Anthropic  (claude-3-5-sonnet, claude-3-haiku, …)
- *   - Google     (gemini-1.5-pro, gemini-1.5-flash, …)  via OpenAI-compatible endpoint
+ *   - OpenAI     (gpt-5, gpt-5-mini, gpt-4.1, o4-mini, …)
+ *   - Anthropic  (claude-opus-5, claude-sonnet-5, claude-haiku-4-5, …)
+ *   - Google     (gemini-2.5-pro, gemini-2.5-flash, …)  via OpenAI-compatible endpoint
  *
  * All providers are normalised to a single `chatCompletion()` call that returns
  * an OpenAI-style `ChatCompletion` response so the rest of the codebase needs
  * no changes.
+ *
+ * Model IDs come from `@/lib/ai/model-catalog` — update the catalog, not this
+ * file, when a provider ships a new model.
  */
 
 import OpenAI from "openai";
 import type { StandardLlmSettings, LlmProvider } from "@/lib/types";
+import { getCloudModelsForProvider } from "@/lib/ai/model-catalog";
 
 // ---------------------------------------------------------------------------
 // Provider metadata
@@ -38,23 +42,19 @@ export const PROVIDER_META: ProviderMeta[] = [
   {
     id: "openai",
     label: "OpenAI",
-    defaultModels: ["gpt-4o", "gpt-4o-mini", "o1-mini", "o1"],
+    defaultModels: getCloudModelsForProvider("openai").map((entry) => entry.id),
     requiresApiKey: true,
   },
   {
     id: "anthropic",
     label: "Anthropic",
-    defaultModels: [
-      "claude-sonnet-4-6",
-      "claude-opus-4-7",
-      "claude-haiku-4-5-20251001",
-    ],
+    defaultModels: getCloudModelsForProvider("anthropic").map((entry) => entry.id),
     requiresApiKey: true,
   },
   {
     id: "google",
     label: "Google Gemini",
-    defaultModels: ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash"],
+    defaultModels: getCloudModelsForProvider("google").map((entry) => entry.id),
     requiresApiKey: true,
     // Google exposes an OpenAI-compatible REST endpoint
     defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",

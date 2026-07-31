@@ -47,7 +47,11 @@ export function PostRunQualityGate({
   const outcome = useMemo(() => summarizeStrategyOutcome(reports), [reports]);
   const latestDrift = reports.find((report) => report.report_type === "rewrite_drift_check");
   const latestGuidance = reports.find((report) => report.report_type === "humanized_guidance");
-  const postCriticCount = reports.filter((report) => report.report_type.startsWith("critic_post:")).length;
+  const postCriticCount = new Set(
+    reports
+      .filter((report) => report.report_type.startsWith("critic_post:"))
+      .map((report) => report.report_type.toLowerCase()),
+  ).size;
   const acceptedPercent = totalParagraphs ? Math.round((acceptedParagraphs / totalParagraphs) * 100) : 0;
   // pendingDraftCount === 0 and still below 90% means all reviewable paragraphs
   // are accepted — the gap is short structural paragraphs the rewrite skips (< 8 words).

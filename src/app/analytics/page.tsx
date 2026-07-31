@@ -189,7 +189,7 @@ export default async function AnalyticsPage() {
   });
 
   const provenanceRuns: ProvenanceRunRecord[] = [
-    ...(jobs ?? []).map((job) => {
+    ...(jobs ?? []).map((job): ProvenanceRunRecord => {
       const selection = parseSelectionRecord(job as Record<string, unknown>, "config");
       return {
         workflow: "auto_review",
@@ -200,7 +200,7 @@ export default async function AnalyticsPage() {
         createdAt: job.created_at,
       };
     }),
-    ...(revisionJobs ?? []).map((job) => {
+    ...(revisionJobs ?? []).map((job): ProvenanceRunRecord => {
       const selection = parseSelectionRecord(job as Record<string, unknown>, "settings");
       return {
         workflow: "revision",

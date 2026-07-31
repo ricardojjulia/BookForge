@@ -40,6 +40,22 @@ export default async function JobsHistoryPage({
   const [{ bookId }, query] = await Promise.all([params, searchParams]);
   const selectedJobId = typeof query?.job === "string" ? query.job.trim() : "";
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return (
+      <AppShell>
+        <Container size="lg">
+          <Alert color="grape" title="Login required">
+            Sign in to view persistent AI job history for this book.
+          </Alert>
+        </Container>
+      </AppShell>
+    );
+  }
+
   const [{ data: book }, { data: jobs, error }] = await Promise.all([
     supabase.from("books").select("title").eq("id", bookId).single(),
     supabase

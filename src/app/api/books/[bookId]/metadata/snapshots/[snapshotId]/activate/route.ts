@@ -8,6 +8,7 @@ import {
   snapshotSelectColumns,
   toBranchResponse,
   toSnapshotResponse,
+  type MetadataBranchRecord,
   type MetadataSnapshotRecord,
 } from "@/lib/book-metadata/timeline";
 
@@ -44,14 +45,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       throw snapshotError;
     }
 
-    const targetBranchName = body.branchName?.trim() || snapshot.branch_name;
+    const snapshotRecord = snapshot as unknown as MetadataSnapshotRecord;
+
+    const targetBranchName = body.branchName?.trim() || snapshotRecord.branch_name;
     const now = new Date().toISOString();
 
-    if (targetBranchName !== snapshot.branch_name) {
+    if (targetBranchName !== snapshotRecord.branch_name) {
       const { error: moveError } = await supabase
         .from("book_metadata_snapshots")
         .update({ branch_name: targetBranchName, updated_at: now })
-        .eq("id", snapshot.id)
+        .eq("id", snapshotRecord.id)
         .eq("book_id", bookId);
       if (moveError) throw moveError;
     }
@@ -67,7 +70,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     const { data: activatedSnapshot, error: activateError } = await supabase
       .from("book_metadata_snapshots")
       .update({ status: "active", updated_at: now })
-      .eq("id", snapshot.id)
+      .eq("id", snapshotRecord.id)
       .eq("book_id", bookId)
       .select(snapshotSelectColumns())
       .single();
@@ -80,7 +83,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         {
           book_id: bookId,
           name: targetBranchName,
-          head_snapshot_id: snapshot.id,
+          head_snapshot_id: snapshotRecord.id,
           is_default: body.isDefault === true || targetBranchName === "main",
           created_by: user.id,
           updated_at: now,
@@ -92,7 +95,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
 
     if (branchError) throw branchError;
 
-    return NextResponse.json({ snapshot: toSnapshotResponse(activatedSnapshot as MetadataSnapshotRecord), branch: toBranchResponse(branch) });
+    return NextResponse.json({
+      snapshot: toSnapshotResponse(activatedSnapshot as unknown as MetadataSnapshotRecord),
+      branch: toBranchResponse(branch as unknown as MetadataBranchRecord),
+    });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to activate metadata snapshot." }, { status: 500 });
   }

@@ -286,24 +286,31 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         candidates: getReasoningModelCandidates(settings),
         expectedCalls: 1,
         latencyPreference: "quality",
+        telemetry: { supabase, userId: user.id },
       });
-      const { client, preparedModel, modelSelection } = modelPlan;
-      const completion = await createManagedChatCompletion(client, preparedModel, {
-        temperature: 0.2,
-        top_p: settings.topP,
-        max_tokens: 3000,
-        messages: [
-          {
-            role: "user",
-            content: buildRewriteDriftPrompt({
-              manuscriptBlueprint: bible?.content,
-              rewritePlan: rewritePlan?.content,
-              continuityLedger: continuityLedger?.content,
-              revisionSamples,
-            }),
-          },
-        ],
-      });
+      const { client, preparedModel, modelSelection, telemetryContext } = modelPlan;
+      const completion = await createManagedChatCompletion(
+        client,
+        preparedModel,
+        {
+          temperature: 0.2,
+          top_p: settings.topP,
+          max_tokens: 3000,
+          messages: [
+            {
+              role: "user",
+              content: buildRewriteDriftPrompt({
+                manuscriptBlueprint: bible?.content,
+                rewritePlan: rewritePlan?.content,
+                continuityLedger: continuityLedger?.content,
+                revisionSamples,
+              }),
+            },
+          ],
+        },
+        undefined,
+        telemetryContext,
+      );
 
       const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({
         overallDriftRisk: "medium",

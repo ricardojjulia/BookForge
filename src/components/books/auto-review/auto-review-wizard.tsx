@@ -26,28 +26,28 @@ const MODES: { value: Mode; icon: React.ReactNode; label: string; tagline: strin
   {
     value: "full_review",
     icon: <IconRocket size={28} />,
-    label: "Do it all for me!",
-    tagline: "Full autonomous review cycle",
+    label: "Full Review",
+    tagline: "Autonomous review and publish",
     detail:
-      "Analyzes, critiques, rewrites, checks drift, and re-critiques. Loops until all 7 critics score ≥ 70 (up to 3 cycles). Then exports and marks the book finished.",
+      "Runs analyze, critics, rewrite, drift check, and re-critique. Repeats until all 7 critics are at least 70, up to 3 cycles, then exports and marks the book as finished.",
     color: "grape",
   },
   {
     value: "make_shorter",
     icon: <IconScissors size={28} />,
     label: "Make Shorter",
-    tagline: "45–55% compression, then full review",
+    tagline: "~50% shorter, then full review",
     detail:
-      "Runs the same full cycle but the rewrite targets a 50% word-count reduction. Great for tightening first drafts or producing an abridged version.",
+      "Uses the full pipeline, with rewrite targeting 45-55% compression before quality checks and publish.",
     color: "teal",
   },
   {
     value: "make_longer",
     icon: <IconArrowUp size={28} />,
     label: "Make Longer",
-    tagline: "35–45% expansion, then full review",
+    tagline: "~40% longer, then full review",
     detail:
-      "Expands prose depth by ~40%, then runs the full review cycle. Use this to develop a sparse draft into a fuller manuscript.",
+      "Uses the full pipeline, with rewrite targeting 35-45% expansion before quality checks and publish.",
     color: "blue",
   },
 ];
@@ -193,20 +193,20 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
             )}
 
             {resumableJob && (
-              <Alert color="orange" icon={<IconPlayerPlay size={16} />} title="Previous run can be resumed">
+              <Alert color="orange" icon={<IconPlayerPlay size={16} />} title="Resume available">
                 <Text size="sm" mb="xs">
-                  {resumableJob.stages_completed.length} stage{resumableJob.stages_completed.length === 1 ? "" : "s"} completed before the last run stopped.
-                  Resume to skip those and continue from where it left off.
+                  A previous run completed {resumableJob.stages_completed.length} stage{resumableJob.stages_completed.length === 1 ? "" : "s"} before stopping.
+                  Resume continues from the next stage and skips completed work.
                 </Text>
-                {resumableJob.error && <Text size="xs" c="dimmed" mb="xs">{resumableJob.error}</Text>}
+                {resumableJob.error && <Text size="xs" c="dimmed" mb="xs">Last stop reason: {resumableJob.error}</Text>}
                 <Button size="xs" color="orange" leftSection={<IconPlayerPlay size={14} />} onClick={() => start(resumableJob)}>
-                  Resume ({resumableJob.stages_completed.length} stages done)
+                  Resume from stage {resumableJob.stages_completed.length + 1}
                 </Button>
               </Alert>
             )}
 
             <Text c="dimmed" size="sm">
-              {checkingResume ? "Checking for previous runs…" : "Choose a mode. BookForge will run the entire workflow — no further decisions needed — until the book is published."}
+              {checkingResume ? "Checking for previous runs..." : "Choose a mode. BookForge runs the full pipeline automatically and publishes the result when complete."}
             </Text>
 
             <Stack gap="sm">
@@ -252,7 +252,7 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
                 disabled={!selected}
                 onClick={() => start()}
               >
-                Start — I&apos;ll grab a coffee ☕
+                Start Auto-Review
               </Button>
             </Group>
           </Stack>

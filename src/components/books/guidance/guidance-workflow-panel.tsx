@@ -73,7 +73,7 @@ const STRATEGY_OPTIONS: { value: RewriteStrategyId; label: string }[] = [
 
 const STATUS_META: Record<TaskStatus, { label: string; color: string }> = {
   todo:        { label: "To do",       color: "gray"   },
-  in_progress: { label: "In progress", color: "blue"   },
+  in_progress: { label: "Marked in progress", color: "blue"   },
   done:        { label: "Done",        color: "green"  },
   skipped:     { label: "Skipped",     color: "orange" },
 };
@@ -332,7 +332,7 @@ function TaskCard({
             variant="light"
             style={{ cursor: "pointer" }}
             onClick={onStatusClick}
-            title="Click to advance status"
+            title="Click to cycle status (To do -> Marked in progress -> Done -> Skipped)"
           >
             {meta.label}
           </Badge>
@@ -501,14 +501,27 @@ export function GuidanceWorkflowPanel({
     }
   }
 
-  const done        = items.filter((i) => statusFor(i.key) === "done").length;
-  const skipped     = items.filter((i) => statusFor(i.key) === "skipped").length;
-  const in_progress = items.filter((i) => statusFor(i.key) === "in_progress").length;
-  const addressed   = done + skipped + in_progress;
-  const progress    = items.length > 0 ? Math.round((addressed / items.length) * 100) : 0;
-
   const priorities = items.filter((i) => i.group === "priority");
   const actions    = items.filter((i) => i.group === "action");
+
+  const done = items.filter((i) => statusFor(i.key) === "done").length;
+  const skipped = items.filter((i) => statusFor(i.key) === "skipped").length;
+  const inProgress = items.filter((i) => statusFor(i.key) === "in_progress").length;
+
+  const priorityDone = priorities.filter((i) => statusFor(i.key) === "done").length;
+  const priorityInProgress = priorities.filter((i) => statusFor(i.key) === "in_progress").length;
+  const prioritySkipped = priorities.filter((i) => statusFor(i.key) === "skipped").length;
+
+  // Weighted progress: priority tasks count double; in-progress is partial; skipped does not imply completion.
+  const weightedCompleted = items.reduce((sum, item) => {
+    const status = statusFor(item.key);
+    const weight = item.group === "priority" ? 2 : 1;
+    if (status === "done") return sum + weight;
+    if (status === "in_progress") return sum + weight * 0.5;
+    return sum;
+  }, 0);
+  const weightedTotal = items.reduce((sum, item) => sum + (item.group === "priority" ? 2 : 1), 0);
+  const progress = weightedTotal > 0 ? Math.round((weightedCompleted / weightedTotal) * 100) : 0;
 
   return (
     <Paper withBorder radius="md" p="xl" bg="white" mt="xl">
@@ -556,12 +569,20 @@ export function GuidanceWorkflowPanel({
             {items.length > 0 && (
               <Paper withBorder p="md" radius="md" bg="#fbfaf8">
                 <Group justify="space-between" mb={6}>
-                  <Text size="sm" fw={600}>Overall progress</Text>
+                  <Text size="sm" fw={600}>Overall weighted progress</Text>
                   <Text size="sm" c="dimmed">
-                    {addressed} of {items.length} addressed ({done} done · {in_progress} in progress · {skipped} skipped)
+                    {done} done · {inProgress} in progress · {skipped} skipped
                   </Text>
                 </Group>
                 <Progress value={progress} color={progress === 100 ? "green" : "blue"} radius="sm" />
+                <Text size="xs" c="dimmed" mt={6}>
+                  &quot;In progress&quot; means the item is marked as actively worked (or rewrite was started from this card). Live execution appears above in Running jobs.
+                </Text>
+                {priorities.length > 0 && (
+                  <Text size="xs" c="dimmed" mt={6}>
+                    Priority progress: {priorityDone}/{priorities.length} done ({priorityInProgress} in progress · {prioritySkipped} skipped)
+                  </Text>
+                )}
               </Paper>
             )}
 

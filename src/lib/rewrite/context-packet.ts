@@ -1,10 +1,12 @@
 import { criticLenses } from "@/lib/critic/prompts";
 import { summarizeCriticContent } from "@/lib/critic/summary";
+import { describeDialogueDensity } from "@/lib/dialogue-density";
 import type { CriticLens } from "@/lib/types";
 
 export type RewriteContextPacketInput = {
   manuscriptBlueprint: unknown;
   rewritePlan: Record<string, unknown>;
+  dialogDensity?: string | null;
   chapter: {
     id: string;
     chapter_number: number;
@@ -59,6 +61,7 @@ export function buildRewriteContextPacket(input: RewriteContextPacketInput) {
     globalObjective: stringValue(input.rewritePlan.rewriteObjective),
     manuscriptBlueprintAvailable: Boolean(input.manuscriptBlueprint),
     criticPriorities: getCriticPriorities(input.criticReports),
+    dialogueDensityGuidance: describeDialogueDensity(input.dialogDensity),
     chapterSummary: input.chapter.summary || "",
     previousChapterSummary: input.previousChapterSummary || "",
     nextChapterSummary: input.nextChapterSummary || "",

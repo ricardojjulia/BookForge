@@ -51,7 +51,11 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
   const previousStatuses = useRef(new Map<string, string | null>());
   const refreshedCompletedJobs = useRef(new Set<string>());
   const activeJob = useMemo(
-    () => jobs.find((job) => ["running", "paused", "queued"].includes(job.status || "")) || jobs[0],
+    () => jobs.find((job) => ["running", "paused", "queued"].includes(job.status || "")) || null,
+    [jobs],
+  );
+  const latestFinishedJob = useMemo(
+    () => jobs.find((job) => !["running", "paused", "queued"].includes(job.status || "")) || null,
     [jobs],
   );
 
@@ -228,17 +232,13 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
             </Button>
           </div>
           <Badge color={activeJob ? statusColor(activeJob.status) : "gray"} variant="light">
-            {activeJob?.status || "No jobs yet"}
+            {activeJob?.status || "idle"}
           </Badge>
         </Group>
 
         {error && <Alert color="red">{error}</Alert>}
 
-        {!activeJob ? (
-          <Alert color="gray" variant="light">
-            No persistent AI jobs have been created for this book yet.
-          </Alert>
-        ) : (
+        {activeJob ? (
           <JobCard
             job={activeJob}
             loadingAction={loadingAction}
@@ -249,9 +249,17 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
             onRetryFailed={() => retryFailed(activeJob)}
             onResumeInterrupted={() => resumeInterrupted(activeJob)}
           />
+        ) : latestFinishedJob ? (
+          <Alert color="gray" variant="light" title="No active persistent AI jobs">
+            Last job: {latestFinishedJob.progress?.taskName || humanizeMode(latestFinishedJob.mode)} ({latestFinishedJob.status || "unknown"}).
+          </Alert>
+        ) : (
+          <Alert color="gray" variant="light">
+            No persistent AI jobs have been created for this book yet.
+          </Alert>
         )}
 
-        {jobs.length > 1 && (
+        {jobs.length > 1 && activeJob && (
           <Stack gap="xs">
             <Text fw={800} size="sm">
               Recent jobs

@@ -53,8 +53,8 @@ describe("AutoReviewWizard", () => {
     renderWizard();
 
     await userEvent.click(screen.getByRole("button", { name: "Auto-Review Wizard" }));
-    await screen.findByText("Full autonomous review cycle");
-    await userEvent.click(screen.getByText("Full autonomous review cycle"));
+    await screen.findByText("Full Review");
+    await userEvent.click(screen.getByText("Full Review"));
     await userEvent.click(screen.getByRole("button", { name: /Start/i }));
 
     await waitFor(() => {
@@ -99,8 +99,8 @@ describe("AutoReviewWizard", () => {
     renderWizard();
 
     await userEvent.click(screen.getByRole("button", { name: "Auto-Review Wizard" }));
-    await screen.findByText("Full autonomous review cycle");
-    await userEvent.click(screen.getByText("Full autonomous review cycle"));
+    await screen.findByText("Full Review");
+    await userEvent.click(screen.getByText("Full Review"));
     await userEvent.click(screen.getByRole("button", { name: /Start/i }));
 
     await waitFor(() => {
@@ -162,7 +162,7 @@ describe("AutoReviewWizard", () => {
     renderWizard();
 
     await userEvent.click(screen.getByRole("button", { name: "Auto-Review Wizard" }));
-    await screen.findByText("Previous run can be resumed");
+    await screen.findByText("Resume available");
     await userEvent.click(screen.getByRole("button", { name: /Resume/i }));
 
     await waitFor(() => {
@@ -223,8 +223,8 @@ describe("AutoReviewWizard", () => {
     renderWizard();
 
     await userEvent.click(screen.getByRole("button", { name: "Auto-Review Wizard" }));
-    await screen.findByText("Full autonomous review cycle");
-    await userEvent.click(screen.getByText("Full autonomous review cycle"));
+    await screen.findByText("Full Review");
+    await userEvent.click(screen.getByText("Full Review"));
     await userEvent.click(screen.getByRole("button", { name: /Start/i }));
 
     await waitFor(() => {
@@ -303,7 +303,7 @@ describe("AutoReviewWizard", () => {
     renderWizard();
 
     await userEvent.click(screen.getByRole("button", { name: "Auto-Review Wizard" }));
-    await screen.findByText("Previous run can be resumed");
+    await screen.findByText("Resume available");
     await userEvent.click(screen.getByRole("button", { name: /Resume/i }));
 
     await waitFor(() => {

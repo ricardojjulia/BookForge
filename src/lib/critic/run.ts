@@ -2,6 +2,7 @@ import { estimateAiCallPlan } from "@/lib/ai/call-planner";
 import { buildCriticPrompt } from "@/lib/critic/prompts";
 import { extractCriticScore } from "@/lib/critic/score";
 import { summarizeCriticContent } from "@/lib/critic/summary";
+import { computeDialogueRatio } from "@/lib/dialogue-density";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
 import { getReasoningModelCandidates } from "@/lib/lmstudio/model-selection";
@@ -26,14 +27,35 @@ type ParagraphRow = {
   accepted_text: string | null;
 };
 
-export async function runCriticLens(input: {
+export type CriticRunContext = {
+  title: string;
+  bookBible: unknown;
+  chapterRows: ChapterRow[];
+  acceptedRevisionContext?: Array<{
+    title: string;
+    acceptedTextSample: string;
+    acceptedParagraphs: number;
+    totalParagraphs: number;
+  }>;
+  sceneCount: number;
+  paragraphCount: number;
+  dialogueMetrics: {
+    perChapter: Array<{ title: string; ratio: number; wordCount: number }>;
+    overallRatio: number;
+  };
+  targetDialogDensity: string | null;
+};
+
+type CriticModelExecution = {
+  settings: Awaited<ReturnType<typeof getUserLmStudioSettings>>;
+  modelPlan: Awaited<ReturnType<typeof selectAndPrepareActiveModel>>;
+};
+
+export async function preloadCriticRunContext(input: {
   supabase: SupabaseClient;
   bookId: string;
-  userId: string;
-  lens: CriticLens;
-  stage?: CriticStage;
-}) {
-  const stage = input.stage || "baseline";
+  stage: CriticStage;
+}): Promise<CriticRunContext> {
   const [
     { data: book, error: bookError },
     { data: bible },
@@ -42,16 +64,14 @@ export async function runCriticLens(input: {
     { count: scenes },
     { count: paragraphs },
   ] = await Promise.all([
-    input.supabase.from("books").select("title").eq("id", input.bookId).single(),
+    input.supabase.from("books").select("title,dialog_density").eq("id", input.bookId).single(),
     input.supabase.from("book_bibles").select("content").eq("book_id", input.bookId).maybeSingle(),
     input.supabase.from("chapters").select("id,title,summary").eq("book_id", input.bookId).order("chapter_number"),
-    stage === "post_rewrite"
-      ? input.supabase
-          .from("paragraphs")
-          .select("chapter_id,paragraph_number,original_text,accepted_text")
-          .eq("book_id", input.bookId)
-          .order("paragraph_number")
-      : Promise.resolve({ data: [] }),
+    input.supabase
+      .from("paragraphs")
+      .select("chapter_id,paragraph_number,original_text,accepted_text")
+      .eq("book_id", input.bookId)
+      .order("paragraph_number"),
     input.supabase.from("scenes").select("id", { count: "exact", head: true }).eq("book_id", input.bookId),
     input.supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", input.bookId),
   ]);
@@ -59,15 +79,55 @@ export async function runCriticLens(input: {
   if (bookError) throw bookError;
   if (chaptersError) throw chaptersError;
 
-  const settings = await getUserLmStudioSettings(input.userId);
+  const chapterRows = (chapters || []) as ChapterRow[];
+  const paragraphRows = (paragraphsForContext || []) as ParagraphRow[];
+
+  return {
+    title: book.title,
+    bookBible: bible?.content,
+    chapterRows,
+    acceptedRevisionContext:
+      input.stage === "post_rewrite" ? buildAcceptedRevisionContext(chapterRows, paragraphRows) : undefined,
+    sceneCount: scenes || 0,
+    paragraphCount: paragraphs || 0,
+    dialogueMetrics: computeDialogueMetrics(chapterRows, paragraphRows),
+    targetDialogDensity: book.dialog_density || null,
+  };
+}
+
+export async function preloadCriticModelExecution(supabase: SupabaseClient, userId: string): Promise<CriticModelExecution> {
+  const settings = await getUserLmStudioSettings(userId);
   const modelPlan = await selectAndPrepareActiveModel(settings, {
     task: "critic",
     candidates: getReasoningModelCandidates(settings),
     expectedCalls: 1,
     latencyPreference: settings.qualityProfile === "fast" ? "fast" : "quality",
+    telemetry: { supabase, userId },
   });
-  const { client, model, preparedModel, modelSelection } = modelPlan;
-  const chapterRows = (chapters || []) as ChapterRow[];
+  return { settings, modelPlan };
+}
+
+export async function runCriticLens(input: {
+  supabase: SupabaseClient;
+  bookId: string;
+  userId: string;
+  lens: CriticLens;
+  stage?: CriticStage;
+  preloadedContext?: CriticRunContext;
+  modelExecution?: CriticModelExecution;
+}) {
+  const stage = input.stage || "baseline";
+  const context =
+    input.preloadedContext ||
+    (await preloadCriticRunContext({
+      supabase: input.supabase,
+      bookId: input.bookId,
+      stage,
+    }));
+  const modelExecution = input.modelExecution || (await preloadCriticModelExecution(input.supabase, input.userId));
+  const { settings, modelPlan } = modelExecution;
+  const { client, model, preparedModel, modelSelection, telemetryContext } = modelPlan;
+  const chapterRows = context.chapterRows;
   const plan = estimateAiCallPlan({
     task: "critic",
     selectedModel: model,
@@ -75,32 +135,36 @@ export async function runCriticLens(input: {
     contextWindowTokens: preparedModel.runtimeLimits.configuredContextTokens,
     maxOutputTokens: preparedModel.runtimeLimits.maxOutputTokens,
     chapterCount: chapterRows.length,
-    sceneCount: scenes || 0,
-    paragraphCount: paragraphs || 0,
+    sceneCount: context.sceneCount,
+    paragraphCount: context.paragraphCount,
   });
 
   const prompt = buildCriticPrompt({
-    title: book.title,
-    bookBible: bible?.content,
+    title: context.title,
+    bookBible: context.bookBible,
     chapterSummaries: chapterRows.map((chapter) => ({
       title: chapter.title || "Untitled chapter",
       summary: chapter.summary,
     })),
-    acceptedRevisionContext:
-      stage === "post_rewrite"
-        ? buildAcceptedRevisionContext(chapterRows, (paragraphsForContext || []) as ParagraphRow[])
-        : undefined,
+    acceptedRevisionContext: stage === "post_rewrite" ? context.acceptedRevisionContext : undefined,
     rewriteStage: stage,
     lens: input.lens,
     promptCharBudget: preparedModel.runtimeLimits.promptCharBudget,
+    dialogueMetrics: context.dialogueMetrics,
+    targetDialogDensity: context.targetDialogDensity,
   });
 
-  const completion = await createManagedChatCompletion(client, preparedModel, {
-    temperature: 0.3,
-    top_p: settings.topP,
-    messages: [{ role: "user", content: prompt }],
-    
-  });
+  const completion = await createManagedChatCompletion(
+    client,
+    preparedModel,
+    {
+      temperature: 0.3,
+      top_p: settings.topP,
+      messages: [{ role: "user", content: prompt }],
+    },
+    undefined,
+    telemetryContext,
+  );
 
   const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({
     score: null,
@@ -120,9 +184,12 @@ export async function runCriticLens(input: {
     typeof parsed === "object" && parsed ? (parsed as Record<string, unknown>) : { executiveSummary: String(parsed) };
   const numericScore = extractCriticScore(parsedContent);
   const executiveSummary = summarizeCriticContent(parsedContent);
+  const normalized = normalizeCriticReportContent(parsedContent);
   const content = {
-    ...parsedContent,
-    ...(parsedContent.score && typeof parsedContent.score === "object" ? { scoreBreakdown: parsedContent.score } : {}),
+    ...normalized,
+    ...(parsedContent.score && typeof parsedContent.score === "object" && !normalized.scoreBreakdown
+      ? { scoreBreakdown: parsedContent.score }
+      : {}),
     executiveSummary,
     score: numericScore,
     rewriteStage: stage,
@@ -146,6 +213,75 @@ export async function runCriticLens(input: {
   return content;
 }
 
+function normalizeCriticReportContent(content: Record<string, unknown>) {
+  const normalized = { ...content };
+
+  // Canonical summary key used by UI cards.
+  if (!stringValue(normalized.executiveSummary)) {
+    normalized.executiveSummary =
+      stringValue(normalized.summary) ||
+      stringValue(normalized.overview) ||
+      stringValue(normalized.assessment) ||
+      stringValue(normalized.finalVerdict) ||
+      stringValue(normalized.conclusion) ||
+      "";
+  }
+
+  normalized.strengths = toArray(normalized.strengths);
+  normalized.risks = toArray(normalized.risks);
+  normalized.chapterNotes = toArray(normalized.chapterNotes);
+  normalized.continuityFlags = toArray(normalized.continuityFlags);
+  normalized.voiceAndStyleNotes = toArray(normalized.voiceAndStyleNotes);
+  normalized.marketPositioning = toArray(normalized.marketPositioning);
+  normalized.nextRevisionPlan = toArray(normalized.nextRevisionPlan);
+
+  // Fixes can arrive under several equivalent keys.
+  const highestLeverageFixes =
+    toArray(normalized.highestLeverageFixes).length
+      ? toArray(normalized.highestLeverageFixes)
+      : toArray(normalized.keyFixes).length
+        ? toArray(normalized.keyFixes)
+        : toArray(normalized.priorityFixes);
+  normalized.highestLeverageFixes = highestLeverageFixes;
+
+  const recommendedFixes =
+    toArray(normalized.recommendedFixes).length
+      ? toArray(normalized.recommendedFixes)
+      : toArray(normalized.suggestedFixes).length
+        ? toArray(normalized.suggestedFixes)
+        : toArray(normalized.actionItems);
+  normalized.recommendedFixes = recommendedFixes;
+
+  // Finding-oriented aliases used by some models.
+  normalized.findings = toArray(normalized.findings).length
+    ? toArray(normalized.findings)
+    : toArray(normalized.keyFindings).length
+      ? toArray(normalized.keyFindings)
+      : toArray(normalized.observations).length
+        ? toArray(normalized.observations)
+        : toArray(normalized.issues);
+  normalized.observations = toArray(normalized.observations);
+  normalized.issues = toArray(normalized.issues);
+  normalized.keyFindings = toArray(normalized.keyFindings);
+
+  return normalized;
+}
+
+function toArray(value: unknown) {
+  if (Array.isArray(value)) return value;
+  if (value === null || value === undefined) return [];
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  if (typeof value === "object") return [value as Record<string, unknown>];
+  return [String(value)];
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function buildAcceptedRevisionContext(chapters: ChapterRow[], paragraphs: ParagraphRow[]) {
   const paragraphsByChapter = paragraphs.reduce<Record<string, ParagraphRow[]>>((groups, paragraph) => {
     groups[paragraph.chapter_id] ||= [];
@@ -153,20 +289,18 @@ function buildAcceptedRevisionContext(chapters: ChapterRow[], paragraphs: Paragr
     return groups;
   }, {});
 
-  let remainingContextCharacters = 14000;
+  const totalBudget = 14000;
+  const perChapterLimit = Math.max(300, Math.min(1200, Math.floor(totalBudget / Math.max(1, chapters.length))));
 
   return chapters.map((chapter) => {
     const chapterParagraphs = (paragraphsByChapter[chapter.id] || []).sort((a, b) => a.paragraph_number - b.paragraph_number);
     const acceptedParagraphs = chapterParagraphs.filter((paragraph) => paragraph.accepted_text);
-    const perChapterLimit = Math.max(300, Math.min(1200, Math.floor(remainingContextCharacters / Math.max(1, chapters.length))));
-    const sample =
-      remainingContextCharacters > 0
-        ? chapterParagraphs
-            .map((paragraph) => paragraph.accepted_text || paragraph.original_text)
-            .join("\n\n")
-            .slice(0, perChapterLimit)
-        : "";
-    remainingContextCharacters = Math.max(0, remainingContextCharacters - sample.length);
+    const acceptedSnippet = acceptedParagraphs.map((paragraph) => paragraph.accepted_text || paragraph.original_text).join("\n\n");
+    const narrativeSnippet = chapterParagraphs
+      .map((paragraph) => paragraph.accepted_text || paragraph.original_text)
+      .join("\n\n");
+    const prioritized = `${acceptedSnippet}\n\n${narrativeSnippet}`.trim();
+    const sample = prioritized.slice(0, perChapterLimit);
 
     return {
       title: chapter.title || "Untitled chapter",
@@ -175,4 +309,29 @@ function buildAcceptedRevisionContext(chapters: ChapterRow[], paragraphs: Paragr
       totalParagraphs: chapterParagraphs.length,
     };
   });
+}
+
+function computeDialogueMetrics(chapters: ChapterRow[], paragraphs: ParagraphRow[]) {
+  const paragraphsByChapter = paragraphs.reduce<Record<string, ParagraphRow[]>>((groups, paragraph) => {
+    groups[paragraph.chapter_id] ||= [];
+    groups[paragraph.chapter_id].push(paragraph);
+    return groups;
+  }, {});
+
+  let totalDialogueWords = 0;
+  let totalWords = 0;
+
+  const perChapter = chapters.map((chapter) => {
+    const chapterParagraphs = paragraphsByChapter[chapter.id] || [];
+    const text = chapterParagraphs.map((paragraph) => paragraph.accepted_text || paragraph.original_text).join("\n\n");
+    const { dialogueWords, totalWords: chapterWordCount, ratio } = computeDialogueRatio(text);
+    totalDialogueWords += dialogueWords;
+    totalWords += chapterWordCount;
+    return { title: chapter.title || "Untitled chapter", ratio, wordCount: chapterWordCount };
+  });
+
+  return {
+    perChapter,
+    overallRatio: totalWords > 0 ? totalDialogueWords / totalWords : 0,
+  };
 }

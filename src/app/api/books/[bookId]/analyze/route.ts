@@ -60,8 +60,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       expectedCalls: Math.max(1, chapters?.length || 1),
       latencyPreference: settings.qualityProfile === "premium" ? "quality" : "balanced",
       allowUnload: true,
+      telemetry: { supabase, userId: user.id },
     });
-    const { client, model, preparedModel, modelSelection } = modelPlan;
+    const { client, model, preparedModel, modelSelection, telemetryContext } = modelPlan;
     const plan = estimateAiCallPlan({
       task: "book-bible",
       selectedModel: model,
@@ -72,7 +73,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       sceneCount: scenes || 0,
       paragraphCount: paragraphs || 0,
     });
-    const allChunks = chunkChaptersForModel(chapters || [], plan.targetTokensPerCall).map((chunk, index) => ({
+    const runtimePromptTokenBudget = Math.max(900, Math.floor(preparedModel.runtimeLimits.promptCharBudget / 4));
+    const chunkingTokenBudget = Math.max(700, Math.min(plan.targetTokensPerCall, runtimePromptTokenBudget));
+    const allChunks = chunkChaptersForModel(chapters || [], chunkingTokenBudget).map((chunk, index) => ({
       ...chunk,
       chunkNumber: index + 1,
     }));
@@ -196,14 +199,22 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             "Extract only what is visible in this chunk. Do not invent full-book facts.",
             chunk.text,
           ].join("\n\n"),
+          {
+            maxSampleChars: Math.max(2200, Math.floor(preparedModel.runtimeLimits.promptCharBudget * 0.72)),
+          },
         );
 
-        const completion = await createManagedChatCompletion(client, preparedModel, {
-          temperature: settings.temperature,
-          top_p: settings.topP,
-          messages: [{ role: "user", content: prompt }],
-          
-        });
+        const completion = await createManagedChatCompletion(
+          client,
+          preparedModel,
+          {
+            temperature: settings.temperature,
+            top_p: settings.topP,
+            messages: [{ role: "user", content: prompt }],
+          },
+          undefined,
+          telemetryContext,
+        );
 
         const content = completion.choices[0]?.message.content || "{}";
         partials.push({
@@ -260,6 +271,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         chunkCount: allChunks.length,
         retryChunkCount: retryChunkNumbers?.size || 0,
         chunkChapterRanges: allChunks.map((chunk) => chunk.chapterRange),
+        promptCharBudget: preparedModel.runtimeLimits.promptCharBudget,
+        chunkingTokenBudget,
       },
       partialAnalyses: await getMergedPartialRecordsForBlueprintRetry(supabase, bookId, partials, Boolean(retryChunkNumbers?.size)),
     };

@@ -1,3 +1,5 @@
+import { matchLocalModelFamily } from "@/lib/ai/model-catalog";
+
 export type RewriteModelSuitability = {
   model: string;
   score: number;
@@ -48,6 +50,9 @@ function scoreRewriteModel(
   let score = 0;
   const size = getModelSizeB(name);
   const quantization = getQuantization(name);
+  // Family identity (Qwen, Llama, DeepSeek-R1, bge-m3, ...) comes from the shared
+  // catalog so this file and model-recommendations.ts never drift apart.
+  const family = matchLocalModelFamily(name);
 
   if (isEmbeddingOrRankingModel(name)) {
     return {
@@ -61,12 +66,14 @@ function scoreRewriteModel(
 
   add(18, "generation model", "base generation capability");
 
-  if (/instruct|chat|assistant|it\b/.test(name)) add(18, "instruction tuned", "instruction/chat signal");
-  else if (/qwen3|llama-3|mistral-small|gemma/.test(name)) add(12, "modern chat-capable family", "family signal");
+  const instructTagged = /instruct|chat|assistant|it\b/.test(name);
+  if (instructTagged) add(18, "instruction tuned", "instruction/chat signal");
 
-  if (/qwen/.test(name)) add(13, "Qwen is strong for local rewriting", "rewrite family fit");
-  else if (/mistral|llama|gemma/.test(name)) add(10, "strong general prose model family", "rewrite family fit");
-  else if (/gpt-oss|openai/.test(name)) add(8, "general purpose model family", "rewrite family fit");
+  if (family?.kind === "general") {
+    const bonus = family.taskAffinity.primary_rewrite_model ?? 10;
+    add(bonus, `${family.label} is strong for local rewriting (${family.strengths[0]})`, "rewrite family fit");
+    if (!instructTagged) add(12, `${family.label} is a modern chat-capable family`, "family signal");
+  }
 
   if (size >= 28 && size <= 40) add(24, "30B-class model fits balanced rewrite quality/speed", "size fit");
   else if (size >= 60) add(input.qualityProfile === "premium" ? 25 : 18, "70B-class model has high quality but heavier latency", "size fit");
@@ -87,9 +94,12 @@ function scoreRewriteModel(
     add(5, "quantization unknown", "quantization unknown");
   }
 
-  if (/reason|deepseek|r1|thinking/.test(name)) subtract(18, "reasoning model is better for planning/critique than final prose rewrite");
-  if (/coder|code/.test(name)) subtract(16, "coder model is not ideal for literary rewrite");
-  if (/embed|embedding|rerank/.test(name)) subtract(100, "not a rewrite model");
+  // Known reasoning/coder families are flagged via the catalog; the regex
+  // fallback still catches unrecognized model names carrying the same signal.
+  const looksReasoning = family?.kind === "reasoning" || (!family && /reason|deepseek|r1|thinking/.test(name));
+  const looksCoder = family?.kind === "code" || (!family && /coder|code/.test(name));
+  if (looksReasoning) subtract(18, "reasoning model is better for planning/critique than final prose rewrite");
+  if (looksCoder) subtract(16, "coder model is not ideal for literary rewrite");
 
   const finalScore = Math.max(0, Math.min(100, Math.round(score)));
   return {
@@ -125,5 +135,7 @@ function getQuantization(name: string) {
 }
 
 function isEmbeddingOrRankingModel(name: string) {
+  const kind = matchLocalModelFamily(name)?.kind;
+  if (kind === "embedding" || kind === "reranker") return true;
   return /embed|embedding|rerank|reranker|cross[-_ ]?encoder|\bbge[-_ ]?m3\b|nomic/.test(name);
 }

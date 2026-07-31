@@ -10,6 +10,7 @@ import {
   snapshotSelectColumns,
   toBranchResponse,
   toSnapshotResponse,
+  type MetadataBranchRecord,
   type MetadataSnapshotRecord,
 } from "@/lib/book-metadata/timeline";
 
@@ -65,14 +66,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ book
 
     if (branchError) {
       if (isMissingMetadataSchema(branchError)) {
-        return NextResponse.json({ snapshots: (snapshots || []).map((row) => toSnapshotResponse(row as MetadataSnapshotRecord)), branches: [], unavailable: true, reason: "Metadata timeline tables are not installed. Run the latest Supabase migrations." });
+        return NextResponse.json({ snapshots: (snapshots || []).map((row) => toSnapshotResponse(row as unknown as MetadataSnapshotRecord)), branches: [], unavailable: true, reason: "Metadata timeline tables are not installed. Run the latest Supabase migrations." });
       }
       throw branchError;
     }
 
     return NextResponse.json({
-      snapshots: (snapshots || []).map((row) => toSnapshotResponse(row as MetadataSnapshotRecord)),
-      branches: (branches || []).map((row) => toBranchResponse(row)),
+      snapshots: (snapshots || []).map((row) => toSnapshotResponse(row as unknown as MetadataSnapshotRecord)),
+      branches: (branches || []).map((row) => toBranchResponse(row as unknown as MetadataBranchRecord)),
     });
   } catch (error) {
     console.error("Metadata snapshots load failed", error);
@@ -138,13 +139,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       throw snapshotError;
     }
 
+    const snapshotRecord = snapshot as unknown as MetadataSnapshotRecord;
+
     const { data: branch, error: branchError } = await supabase
       .from("book_metadata_branches")
       .upsert(
         {
           book_id: bookId,
           name: branchName,
-          head_snapshot_id: snapshot.id,
+          head_snapshot_id: snapshotRecord.id,
           is_default: branchName === "main",
           created_by: user.id,
           updated_at: now,
@@ -156,7 +159,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
 
     if (branchError) throw branchError;
 
-    return NextResponse.json({ snapshot: toSnapshotResponse(snapshot as MetadataSnapshotRecord), branch: toBranchResponse(branch) });
+    return NextResponse.json({
+      snapshot: toSnapshotResponse(snapshotRecord),
+      branch: toBranchResponse(branch as unknown as MetadataBranchRecord),
+    });
   } catch (error) {
     console.error("Metadata snapshot create failed", error);
     return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to create metadata snapshot." }, { status: 500 });

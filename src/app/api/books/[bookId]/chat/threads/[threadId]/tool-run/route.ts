@@ -158,7 +158,12 @@ async function executeTool(input: {
   request: Request;
   bookId: string;
   toolName: "rewrite_plan" | "critic_all" | "humanize_guidance";
-  toolArgs: { stage?: "baseline" | "post_rewrite"; launch?: boolean };
+  toolArgs: {
+    stage?: "baseline" | "post_rewrite";
+    launch?: boolean;
+    metadataSnapshotId?: string;
+    metadataBranchName?: string;
+  };
 }): Promise<ToolRunResult> {
   const origin = new URL(input.request.url).origin;
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Alert, Button, Divider, Paper, Select, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { Alert, Button, Divider, Group, Modal, Paper, Select, SimpleGrid, Stack, Switch, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AiJobQueue, type AiJobQueueState } from "@/components/ai/ai-job-queue";
@@ -80,6 +80,18 @@ type AutoReviewStatusResponse = {
   };
 };
 
+type AutoReviewJobSummary = {
+  id: string;
+  mode: "full_review" | "make_shorter" | "make_longer";
+  status: "running" | "completed" | "failed" | "cancelled";
+  completed_at: string | null;
+  created_at: string;
+};
+
+type AutoReviewJobResponse = {
+  job?: AutoReviewJobSummary | null;
+};
+
 const autoReviewStrategies = [
   "conservative_polish",
   "humanized_literary",
@@ -109,6 +121,12 @@ export function BookActions({
   const [lens, setLens] = useState<CriticLens>("revision_priorities");
   const [output, setOutput] = useState("");
   const [pendingTask, setPendingTask] = useState<PendingTask | null>(null);
+  const [pendingGuardTask, setPendingGuardTask] = useState<AiDashboardTask | null>(null);
+  const [latestAutoReviewJob, setLatestAutoReviewJob] = useState<AutoReviewJobSummary | null>(null);
+  const [alwaysShowDetailedQueue, setAlwaysShowDetailedQueue] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("bookforge.alwaysShowDetailedQueue") === "1";
+  });
   const [queue, setQueue] = useState<AiJobQueueState>({
     currentTask: "",
     currentUnit: "",
@@ -119,6 +137,41 @@ export function BookActions({
     skippedUnits: 0,
     status: "idle",
   });
+
+  useEffect(() => {
+    window.localStorage.setItem("bookforge.alwaysShowDetailedQueue", alwaysShowDetailedQueue ? "1" : "0");
+  }, [alwaysShowDetailedQueue]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadLatestAutoReviewJob() {
+      try {
+        const result = await fetchJson<AutoReviewJobResponse>(
+          `/api/books/${bookId}/auto-review`,
+          { cache: "no-store" },
+          "Auto-review latest job status",
+        );
+        if (!cancelled) {
+          setLatestAutoReviewJob(result.job || null);
+        }
+      } catch {
+        if (!cancelled) {
+          setLatestAutoReviewJob(null);
+        }
+      }
+    }
+
+    void loadLatestAutoReviewJob();
+    const interval = window.setInterval(() => {
+      void loadLatestAutoReviewJob();
+    }, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [bookId]);
 
   async function getModelStatus(): Promise<ModelStatusResponse> {
     return fetchJson<ModelStatusResponse>(
@@ -316,6 +369,18 @@ export function BookActions({
     } finally {
       setLoading(null);
     }
+  }
+
+  function requiresPostAutoReviewConfirmation(task: AiDashboardTask) {
+    return task === "book-bible" || task === "chapter-summaries" || task === "critic" || task === "critic-all";
+  }
+
+  function requestTask(task: AiDashboardTask) {
+    if (latestAutoReviewJob?.status === "completed" && requiresPostAutoReviewConfirmation(task)) {
+      setPendingGuardTask(task);
+      return;
+    }
+    void openPreflight(task);
   }
 
   async function run(path: string, body: unknown, preflight: AiTaskPreflightData | null) {
@@ -676,7 +741,15 @@ export function BookActions({
           setLoading(null);
         });
     } catch (error) {
-      setOutput(JSON.stringify({ error: error instanceof Error ? error.message : "Planned draft queue failed." }, null, 2));
+      setOutput(
+        JSON.stringify(
+          {
+            error: describeTaskError(error, "Planned draft queue failed."),
+          },
+          null,
+          2,
+        ),
+      );
       setQueue((current) => ({
         ...current,
         failedUnits: Math.max(1, current.failedUnits),
@@ -1075,6 +1148,20 @@ export function BookActions({
 
   return (
     <Stack>
+      {latestAutoReviewJob?.status === "completed" && (
+        <Alert color="green" title="Auto-Review already completed for this manuscript">
+          <Text size="sm" mb={6}>
+            {`Last run: ${describeAutoReviewMode(latestAutoReviewJob.mode)} completed ${formatAutoReviewCompletionTime(
+              latestAutoReviewJob.completed_at,
+              latestAutoReviewJob.created_at,
+            )}.`}
+          </Text>
+          <Text size="sm" c="dimmed">
+            Review the revised manuscript and exports first. Prepare Context and Critic actions are still available, but they are usually redundant right after a completed Auto-Review.
+          </Text>
+        </Alert>
+      )}
+
       <SimpleGrid cols={{ base: 1, lg: 3 }}>
         <ActionPanel
           title="Prepare Context"
@@ -1084,7 +1171,7 @@ export function BookActions({
             color="grape"
             fullWidth
             loading={loading === "preflight:book-bible" || loading === `/api/books/${bookId}/analyze`}
-            onClick={() => openPreflight("book-bible")}
+            onClick={() => requestTask("book-bible")}
           >
             Generate Manuscript Blueprint
           </Button>
@@ -1096,10 +1183,13 @@ export function BookActions({
               loading === "preflight:chapter-summaries" ||
               loading === `/api/books/${bookId}/chapters/summarize`
             }
-            onClick={() => openPreflight("chapter-summaries")}
+            onClick={() => requestTask("chapter-summaries")}
           >
             Generate Chapter Summaries
           </Button>
+          <Text size="xs" c="dimmed">
+            This opens AI Task Preflight. Click Proceed in that dialog to start summary generation.
+          </Text>
         </ActionPanel>
 
         <ActionPanel
@@ -1117,7 +1207,7 @@ export function BookActions({
             variant="light"
             color="grape"
             loading={loading === "preflight:critic" || loading === `/api/books/${bookId}/critic`}
-            onClick={() => openPreflight("critic")}
+            onClick={() => requestTask("critic")}
           >
             Run Selected Critic Lens
           </Button>
@@ -1125,7 +1215,7 @@ export function BookActions({
             fullWidth
             color="grape"
             loading={loading === "preflight:critic-all" || loading === `/api/books/${bookId}/critic/all`}
-            onClick={() => openPreflight("critic-all")}
+            onClick={() => requestTask("critic-all")}
           >
             Run All Critic Lenses
           </Button>
@@ -1136,14 +1226,19 @@ export function BookActions({
           description="Move from architecture to reviewable drafts and final files."
         >
           {plannedChapterCount > 0 && (
-            <Button
-              fullWidth
-              color="orange"
-              loading={loading === "preflight:generate-draft" || loading === `/api/books/${bookId}/generate-draft`}
-              onClick={() => openPreflight("generate-draft")}
-            >
-              Generate Planned Draft ({Math.min(plannedChapterCount, 3)} of {plannedChapterCount})
-            </Button>
+            <>
+              <Button
+                fullWidth
+                color="orange"
+                loading={loading === "preflight:generate-draft" || loading === `/api/books/${bookId}/generate-draft`}
+                onClick={() => openPreflight("generate-draft")}
+              >
+                Generate Planned Draft ({Math.min(plannedChapterCount, 3)} of {plannedChapterCount})
+              </Button>
+              <Text size="xs" c="dimmed">
+                This opens AI Task Preflight. Click Proceed in that dialog to start chapter generation.
+              </Text>
+            </>
           )}
           <Button component={Link} href={`/books/${bookId}/rewrite-plan`} color="dark" variant="light" fullWidth>
             Rewrite Architect
@@ -1159,20 +1254,53 @@ export function BookActions({
 
       <Divider />
 
-      <AiJobQueue
-        job={queue}
-        onPause={() => setQueue((current) => ({ ...current, status: "paused" }))}
-        onResume={() => setQueue((current) => ({ ...current, status: "running" }))}
-        onCancel={() => setQueue((current) => ({ ...current, status: "cancelled" }))}
-        onRetryFailed={() =>
-          setQueue((current) => ({
-            ...current,
-            failedUnits: 0,
-            skippedUnits: 0,
-            status: current.currentTask ? "running" : "idle",
-          }))
-        }
-      />
+      <Group justify="space-between" align="center">
+        <Text size="sm" c="dimmed">Queue visibility</Text>
+        <Switch
+          checked={alwaysShowDetailedQueue}
+          onChange={(event) => setAlwaysShowDetailedQueue(event.currentTarget.checked)}
+          label="Always show detailed queue"
+          size="sm"
+        />
+      </Group>
+
+      {(alwaysShowDetailedQueue || queue.status !== "idle" || queue.totalUnits > 0 || Boolean(queue.currentTask)) ? (
+        <AiJobQueue
+          job={queue}
+          onPause={() => setQueue((current) => ({ ...current, status: "paused" }))}
+          onResume={() => setQueue((current) => ({ ...current, status: "running" }))}
+          onCancel={() => setQueue((current) => ({ ...current, status: "cancelled" }))}
+          onRetryFailed={() => {
+            if (queue.currentTask === "Generate Planned Draft") {
+              void runQueuedGenerateDraft(null);
+              return;
+            }
+            if (queue.currentTask === "Generate Chapter Summaries") {
+              void runQueuedChapterSummaries(null);
+              return;
+            }
+            if (queue.currentTask === "Generate Manuscript Blueprint") {
+              void runQueuedBlueprint(null);
+              return;
+            }
+            if (queue.currentTask === "Run all BookForge Critic lenses") {
+              void runQueuedCriticAll(null, { stage: "baseline" });
+              return;
+            }
+
+            setQueue((current) => ({
+              ...current,
+              failedUnits: 0,
+              skippedUnits: 0,
+              status: current.currentTask ? "running" : "idle",
+            }));
+          }}
+        />
+      ) : (
+        <Alert color="gray" variant="light" title="AI Job Queue">
+          No active local queue task.
+        </Alert>
+      )}
       {output && (
         <Alert color={output.startsWith("Error:") || output.includes('"error"') ? "red" : "green"} title="Latest result">
           {output}
@@ -1202,6 +1330,35 @@ export function BookActions({
           }
         }}
       />
+      <Modal
+        opened={Boolean(pendingGuardTask)}
+        onClose={() => setPendingGuardTask(null)}
+        title="Auto-Review already completed"
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            This manuscript already has a completed Auto-Review run. The selected action is still available, but it often duplicates work that was just completed.
+          </Text>
+          <Text size="sm" c="dimmed">
+            Review the revised manuscript, critic outcomes, and exports first. Continue only if you intentionally want a fresh baseline/context pass.
+          </Text>
+          <Button
+            color="grape"
+            onClick={() => {
+              if (!pendingGuardTask) return;
+              const task = pendingGuardTask;
+              setPendingGuardTask(null);
+              void openPreflight(task);
+            }}
+          >
+            Run anyway
+          </Button>
+          <Button variant="subtle" color="gray" onClick={() => setPendingGuardTask(null)}>
+            Cancel
+          </Button>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }
@@ -1262,6 +1419,19 @@ function formatAutoReviewMessage(firstReview: AutoRevisionResponse | null, secon
   return parts.join(" ");
 }
 
+function describeAutoReviewMode(mode: AutoReviewJobSummary["mode"]) {
+  if (mode === "make_shorter") return "Make Shorter Auto-Review";
+  if (mode === "make_longer") return "Make Longer Auto-Review";
+  return "Full Auto-Review";
+}
+
+function formatAutoReviewCompletionTime(completedAt: string | null, createdAt: string) {
+  const source = completedAt || createdAt;
+  const date = new Date(source);
+  if (Number.isNaN(date.getTime())) return "recently";
+  return date.toLocaleString();
+}
+
 function formatResultMessage(path: string, result: { content?: Record<string, unknown> }) {
   const plan = result.content?.aiCallPlan as
     | { actualCalls?: number; expectedCalls?: number; chunkCount?: number; unitStrategy?: string }
@@ -1297,4 +1467,12 @@ function formatResultMessage(path: string, result: { content?: Record<string, un
   }
 
   return "Task completed and saved.";
+}
+
+function describeTaskError(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : fallback;
+  if (message.includes("<!DOCTYPE html")) {
+    return `${fallback} The server returned an HTML error page instead of JSON. Check server logs for the underlying 500 error.`;
+  }
+  return message;
 }

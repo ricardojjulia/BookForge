@@ -117,6 +117,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
 
     const [
+      { data: book },
       { data: bible },
       { data: rewritePlan, error: planError },
       { data: continuityLedger },
@@ -126,6 +127,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       { data: acceptedRevisionRows, error: acceptedRevisionRowsError },
       { data: lockedPassageRows, error: lockedPassageRowsError },
     ] = await Promise.all([
+      supabase.from("books").select("dialog_density").eq("id", bookId).single(),
       supabase.from("book_bibles").select("content,voice_profile").eq("book_id", bookId).maybeSingle(),
       supabase
         .from("coherence_reports")
@@ -208,8 +210,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       expectedCalls,
       latencyPreference: settings.qualityProfile === "premium" ? "quality" : settings.qualityProfile === "fast" ? "fast" : "balanced",
       allowUnload: true,
+      telemetry: { supabase, userId: user.id },
     });
-    const { client, model, preparedModel, modelSelection, availableModels } = modelPlan;
+    const { client, model, preparedModel, modelSelection, availableModels, telemetryContext } = modelPlan;
     const rewriteSelection = selectBestRewriteModel(availableModels, {
       qualityProfile: settings.qualityProfile,
       contextWindowTokens: settings.contextWindowTokens,
@@ -292,6 +295,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       if (body.serverManaged) {
         return NextResponse.json({
           content: {
+            jobId,
             revisionJobId: jobId,
             queued: true,
             totalUnits: body.maxUnits || expectedCalls,
@@ -452,6 +456,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         const contextPacket = buildRewriteContextPacket({
           manuscriptBlueprint: bible?.content,
           rewritePlan: normalizedRewritePlan,
+          dialogDensity: book?.dialog_density,
           chapter,
           previousChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex - 1]?.summary,
           nextChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex + 1]?.summary,
@@ -484,13 +489,18 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           text: paragraph.original_text,
         });
 
-        const completion = await createManagedChatCompletion(client, preparedModel, {
-          temperature: Math.min(settings.temperature, 0.55),
-          top_p: settings.topP,
-          max_tokens: 1800,
-          messages: [{ role: "user", content: prompt }],
-          
-        });
+        const completion = await createManagedChatCompletion(
+          client,
+          preparedModel,
+          {
+            temperature: Math.min(settings.temperature, 0.55),
+            top_p: settings.topP,
+            max_tokens: 1800,
+            messages: [{ role: "user", content: prompt }],
+          },
+          undefined,
+          telemetryContext,
+        );
 
         const parsed = parseRewriteResponse(completion.choices[0]?.message.content || "{}");
         const revisedText = extractRevisedText(parsed) || paragraph.original_text;

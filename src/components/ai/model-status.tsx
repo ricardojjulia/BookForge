@@ -24,6 +24,14 @@ type ConfiguredModel = {
   available: boolean;
 };
 
+type RecentIssue = {
+  model: string;
+  task: string;
+  incidentCount: number;
+  signature: string;
+  sampleSize: number;
+};
+
 type ModelStatusPayload = {
   connected: boolean;
   baseUrl: string;
@@ -34,6 +42,7 @@ type ModelStatusPayload = {
     warning: string | null;
   };
   warnings: string[];
+  recentIssues?: RecentIssue[];
   error: string | null;
 };
 
@@ -56,6 +65,7 @@ export const ModelStatus = forwardRef<ModelStatusHandle>(function ModelStatus(_,
         availableModels: [],
         configuredModels: [],
         warnings: [],
+        recentIssues: [],
         error: error instanceof Error ? error.message : "Unable to load model status.",
       };
     }
@@ -132,6 +142,26 @@ export const ModelStatus = forwardRef<ModelStatusHandle>(function ModelStatus(_,
                 {warning}
               </Alert>
             ))}
+
+            {!!status.recentIssues?.length && (
+              <Paper withBorder radius="sm" p="md" bg="#fff8f0">
+                <Text fw={700} mb="xs">
+                  Recent issues (last 14 days)
+                </Text>
+                <Stack gap="xs">
+                  {status.recentIssues.map((issue) => (
+                    <Group key={`${issue.model}:${issue.task}`} justify="space-between" wrap="nowrap">
+                      <Text size="sm">
+                        <b>{issue.model}</b> on {issue.task} — {issue.signature.replaceAll("_", " ")}
+                      </Text>
+                      <Badge color="orange" variant="light">
+                        {issue.incidentCount}/{issue.sampleSize} calls
+                      </Badge>
+                    </Group>
+                  ))}
+                </Stack>
+              </Paper>
+            )}
 
             <Table striped highlightOnHover>
               <thead>

@@ -32,7 +32,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     const book = await loadAccessibleBook(supabase, bookId);
     if (!book) return NextResponse.json({ error: "Book not found." }, { status: 404 });
 
-    const { data: snapshot, error: snapshotError } = await supabase
+    const { error: snapshotError } = await supabase
       .from("book_metadata_snapshots")
       .select(snapshotSelectColumns())
       .eq("id", body.snapshotId)
@@ -50,7 +50,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       .from("book_metadata_decisions")
       .insert({
         book_id: bookId,
-        snapshot_id: snapshot.id,
+        snapshot_id: body.snapshotId,
         decision_type: body.decisionType,
         subject_type: body.subjectType,
         subject_ref: body.subjectRef.trim(),
@@ -67,7 +67,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       throw decisionError;
     }
 
-    return NextResponse.json({ decision: toDecisionResponse(decision as MetadataDecisionRecord) });
+    return NextResponse.json({ decision: toDecisionResponse(decision as unknown as MetadataDecisionRecord) });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to record metadata decision." }, { status: 500 });
   }

@@ -28,6 +28,11 @@ function getError(e: unknown) {
   return "Failed.";
 }
 
+function isTransientJsonParseError(e: unknown) {
+  const message = e instanceof Error ? e.message : String(e || "");
+  return /Unexpected end of JSON input/i.test(message);
+}
+
 export async function POST(request: Request, { params }: { params: Promise<{ bookId: string }> }) {
   try {
     const { bookId } = await params;
@@ -143,6 +148,10 @@ export async function GET(_: Request, { params }: { params: Promise<{ bookId: st
 
     return NextResponse.json({ job });
   } catch (e) {
+    if (isTransientJsonParseError(e)) {
+      console.warn("Auto-review status polling transient parse error", e);
+      return NextResponse.json({ job: null, transient: true });
+    }
     return NextResponse.json({ error: getError(e) }, { status: 500 });
   }
 }
