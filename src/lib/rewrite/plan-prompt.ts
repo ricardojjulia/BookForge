@@ -1,11 +1,13 @@
 import { criticLenses } from "@/lib/critic/prompts";
 import { extractCriticScore } from "@/lib/critic/score";
+import { describeDialogueDensity } from "@/lib/dialogue-density";
 import type { CriticLens } from "@/lib/types";
 
 type RewritePlanPromptInput = {
   title: string;
   genre?: string | null;
   targetAudience?: string | null;
+  dialogDensity?: string | null;
   manuscriptBlueprint?: unknown;
   rewriteModelSelection?: unknown;
   chapters: Array<{ chapter_number: number; title: string | null; summary: string | null }>;
@@ -31,6 +33,9 @@ ${input.genre || "Not specified"}
 
 TARGET AUDIENCE:
 ${input.targetAudience || "Not specified"}
+
+DIALOGUE DENSITY:
+${describeDialogueDensity(input.dialogDensity)}
 
 MANUSCRIPT BLUEPRINT:
 ${compactJson(input.manuscriptBlueprint || {}, budget.blueprint)}
@@ -137,7 +142,8 @@ Return JSON with:
     "character_depth",
     "market_fit",
     "contemporary_view",
-    "revision_priorities"
+    "revision_priorities",
+    "dialogue_density"
   ],
   "acceptanceCriteria": []
 }

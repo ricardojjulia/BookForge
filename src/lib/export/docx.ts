@@ -13,6 +13,7 @@ import {
   type MatterSectionForExport,
   type ParagraphForExport,
 } from "@/lib/export/markdown";
+import { repairCommonMojibake } from "@/lib/text/repair-mojibake";
 
 const frontMatterTypes = new Set(["title_page", "copyright_page", "dedication", "foreword", "preface", "introduction"]);
 
@@ -30,7 +31,7 @@ const backMatterTypes = new Set([
 export async function buildFinalManuscriptDocx(input: BuildMarkdownInput) {
   const children: Paragraph[] = [
     new Paragraph({
-      text: input.book.title.trim() || "Untitled Book",
+      text: repairCommonMojibake(input.book.title.trim() || "Untitled Book"),
       heading: HeadingLevel.TITLE,
       alignment: AlignmentType.CENTER,
       spacing: { after: 240 },
@@ -40,7 +41,7 @@ export async function buildFinalManuscriptDocx(input: BuildMarkdownInput) {
   if (input.book.author_name) {
     children.push(
       new Paragraph({
-        text: `by ${input.book.author_name}`,
+        text: `by ${repairCommonMojibake(input.book.author_name)}`,
         alignment: AlignmentType.CENTER,
         spacing: { after: 480 },
       }),
@@ -71,7 +72,7 @@ export async function buildFinalManuscriptDocx(input: BuildMarkdownInput) {
 
     children.push(
       new Paragraph({
-        text: chapter.title?.trim() || `Chapter ${chapter.chapter_number}`,
+        text: repairCommonMojibake(chapter.title?.trim() || `Chapter ${chapter.chapter_number}`),
         heading: HeadingLevel.HEADING_1,
         spacing: { before: 480, after: 240 },
       }),
@@ -116,12 +117,12 @@ function appendMatter(children: Paragraph[], sections: MatterSectionForExport[])
   sections.forEach((section) => {
     children.push(
       new Paragraph({
-        text: section.title?.trim() || humanizeSectionType(section.section_type),
+        text: repairCommonMojibake(section.title?.trim() || humanizeSectionType(section.section_type)),
         heading: HeadingLevel.HEADING_1,
         spacing: { before: 480, after: 240 },
       }),
     );
-    appendBodyText(children, section.content);
+    appendBodyText(children, repairCommonMojibake(section.content));
   });
 }
 
@@ -133,7 +134,7 @@ function appendBodyText(children: Paragraph[], text: string) {
     .forEach((paragraph) => {
       children.push(
         new Paragraph({
-          children: [new TextRun({ text: paragraph })],
+          children: [new TextRun({ text: repairCommonMojibake(paragraph) })],
           spacing: { after: 220 },
         }),
       );

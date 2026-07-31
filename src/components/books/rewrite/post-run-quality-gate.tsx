@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { criticLenses } from "@/lib/critic/prompts";
 import { summarizeStrategyOutcome } from "@/lib/critic/comparison";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 
 type ReportRow = {
   id: string;
@@ -46,7 +47,11 @@ export function PostRunQualityGate({
   const outcome = useMemo(() => summarizeStrategyOutcome(reports), [reports]);
   const latestDrift = reports.find((report) => report.report_type === "rewrite_drift_check");
   const latestGuidance = reports.find((report) => report.report_type === "humanized_guidance");
-  const postCriticCount = reports.filter((report) => report.report_type.startsWith("critic_post:")).length;
+  const postCriticCount = new Set(
+    reports
+      .filter((report) => report.report_type.startsWith("critic_post:"))
+      .map((report) => report.report_type.toLowerCase()),
+  ).size;
   const acceptedPercent = totalParagraphs ? Math.round((acceptedParagraphs / totalParagraphs) * 100) : 0;
   // pendingDraftCount === 0 and still below 90% means all reviewable paragraphs
   // are accepted — the gap is short structural paragraphs the rewrite skips (< 8 words).
@@ -64,14 +69,26 @@ export function PostRunQualityGate({
     setError("");
     try {
       if (action === "drift") {
+        const queued = await fetchJson<{ content?: { jobId?: string } }>(
+          `/api/books/${bookId}/drift-check`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ revisionJobId: latestRewriteJob?.id, serverManaged: true }),
+          },
+          "Queue drift check",
+        );
+        const jobId = queued.content?.jobId;
+        if (!jobId) throw new Error("Drift check queue handoff failed.");
+
         await fetchJson(
           `/api/books/${bookId}/drift-check`,
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ revisionJobId: latestRewriteJob?.id }),
+            body: JSON.stringify({ revisionJobId: latestRewriteJob?.id, jobId }),
           },
-          "Run drift check",
+          "Run drift check worker",
         );
         setMessage("Drift check saved.");
       } else if (action === "critic") {
@@ -80,7 +97,7 @@ export function PostRunQualityGate({
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ stage: "post_rewrite" }),
+            body: JSON.stringify(mergeMetadataSnapshotBody({ stage: "post_rewrite" })),
           },
           "Run post-rewrite Critic",
         );

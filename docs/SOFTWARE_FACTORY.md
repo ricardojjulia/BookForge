@@ -1,102 +1,116 @@
 # Software Factory Execution Log
 
-Last updated: 2026-06-01
+Last updated: 2026-06-02
 Owner: Engineering
-Branch: feat/v0.2.2-creator-panels-resume-account
+Branch: feat/v0.3.0-next
 
 ## Mission
 
-Execute the reliability and workflow pivot work with traceable phases, explicit acceptance criteria, and fresh documentation.
+Execute the v0.3.0 software-factory cycle with traceable phases, explicit acceptance criteria, and fresh documentation.
 
 ## Scope
 
-- Fix all High findings from the 2026-06-01 assessment.
-- Implement stale-aware data UX with manual refresh and force-refresh policy.
-- Add tooling and process guardrails for reliability.
-- Refresh architecture/status/changelog/todo documentation.
+- Lock the v0.3.0 release slice.
+- Design durable background processing and job-history visibility.
+- Improve collaborator and export workflows.
+- Keep status, TODO, and factory documentation in sync with delivery.
 
-## High Findings and Fix Ownership
+## v0.3.0 Workstreams
 
-1. Corrupted architecture document
+1. Release scope and milestones
 
 - Status: In progress
-- Owner: Docs/Platform
-- Deliverable: Clean `docs/ARCHITECTURE.md` as single source of truth.
+- Owner: Product + Engineering
+- Deliverable: Release goals, non-goals, and exit criteria for v0.3.0.
 
-1. Always-live fetch strategy increases fragility
+1. Operational maturity
 
 - Status: In progress
 - Owner: App Platform
-- Deliverable: Freshness tooling + route integration + reduced unconditional dynamic behavior.
+- Deliverable: Durable jobs, job-history UX, retry/cancel/visibility policy.
+
+1. Product quality
+
+- Status: Planned
+- Owner: App UI + Platform
+- Deliverable: Export metadata controls, collaborator workflow refinements, and test expansion.
 
 ## Execution Phases
 
-### Phase A — Documentation Recovery (Blocker)
+### Phase A — Scope Lock (Blocker)
 
-- [x] Replace corrupted architecture document.
-- [x] Align `README.md`, `docs/STATUS.md`, and changelog language with actual behavior.
-
-Acceptance:
-
-- Architecture docs no longer contain unrelated content.
-- Data freshness model documented as policy.
-
-### Phase B — Freshness Contract + UX
-
-- [x] Create shared freshness policy module.
-- [x] Add reusable freshness banner with refresh controls.
-- [x] Add force-refresh threshold handling (`>= 48h`) with non-blocking fallback.
+- [ ] Confirm v0.3.0 scope and non-goals.
+- [ ] Define release checkpoints and owner map.
+- [ ] Freeze the first implementation slice.
 
 Acceptance:
 
-- User can see freshness age and refresh manually.
-- Expired snapshots trigger forced refresh attempt without blocking stale display.
+- Scope is small enough to ship incrementally.
+- Every slice has an owner and acceptance criteria.
 
-### Phase C — Key Route Rollout
+### Phase B — Operational Maturity
 
-- [x] Dashboard
-- [x] Book page
-- [x] Rewrite plan
-- [x] Final manuscript
-- [x] Analytics
+- [ ] Design durable background processing for long-running AI workflows.
+- [ ] Add a job-history screen for queued/running/completed work.
+- [ ] Define retry/cancel/visibility behavior.
 
 Acceptance:
 
-- All key pages surface freshness and recover gracefully from refresh failures.
+- Long-running work can be observed and managed.
+- Job state is visible without relying on request-bound completion.
 
-### Phase D — Tooling and Guardrails
+### Phase C — Product Quality
 
-- [x] Add refresh telemetry instrumentation for lifecycle events (`freshness_refresh_attempt`, `freshness_refresh_success`, `freshness_refresh_failed`, `freshness_forced_refresh_triggered`).
-- [x] Add test coverage for freshness math and UI thresholds.
-- [x] Add engineering checklist to prevent accidental always-live fetch regressions.
-
-Acceptance:
-
-- CI verifies freshness behavior.
-- Team has operational visibility on refresh failures.
-
-### Phase E — Admin + Course Domain Preparation
-
-- [x] Publish domain ADR for admin-first/course-aware workflow.
-- [ ] Define migration strategy from book-centric to hybrid domain.
+- [ ] Refine export styling and metadata controls.
+- [ ] Improve collaborator workflows where coordination is still manual.
+- [ ] Expand tests around parsing, rewrite planning math, and export assembly.
 
 Acceptance:
 
-- Approved domain map before feature implementation.
+- The highest-friction author workflows are easier to complete.
+- Test coverage increases in the riskier core paths.
 
 ## Risk Register
 
-- Risk: Auth-dependent routes may still be dynamic even without explicit `force-dynamic`.
-- Mitigation: Introduce client freshness controls and route-level policy wrappers.
+- Risk: Scope creep can turn v0.3.0 into an unfocused release.
+- Mitigation: Freeze the first slice and require explicit acceptance criteria.
 
-- Risk: Force-refresh can loop if based on source update timestamps only.
-- Mitigation: Track snapshot refresh timestamp per route key and force once per stale window.
+- Risk: Long-running jobs can still be request-bound.
+- Mitigation: Favor a dedicated job-history contract and later durable worker integration.
 
 ## Change Log (Factory)
 
+- 2026-06-02: Added auto-review wizard resume success-path regression coverage to verify launch-token reuse and consistent job-id propagation across handshake and worker-launch calls.
+- 2026-06-02: Added auto-review wizard success-path regression coverage that verifies launch-token reuse between `launchOnly` handshake and worker-launch calls, and stabilized wizard tests by mocking the runner dependency.
+- 2026-06-02: Added auto-review wizard regression coverage for resume-path launch-handshake failure, verifying inline error surfacing and single process-launch attempt semantics.
+- 2026-06-02: Added a second auto-review wizard regression test that validates launch-handshake failure messaging and verifies no duplicate worker-launch call is attempted after failed acknowledgement.
+- 2026-06-02: Replaced auto-review wizard launch/start `alert` failures with inline error state and delayed runner activation until launch handshake succeeds, with a regression test for queued-start failure messaging.
+- 2026-06-02: Added an idempotent auto-review process launch handshake (`launchToken` + `launchOnly`) so retries can receive fast worker-launch acknowledgements without duplicate launches, plus process-route test coverage.
+- 2026-06-02: Converted auto-review start to queue-first handoff (`serverManaged`) with true resume-by-job-id behavior in the wizard, and added API test coverage for queued start responses.
+- 2026-06-02: Converted auto-revision execution to queue-first handoff (`serverManaged` + `jobId`), updated auto-review callers to use queue→worker stage calls, and added persistent job resume support for `auto_revision`.
+- 2026-06-02: Converted voice-capture execution to queue-first handoff (`serverManaged` + `jobId`), updated Voice Capture panel calls, and added persistent job resume support for `voice_capture`.
+- 2026-06-02: Converted rewrite drift-check execution to queue-first handoff (`serverManaged` + `jobId`), updated quality-gate/execution-panel callers, and added persistent job resume support for `rewrite_drift_check`.
+- 2026-06-02: Converted Rewrite Architect planning to queue-first handoff (`serverManaged` + `jobId`) and updated planning UI/persistent job resume wiring for `rewrite_plan` runs.
+- 2026-06-02: Converted single-lens BookForge Critic runs to queue-first handoff (`serverManaged` + `jobId`) and updated critic recheck UI + persistent jobs retries to use durable worker resume.
+- 2026-06-02: Converted Publishing Lab execution to queue-first handoff (`serverManaged` + `jobId`) and wired persistent jobs resume support for `publishing_lab` runs.
+- 2026-06-02: Expanded deterministic test coverage for parsing/defaulting and rewrite planning math (`plan-defaults`, `call-planner`).
+- 2026-06-02: Added actionable workflow notifications (mark one/mark all read) and rewrite approval route tests for permission and assignment transitions.
+- 2026-06-02: Added collaborator workflow ownership for revision review and rewrite approval (reviewer assignment + status transitions) with in-app notifications and optional email hooks.
+- 2026-06-02: Completed export-controls refinement with explicit "Use last export settings" / "Reset to recommended defaults" actions and EPUB/PDF guardrail validation, plus export route/component tests.
+- 2026-06-02: Added export-control persistence so final manuscript metadata/style settings are saved on export rows and used to prefill the next export run.
+- 2026-06-02: Moved remaining rewrite-related UI callers (guidance rewrite modal, revision review rewrite-again action, and persistent jobs retry/replacement for queue-capable routes) to queue-first handoff.
+- 2026-06-02: Split rewrite execution (main panel flow) into a queue-first job creation step plus a worker resume call so long rewrite batches no longer block the initiating request.
+- 2026-06-02: Split Critic batch generation into a queue-first job creation step plus a worker resume call so Book Actions can launch all-lens evaluation without blocking the full batch run.
+- 2026-06-02: Split Manuscript Blueprint generation into a queue-first job creation step plus a worker resume call so the dashboard can launch analysis without waiting on the full chunk loop.
+- 2026-06-02: Split chapter summary generation into a queue-first job creation step plus a worker resume call so the UI no longer blocks on the whole summarization batch.
+- 2026-06-02: Split planned draft generation into a queue-first job creation step plus a worker handoff so the request handler no longer has to do the whole batch inline.
+- 2026-06-02: Added a server worker route for auto-review so the wizard can enqueue work and monitor progress instead of orchestrating the stages itself.
+- 2026-06-02: Extended the heartbeat pattern to the full-book rewrite executor so paragraph-level rewrite jobs stay visible during long model calls.
+- 2026-06-02: Added persistent heartbeats for long-running analysis, summary, critic, and draft-generation routes so in-flight jobs stay visible during blocking model calls.
+- 2026-06-02: Completed the Phase 1 job-history visibility slice with summary cards and stale-running prioritization.
+- 2026-06-02: Reframed the factory log for the v0.3.0 cycle and updated branch context.
 - 2026-06-01: Created software-factory execution log and phased plan.
 - 2026-06-01: Completed High-finding architecture doc fix and rolled freshness UX to dashboard/book/rewrite/final/analytics routes.
-- 2026-06-01: Added ADR-0001 for admin/course-aware domain strategy and refreshed changelog/status/howto/readme docs.
 - 2026-06-01: Implemented freshness telemetry sink (`/api/telemetry/freshness`) and added Vitest coverage for freshness policy and banner lifecycle behavior.
 - 2026-06-01: Added durable `freshness_events` storage + analytics page 24h reliability section (event counts, route success rates, latest failures).
 - 2026-06-01: Added filterable freshness telemetry panel with 24h/7d window controls, route filter, and mini trend bars.

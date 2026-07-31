@@ -152,7 +152,7 @@ function PartSection({
           )}
         </div>
         <Badge variant="light" color={drafted === archChapters.length ? "green" : "yellow"}>
-          {drafted}/{archChapters.length} drafted
+          {drafted}/{archChapters.length} chapters with draft prose
         </Badge>
       </Group>
       <Box>
@@ -187,7 +187,10 @@ export function ArchitectureRoadmapPanel({
         <div>
           <Title order={3}>Architecture Roadmap</Title>
           <Text c="dimmed" size="sm">
-            {draftedChapters} of {totalChapters} chapters drafted · click any chapter to expand key beats
+            {draftedChapters} of {totalChapters} chapters have draft prose · click any chapter to expand key beats
+          </Text>
+          <Text c="dimmed" size="xs">
+            Draft prose means the chapter text was generated. It is not yet final polish.
           </Text>
         </div>
         {plannedChapterCount > 0 && (
@@ -202,7 +205,7 @@ export function ArchitectureRoadmapPanel({
         )}
         {plannedChapterCount === 0 && (
           <Badge color="green" size="lg" variant="light">
-            All chapters drafted
+            All chapters have draft prose
           </Badge>
         )}
       </Group>
@@ -214,8 +217,13 @@ export function ArchitectureRoadmapPanel({
             <div>
               <Text fw={700} size="sm">Next step: Run Auto-Review</Text>
               <Text size="sm" c="dimmed">
-                All chapters are drafted. Auto-Review will read the full manuscript, run the critic panel, generate a Blueprint, and build a rewrite plan — all in one click. Find it in Studio Actions below, or use the button in the Production Command Center.
+                All chapters now have draft prose. Auto-Review will read the full manuscript, run the critic panel, generate a Blueprint, and build a rewrite plan — all in one click. Find it in Studio Actions below, or use the button in the Production Command Center.
               </Text>
+              <Group mt="xs">
+                <Button component="a" href="#studio-actions" size="xs" color="orange">
+                  Run Auto-Review
+                </Button>
+              </Group>
             </div>
           </Group>
         </Paper>
@@ -228,7 +236,7 @@ export function ArchitectureRoadmapPanel({
             <div>
               <Text fw={700} size="sm">Next step: Generate remaining chapters</Text>
               <Text size="sm" c="dimmed">
-                {plannedChapterCount} chapter{plannedChapterCount === 1 ? "" : "s"} still need draft generation. In Studio Actions below, click <Text span fw={600}>Generate Planned Draft</Text> to continue. You can generate up to 5 at a time.
+                {plannedChapterCount} chapter{plannedChapterCount === 1 ? "" : "s"} still need draft generation. In Studio Actions below, click <Text span fw={600}>Generate Planned Draft</Text>, then confirm the AI Task Preflight by clicking <Text span fw={600}>Proceed</Text>. You can generate up to 5 at a time.
               </Text>
             </div>
           </Group>

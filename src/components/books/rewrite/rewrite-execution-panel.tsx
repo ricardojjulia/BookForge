@@ -179,8 +179,42 @@ export function RewriteExecutionPanel({
       status: "running",
     });
 
+    const payload = {
+      maxUnits: overrides.maxUnits ?? (maxUnits || undefined),
+      campaignId: overrides.campaignId,
+      rewriteExistingDrafts: overrides.rewriteExistingDrafts ?? rewriteExistingDrafts,
+      rewriteAccepted: overrides.rewriteAccepted ?? rewriteAccepted,
+      distributeAcrossChapters: overrides.distributeAcrossChapters ?? distributeAcrossChapters,
+      coverageMode: overrides.coverageMode || "normal",
+      strategyId: overrides.strategyId || strategyId,
+      strategySettings: overrides.strategySettings || strategySettings,
+      authorInstructions: overrides.authorInstructions ?? authorInstructions,
+    };
+
     try {
-      const result = await fetchJson<{
+      const created = await fetchJson<{
+        content?: {
+          revisionJobId?: string;
+          queued?: boolean;
+          totalUnits?: number;
+        };
+      }>(
+        `/api/books/${bookId}/rewrite-execute`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...payload, serverManaged: true }),
+        },
+        "Queue rewrite execution",
+      );
+      const revisionJobId = created.content?.revisionJobId || null;
+      if (!revisionJobId) {
+        throw new Error("Rewrite job was not created.");
+      }
+
+      setMessage("Rewrite draft queued. Processing paragraph units in the background.");
+
+      void fetchJson<{
         content?: {
           rewritten?: number;
           skipped?: number;
@@ -193,60 +227,67 @@ export function RewriteExecutionPanel({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            maxUnits: overrides.maxUnits ?? (maxUnits || undefined),
-            campaignId: overrides.campaignId,
-            rewriteExistingDrafts: overrides.rewriteExistingDrafts ?? rewriteExistingDrafts,
-            rewriteAccepted: overrides.rewriteAccepted ?? rewriteAccepted,
-            distributeAcrossChapters: overrides.distributeAcrossChapters ?? distributeAcrossChapters,
-            coverageMode: overrides.coverageMode || "normal",
-            strategyId: overrides.strategyId || strategyId,
-            strategySettings: overrides.strategySettings || strategySettings,
-            authorInstructions: overrides.authorInstructions ?? authorInstructions,
-          }),
+          body: JSON.stringify({ ...payload, jobId: revisionJobId }),
         },
-        "Rewrite execution",
-      );
-      const rewritten = result.content?.rewritten || 0;
-      const skipped = result.content?.skipped || 0;
-      const revisionJobId = result.content?.revisionJobId || null;
-      const skippedDetails = [
-        result.content?.skippedExistingDrafts ? `${result.content.skippedExistingDrafts} existing draft(s)` : "",
-        result.content?.skippedAccepted ? `${result.content.skippedAccepted} accepted paragraph(s)` : "",
-      ]
-        .filter(Boolean)
-        .join(", ");
-      setMessage(
-        `Rewrite draft saved. Created ${rewritten} revision version(s), skipped ${skipped} unit(s)${
-          skippedDetails ? ` (${skippedDetails})` : ""
-        }.`,
-      );
-      setQueue((current) => ({
-        ...current,
-        currentUnit: "Complete",
-        completedUnits: totalUnits,
-        successfulUnits: rewritten,
-        skippedUnits: skipped,
-        elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
-        currentCallElapsedSeconds: estimatedSecondsPerCall,
-        currentCallProgress: 1,
-        nextCallSeconds: 0,
-        estimatedSecondsRemaining: 0,
-        estimatedProgress: false,
-        status: "complete",
-      }));
-      if (revisionJobId) {
-        await saveWorkflow({
-          currentStep: workflowMode === "wizard" ? Math.max(3, workflowState.current_step) : workflowState.current_step,
-          sampleRevisionJobId: workflowState.sample_revision_job_id || revisionJobId,
-          metadata: {
-            ...(workflowState.metadata || {}),
-            lastRevisionJobId: revisionJobId,
-            lastRewriteCompletedAt: new Date().toISOString(),
-          },
+        "Rewrite execution worker",
+      )
+        .then(async (result) => {
+          const rewritten = result.content?.rewritten || 0;
+          const skipped = result.content?.skipped || 0;
+          const completedJobId = result.content?.revisionJobId || revisionJobId;
+          const skippedDetails = [
+            result.content?.skippedExistingDrafts ? `${result.content.skippedExistingDrafts} existing draft(s)` : "",
+            result.content?.skippedAccepted ? `${result.content.skippedAccepted} accepted paragraph(s)` : "",
+          ]
+            .filter(Boolean)
+            .join(", ");
+          setMessage(
+            `Rewrite draft saved. Created ${rewritten} revision version(s), skipped ${skipped} unit(s)${
+              skippedDetails ? ` (${skippedDetails})` : ""
+            }.`,
+          );
+          setQueue((current) => ({
+            ...current,
+            currentUnit: "Complete",
+            completedUnits: totalUnits,
+            successfulUnits: rewritten,
+            skippedUnits: skipped,
+            elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
+            currentCallElapsedSeconds: estimatedSecondsPerCall,
+            currentCallProgress: 1,
+            nextCallSeconds: 0,
+            estimatedSecondsRemaining: 0,
+            estimatedProgress: false,
+            status: "complete",
+          }));
+          if (completedJobId) {
+            await saveWorkflow({
+              currentStep: workflowMode === "wizard" ? Math.max(3, workflowState.current_step) : workflowState.current_step,
+              sampleRevisionJobId: workflowState.sample_revision_job_id || completedJobId,
+              metadata: {
+                ...(workflowState.metadata || {}),
+                lastRevisionJobId: completedJobId,
+                lastRewriteCompletedAt: new Date().toISOString(),
+              },
+            });
+          }
+          router.refresh();
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : "Rewrite execution failed.");
+          setQueue((current) => ({
+            ...current,
+            failedUnits: Math.max(1, current.totalUnits - current.completedUnits),
+            elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
+            currentCallProgress: 0,
+            nextCallSeconds: null,
+            estimatedProgress: false,
+            status: "cancelled",
+          }));
+        })
+        .finally(() => {
+          setLoading(false);
         });
-      }
-      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Rewrite execution failed.");
       setQueue((current) => ({
@@ -258,7 +299,6 @@ export function RewriteExecutionPanel({
         estimatedProgress: false,
         status: "cancelled",
       }));
-    } finally {
       setLoading(false);
     }
   }
@@ -343,14 +383,26 @@ export function RewriteExecutionPanel({
     setMessage("");
     setError("");
     try {
+      const queued = await fetchJson<{ content?: { jobId?: string } }>(
+        `/api/books/${bookId}/drift-check`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ revisionJobId: jobId, serverManaged: true }),
+        },
+        "Queue campaign drift check",
+      );
+      const durableJobId = queued.content?.jobId;
+      if (!durableJobId) throw new Error("Campaign drift-check queue handoff failed.");
+
       const result = await fetchJson<{ content?: { overallDriftRisk?: string; sampleCount?: number; reportId?: string | null } }>(
         `/api/books/${bookId}/drift-check`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ revisionJobId: jobId }),
+          body: JSON.stringify({ revisionJobId: jobId, jobId: durableJobId }),
         },
-        "Run campaign drift check",
+        "Run campaign drift check worker",
       );
       setMessage(
         `Campaign drift check saved. Risk: ${result.content?.overallDriftRisk || "unknown"} · samples checked: ${

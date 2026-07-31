@@ -83,10 +83,26 @@ export function PublishingLabWorkspace({
     setError("");
     setSaveMessage("");
     try {
+      const queued = await fetchJson<{ content?: { jobId?: string } }>(
+        `/api/books/${bookId}/publishing-lab`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "run", serverManaged: true }),
+        },
+        "Queue Publishing Lab run",
+      );
+      const jobId = queued.content?.jobId;
+      if (!jobId) throw new Error("Publishing Lab queue handoff failed.");
+
       const response = await fetchJson<{ content: PublishingLabBundle; reportId?: string | null; createdAt?: string | null }>(
         `/api/books/${bookId}/publishing-lab`,
-        { method: "POST" },
-        "Publishing Lab run",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "run", jobId }),
+        },
+        "Publishing Lab worker",
       );
       setBundle(response.content);
       if (response.reportId && response.createdAt) {
@@ -174,15 +190,17 @@ export function PublishingLabWorkspace({
             <Title order={3}>Run History</Title>
             <Text size="sm" c="dimmed">Open any prior run or save the selected run assets into matter sections.</Text>
           </div>
-          <Button
-            variant="light"
-            color="teal"
-            disabled={!selectedReportId || !bundle}
-            loading={savingAssets}
-            onClick={saveAssetsToMatter}
-          >
-            Save Assets to Matter Sections
-          </Button>
+          <Group>
+            <Button
+              variant="light"
+              color="teal"
+              disabled={!selectedReportId || !bundle}
+              loading={savingAssets}
+              onClick={saveAssetsToMatter}
+            >
+              Save Assets to Matter Sections
+            </Button>
+          </Group>
         </Group>
 
         {!history.length ? (

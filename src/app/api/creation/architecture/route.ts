@@ -72,6 +72,7 @@ export async function POST(request: Request) {
       expectedChapters,
       tone: project.tone || "",
       boundaries: project.boundaries || "",
+      dialogDensity: project.dialog_density || "normal",
       concept: body.concept,
     });
 
@@ -81,15 +82,21 @@ export async function POST(request: Request) {
       candidates: getReasoningModelCandidates(settings),
       expectedCalls: 1,
       latencyPreference: "quality",
+      telemetry: { supabase, userId: user.id },
     });
-    const { client, preparedModel, modelSelection } = modelPlan;
-    const completion = await createManagedChatCompletion(client, preparedModel, {
-      temperature: Math.min(settings.temperature, 0.55),
-      top_p: settings.topP,
-      max_tokens: Math.min(settings.maxOutputTokens, 5000),
-      messages: [{ role: "user", content: prompt }],
-      
-    });
+    const { client, preparedModel, modelSelection, telemetryContext } = modelPlan;
+    const completion = await createManagedChatCompletion(
+      client,
+      preparedModel,
+      {
+        temperature: Math.min(settings.temperature, 0.55),
+        top_p: settings.topP,
+        max_tokens: Math.min(settings.maxOutputTokens, 5000),
+        messages: [{ role: "user", content: prompt }],
+      },
+      undefined,
+      telemetryContext,
+    );
 
     const architecture = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({
       architectureSummary: raw,

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getConfiguredTaskModels, isModelAvailable } from "@/lib/ai/model-status";
+import { getModelsTaskHealth } from "@/lib/ai/model-performance";
 import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
 import { testLmStudioConnection } from "@/lib/lmstudio/client";
 import { getLmStudioRuntimeLimits } from "@/lib/lmstudio/runtime-limits";
@@ -59,6 +60,26 @@ export async function GET() {
       ...runtimeLimits.planning.warnings,
     ];
 
+    const taskKinds = ["rewrite", "critic", "planning", "extraction"] as const;
+    const healthByTask = await Promise.all(
+      taskKinds.map((task) => getModelsTaskHealth(supabase, { userId: user.id, models: availableModels, task })),
+    );
+    const recentIssues = taskKinds.flatMap((task, taskIndex) =>
+      availableModels.flatMap((model) => {
+        const entry = healthByTask[taskIndex].get(model);
+        if (!entry || entry.recentIncidentSignatures.length === 0) return [];
+        return [
+          {
+            model,
+            task,
+            incidentCount: entry.recentIncidentSignatures.length,
+            signature: entry.recentIncidentSignatures[0],
+            sampleSize: entry.sampleSize,
+          },
+        ];
+      }),
+    );
+
     const std = settings.standardSettings;
     const executionMode = settings.executionMode;
     const cloudProvider = std
@@ -89,6 +110,7 @@ export async function GET() {
       cloudProvider,
       executionMode,
       warnings,
+      recentIssues,
       error,
     });
   } catch (error) {

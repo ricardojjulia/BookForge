@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Alert, Badge, Button, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { useRouter } from "next/navigation";
+import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 
 type Props = {
   bookId: string;
@@ -33,11 +34,39 @@ export function ReadinessStatusGrid({ bookId, summarized, chapterCount, hasBluep
     setRunning(key);
     setErrors((prev) => ({ ...prev, [key]: "" }));
     try {
-      await fetchJson(path, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: body ? JSON.stringify(body) : undefined,
-      }, key);
+      if (path.endsWith("/rewrite-plan")) {
+        const queued = await fetchJson<{ content?: { jobId?: string } }>(
+          path,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(
+              mergeMetadataSnapshotBody({ ...(body && typeof body === "object" ? body : {}), serverManaged: true }),
+            ),
+          },
+          `${key}:queue`,
+        );
+        const jobId = queued.content?.jobId;
+        if (!jobId) throw new Error("Rewrite plan queue handoff failed.");
+
+        await fetchJson(
+          path,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(
+              mergeMetadataSnapshotBody({ ...(body && typeof body === "object" ? body : {}), jobId }),
+            ),
+          },
+          `${key}:worker`,
+        );
+      } else {
+        await fetchJson(path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: body ? JSON.stringify(mergeMetadataSnapshotBody(body && typeof body === "object" ? (body as Record<string, unknown>) : {})) : undefined,
+        }, key);
+      }
       router.refresh();
     } catch (err) {
       setErrors((prev) => ({ ...prev, [key]: err instanceof Error ? err.message : "Failed." }));

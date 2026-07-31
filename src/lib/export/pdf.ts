@@ -6,6 +6,7 @@ import {
   type MatterSectionForExport,
   type ParagraphForExport,
 } from "@/lib/export/markdown";
+import { repairCommonMojibake } from "@/lib/text/repair-mojibake";
 
 const frontMatterTypes = new Set(["title_page", "copyright_page", "dedication", "foreword", "preface", "introduction"]);
 
@@ -30,12 +31,12 @@ export type PdfOptions = {
 export async function buildFinalManuscriptPdf(input: BuildMarkdownInput, options: PdfOptions = {}) {
   const fontSize = Math.max(9, Math.min(14, options.fontSize || 11.5));
   const metadata: Record<string, string> = {
-    Title: input.book.title || "Untitled Book",
+    Title: repairCommonMojibake(input.book.title || "Untitled Book"),
     Creator: "BookForge AI",
     Producer: "BookForge AI",
   };
   if (input.book.author_name?.trim()) {
-    metadata.Author = input.book.author_name.trim();
+    metadata.Author = repairCommonMojibake(input.book.author_name.trim());
   }
 
   const doc = new PDFDocument({
@@ -50,11 +51,11 @@ export async function buildFinalManuscriptPdf(input: BuildMarkdownInput, options
   doc.on("data", (chunk: Buffer) => chunks.push(chunk));
 
   doc.addPage();
-  doc.font("Helvetica-Bold").fontSize(24).text(input.book.title.trim() || "Untitled Book", {
+  doc.font("Helvetica-Bold").fontSize(24).text(repairCommonMojibake(input.book.title.trim() || "Untitled Book"), {
     align: "center",
   });
   if (input.book.author_name) {
-    doc.moveDown(0.75).font("Helvetica").fontSize(13).text(`by ${input.book.author_name}`, { align: "center" });
+    doc.moveDown(0.75).font("Helvetica").fontSize(13).text(`by ${repairCommonMojibake(input.book.author_name)}`, { align: "center" });
   }
 
   const sortedMatter = (input.matterSections || []).slice().sort((a, b) => {
@@ -82,7 +83,7 @@ export async function buildFinalManuscriptPdf(input: BuildMarkdownInput, options
       .sort((a, b) => a.paragraph_number - b.paragraph_number);
     if (!chapterParagraphs.length) return;
 
-    addHeading(doc, chapter.title?.trim() || `Chapter ${chapter.chapter_number}`);
+    addHeading(doc, repairCommonMojibake(chapter.title?.trim() || `Chapter ${chapter.chapter_number}`));
 
     let previousSceneId: string | null = null;
     chapterParagraphs.forEach((paragraph, index) => {
@@ -118,7 +119,7 @@ export async function buildFinalManuscriptPdf(input: BuildMarkdownInput, options
 function appendMatter(doc: PDFKit.PDFDocument, sections: MatterSectionForExport[], options: { fontSize: number; lineGap?: number }) {
   sections.forEach((section) => {
     addHeading(doc, section.title?.trim() || humanizeSectionType(section.section_type));
-    appendBodyText(doc, section.content, options);
+    appendBodyText(doc, repairCommonMojibake(section.content), options);
   });
 }
 
@@ -129,7 +130,7 @@ function addHeading(doc: PDFKit.PDFDocument, title: string) {
 }
 
 function appendBodyText(doc: PDFKit.PDFDocument, text: string, options: { fontSize: number; lineGap?: number }) {
-  text
+  repairCommonMojibake(text)
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)

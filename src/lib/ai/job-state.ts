@@ -46,6 +46,101 @@ export function isStaleRunningJob(status: string | null, progress: AiJobProgress
   return Date.now() - new Date(progress.lastHeartbeatAt).getTime() > staleAfterSeconds * 1000;
 }
 
+export type RevisionJobHeartbeat = {
+  touch: (progress?: Partial<AiJobProgress>) => Promise<void>;
+  stop: () => void;
+};
+
+export function createRevisionJobHeartbeat(
+  supabase: SupabaseClient,
+  jobId: string,
+  settings: unknown,
+  progress: Partial<AiJobProgress>,
+  intervalMs = 30000,
+): RevisionJobHeartbeat {
+  let latestSettings = settings;
+  let latestProgress = buildJobProgress(progress);
+  let stopped = false;
+
+  const touch = async (progressPatch: Partial<AiJobProgress> = {}) => {
+    if (stopped) return;
+    latestProgress = buildJobProgress({
+      ...extractJobProgress(latestSettings),
+      ...latestProgress,
+      ...progressPatch,
+      lastHeartbeatAt: new Date().toISOString(),
+    });
+    latestSettings = mergeJobSettings(latestSettings, latestProgress);
+    const { error } = await supabase.from("revision_jobs").update({ settings: latestSettings }).eq("id", jobId);
+    if (error) throw error;
+  };
+
+  const interval = setInterval(() => {
+    void touch();
+  }, intervalMs);
+  if (typeof interval.unref === "function") interval.unref();
+
+  return {
+    touch,
+    stop: () => {
+      stopped = true;
+      clearInterval(interval);
+    },
+  };
+}
+
+export type RevisionJobVisibilitySummary = {
+  total: number;
+  active: number;
+  running: number;
+  queued: number;
+  paused: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  staleRunning: number;
+};
+
+export function summarizeRevisionJobs(
+  jobs: Array<{ status: string | null; settings: unknown }>,
+): RevisionJobVisibilitySummary {
+  const summary: RevisionJobVisibilitySummary = {
+    total: 0,
+    active: 0,
+    running: 0,
+    queued: 0,
+    paused: 0,
+    completed: 0,
+    failed: 0,
+    cancelled: 0,
+    staleRunning: 0,
+  };
+
+  for (const job of jobs) {
+    summary.total += 1;
+    const progress = extractJobProgress(job.settings);
+    if (job.status === "running") {
+      summary.running += 1;
+      summary.active += 1;
+      if (isStaleRunningJob(job.status, progress)) summary.staleRunning += 1;
+    } else if (job.status === "queued") {
+      summary.queued += 1;
+      summary.active += 1;
+    } else if (job.status === "paused") {
+      summary.paused += 1;
+      summary.active += 1;
+    } else if (job.status === "completed") {
+      summary.completed += 1;
+    } else if (job.status === "failed") {
+      summary.failed += 1;
+    } else if (job.status === "cancelled") {
+      summary.cancelled += 1;
+    }
+  }
+
+  return summary;
+}
+
 export function mergeJobSettings(settings: unknown, progress: AiJobProgress) {
   const base = settings && typeof settings === "object" ? (settings as Record<string, unknown>) : {};
   return {

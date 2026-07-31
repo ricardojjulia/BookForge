@@ -14,6 +14,26 @@ type FinalManuscriptBuilderProps = {
    *  everything reviewable — if acceptedPercent is still < 90 they have
    *  hit the natural ceiling (short/structural paragraphs can't be rewritten). */
   pendingDraftCount: number;
+  initialDefaults?: {
+    format?: string;
+    sourceMode?: string;
+    includeFrontMatter?: boolean;
+    includeBackMatter?: boolean;
+    useOriginalForLocked?: boolean;
+    abridgedMode?: boolean;
+    epubMetadata?: {
+      language?: string;
+      publisher?: string;
+      copyright?: string;
+      description?: string;
+    } | null;
+    pdfOptions?: {
+      fontSize?: number;
+      lineGap?: number;
+      pageNumbers?: boolean;
+      pageSize?: "LETTER" | "A4";
+    } | null;
+  } | null;
 };
 
 type ExportResponse = {
@@ -37,28 +57,72 @@ type PreviewResponse = {
   };
 };
 
+type ExportDefaults = {
+  format: string;
+  sourceMode: string;
+  includeFrontMatter: boolean;
+  includeBackMatter: boolean;
+  useOriginalForLocked: boolean;
+  abridgedMode: boolean;
+  epubMetadata: {
+    language?: string;
+    publisher?: string;
+    copyright?: string;
+    description?: string;
+  };
+  pdfOptions: {
+    fontSize?: number;
+    lineGap?: number;
+    pageNumbers: boolean;
+    pageSize: "LETTER" | "A4";
+  };
+};
+
+const RECOMMENDED_DEFAULTS: ExportDefaults = {
+  format: "markdown",
+  sourceMode: "accepted",
+  includeFrontMatter: true,
+  includeBackMatter: true,
+  useOriginalForLocked: true,
+  abridgedMode: false,
+  epubMetadata: {
+    language: "en",
+    publisher: undefined,
+    copyright: undefined,
+    description: undefined,
+  },
+  pdfOptions: {
+    fontSize: 11.5,
+    lineGap: 3,
+    pageNumbers: true,
+    pageSize: "LETTER",
+  },
+};
+
 export function FinalManuscriptBuilder({
   bookId,
   acceptedParagraphs,
   totalParagraphs,
   lockedParagraphs,
   pendingDraftCount,
+  initialDefaults,
 }: FinalManuscriptBuilderProps) {
   const router = useRouter();
-  const [format, setFormat] = useState("markdown");
-  const [sourceMode, setSourceMode] = useState("accepted");
-  const [includeFrontMatter, setIncludeFrontMatter] = useState(true);
-  const [includeBackMatter, setIncludeBackMatter] = useState(true);
-  const [useOriginalForLocked, setUseOriginalForLocked] = useState(true);
-  const [abridgedMode, setAbridgedMode] = useState(false);
-  const [epubLanguage, setEpubLanguage] = useState("en");
-  const [epubPublisher, setEpubPublisher] = useState("");
-  const [epubCopyright, setEpubCopyright] = useState("");
-  const [epubDescription, setEpubDescription] = useState("");
-  const [pdfFontSize, setPdfFontSize] = useState<number | "">(11.5);
-  const [pdfLineGap, setPdfLineGap] = useState<number | "">(3);
-  const [pdfPageNumbers, setPdfPageNumbers] = useState(true);
-  const [pdfPageSize, setPdfPageSize] = useState("LETTER");
+  const lastUsedDefaults = toExportDefaults(initialDefaults);
+  const [format, setFormat] = useState(lastUsedDefaults.format);
+  const [sourceMode, setSourceMode] = useState(lastUsedDefaults.sourceMode);
+  const [includeFrontMatter, setIncludeFrontMatter] = useState(lastUsedDefaults.includeFrontMatter);
+  const [includeBackMatter, setIncludeBackMatter] = useState(lastUsedDefaults.includeBackMatter);
+  const [useOriginalForLocked, setUseOriginalForLocked] = useState(lastUsedDefaults.useOriginalForLocked);
+  const [abridgedMode, setAbridgedMode] = useState(lastUsedDefaults.abridgedMode);
+  const [epubLanguage, setEpubLanguage] = useState(lastUsedDefaults.epubMetadata.language || "en");
+  const [epubPublisher, setEpubPublisher] = useState(lastUsedDefaults.epubMetadata.publisher || "");
+  const [epubCopyright, setEpubCopyright] = useState(lastUsedDefaults.epubMetadata.copyright || "");
+  const [epubDescription, setEpubDescription] = useState(lastUsedDefaults.epubMetadata.description || "");
+  const [pdfFontSize, setPdfFontSize] = useState<number | "">(typeof lastUsedDefaults.pdfOptions.fontSize === "number" ? lastUsedDefaults.pdfOptions.fontSize : 11.5);
+  const [pdfLineGap, setPdfLineGap] = useState<number | "">(typeof lastUsedDefaults.pdfOptions.lineGap === "number" ? lastUsedDefaults.pdfOptions.lineGap : 3);
+  const [pdfPageNumbers, setPdfPageNumbers] = useState(lastUsedDefaults.pdfOptions.pageNumbers);
+  const [pdfPageSize, setPdfPageSize] = useState(lastUsedDefaults.pdfOptions.pageSize);
   const [loading, setLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -72,7 +136,66 @@ export function FinalManuscriptBuilder({
   const atCeiling = pendingDraftCount === 0 && acceptedPercent < 90 && acceptedPercent > 0;
   const recommendation = getExportRecommendation({ acceptedPercent, lockedParagraphs, sourceMode, format, abridgedMode, atCeiling });
 
+  function applyDefaults(defaults: ExportDefaults) {
+    setFormat(defaults.format);
+    setSourceMode(defaults.sourceMode);
+    setIncludeFrontMatter(defaults.includeFrontMatter);
+    setIncludeBackMatter(defaults.includeBackMatter);
+    setUseOriginalForLocked(defaults.useOriginalForLocked);
+    setAbridgedMode(defaults.abridgedMode);
+    setEpubLanguage(defaults.epubMetadata.language || "en");
+    setEpubPublisher(defaults.epubMetadata.publisher || "");
+    setEpubCopyright(defaults.epubMetadata.copyright || "");
+    setEpubDescription(defaults.epubMetadata.description || "");
+    setPdfFontSize(typeof defaults.pdfOptions.fontSize === "number" ? defaults.pdfOptions.fontSize : 11.5);
+    setPdfLineGap(typeof defaults.pdfOptions.lineGap === "number" ? defaults.pdfOptions.lineGap : 3);
+    setPdfPageNumbers(defaults.pdfOptions.pageNumbers);
+    setPdfPageSize(defaults.pdfOptions.pageSize);
+  }
+
+  function validateAndBuildPayload() {
+    const normalizedLanguage = normalizeTextField(epubLanguage);
+    if (normalizedLanguage && !/^[a-z]{2}(-[A-Z]{2})?$/.test(normalizedLanguage)) {
+      setError("EPUB language must use BCP-47 short form like 'en' or 'en-US'.");
+      return null;
+    }
+
+    if (format === "pdf") {
+      if (typeof pdfFontSize === "number" && (pdfFontSize < 9 || pdfFontSize > 14)) {
+        setError("PDF font size must be between 9 and 14.");
+        return null;
+      }
+      if (typeof pdfLineGap === "number" && (pdfLineGap < 0 || pdfLineGap > 8)) {
+        setError("PDF line spacing must be between 0 and 8.");
+        return null;
+      }
+    }
+
+    return {
+      format,
+      sourceMode,
+      includeFrontMatter,
+      includeBackMatter,
+      useOriginalForLocked,
+      abridgedMode,
+      epubMetadata: {
+        language: normalizedLanguage,
+        publisher: normalizeTextField(epubPublisher),
+        copyright: normalizeTextField(epubCopyright),
+        description: normalizeTextField(epubDescription),
+      },
+      pdfOptions: {
+        fontSize: typeof pdfFontSize === "number" ? pdfFontSize : undefined,
+        lineGap: typeof pdfLineGap === "number" ? pdfLineGap : undefined,
+        pageNumbers: pdfPageNumbers,
+        pageSize: pdfPageSize,
+      },
+    };
+  }
+
   async function buildExport() {
+    const payload = validateAndBuildPayload();
+    if (!payload) return;
     const warnings = getClientExportWarnings({ acceptedPercent, sourceMode, format, abridgedMode });
     if (warnings.length) {
       const confirmed = window.confirm(
@@ -90,16 +213,7 @@ export function FinalManuscriptBuilder({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            format,
-            sourceMode,
-            includeFrontMatter,
-            includeBackMatter,
-            useOriginalForLocked,
-            abridgedMode,
-            epubMetadata: buildEpubMetadata(),
-            pdfOptions: buildPdfOptions(),
-          }),
+          body: JSON.stringify(payload),
         },
         "Build final manuscript",
       );
@@ -119,6 +233,8 @@ export function FinalManuscriptBuilder({
   }
 
   async function previewExport() {
+    const payload = validateAndBuildPayload();
+    if (!payload) return;
     setPreviewLoading(true);
     setMessage("");
     setError("");
@@ -129,15 +245,8 @@ export function FinalManuscriptBuilder({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            format,
-            sourceMode,
-            includeFrontMatter,
-            includeBackMatter,
-            useOriginalForLocked,
-            abridgedMode,
+            ...payload,
             preview: true,
-            epubMetadata: buildEpubMetadata(),
-            pdfOptions: buildPdfOptions(),
           }),
         },
         "Preview final manuscript",
@@ -148,24 +257,6 @@ export function FinalManuscriptBuilder({
     } finally {
       setPreviewLoading(false);
     }
-  }
-
-  function buildEpubMetadata() {
-    return {
-      language: epubLanguage || undefined,
-      publisher: epubPublisher || undefined,
-      copyright: epubCopyright || undefined,
-      description: epubDescription || undefined,
-    };
-  }
-
-  function buildPdfOptions() {
-    return {
-      fontSize: typeof pdfFontSize === "number" ? pdfFontSize : undefined,
-      lineGap: typeof pdfLineGap === "number" ? pdfLineGap : undefined,
-      pageNumbers: pdfPageNumbers,
-      pageSize: pdfPageSize,
-    };
   }
 
   return (
@@ -241,6 +332,12 @@ export function FinalManuscriptBuilder({
           </Group>
 
           <Group>
+            <Button variant="default" onClick={() => applyDefaults(lastUsedDefaults)}>
+              Use last export settings
+            </Button>
+            <Button variant="default" onClick={() => applyDefaults(RECOMMENDED_DEFAULTS)}>
+              Reset to recommended defaults
+            </Button>
             <Checkbox
               checked={includeFrontMatter}
               onChange={(event) => setIncludeFrontMatter(event.currentTarget.checked)}
@@ -383,6 +480,49 @@ export function FinalManuscriptBuilder({
       </Paper>
     </Stack>
   );
+}
+
+function toExportDefaults(input: FinalManuscriptBuilderProps["initialDefaults"]): ExportDefaults {
+  return {
+    format: normalizeFormat(input?.format),
+    sourceMode: normalizeSourceMode(input?.sourceMode),
+    includeFrontMatter: input?.includeFrontMatter ?? RECOMMENDED_DEFAULTS.includeFrontMatter,
+    includeBackMatter: input?.includeBackMatter ?? RECOMMENDED_DEFAULTS.includeBackMatter,
+    useOriginalForLocked: input?.useOriginalForLocked ?? RECOMMENDED_DEFAULTS.useOriginalForLocked,
+    abridgedMode: input?.abridgedMode ?? RECOMMENDED_DEFAULTS.abridgedMode,
+    epubMetadata: {
+      language: normalizeTextField(input?.epubMetadata?.language) || RECOMMENDED_DEFAULTS.epubMetadata.language,
+      publisher: normalizeTextField(input?.epubMetadata?.publisher),
+      copyright: normalizeTextField(input?.epubMetadata?.copyright),
+      description: normalizeTextField(input?.epubMetadata?.description),
+    },
+    pdfOptions: {
+      fontSize:
+        typeof input?.pdfOptions?.fontSize === "number" && input.pdfOptions.fontSize >= 9 && input.pdfOptions.fontSize <= 14
+          ? input.pdfOptions.fontSize
+          : RECOMMENDED_DEFAULTS.pdfOptions.fontSize,
+      lineGap:
+        typeof input?.pdfOptions?.lineGap === "number" && input.pdfOptions.lineGap >= 0 && input.pdfOptions.lineGap <= 8
+          ? input.pdfOptions.lineGap
+          : RECOMMENDED_DEFAULTS.pdfOptions.lineGap,
+      pageNumbers: input?.pdfOptions?.pageNumbers ?? RECOMMENDED_DEFAULTS.pdfOptions.pageNumbers,
+      pageSize: input?.pdfOptions?.pageSize === "A4" ? "A4" : "LETTER",
+    },
+  };
+}
+
+function normalizeFormat(format: unknown): string {
+  return ["markdown", "docx", "epub", "pdf"].includes(String(format || "")) ? String(format) : "markdown";
+}
+
+function normalizeSourceMode(sourceMode: unknown): string {
+  return ["accepted", "latest", "original"].includes(String(sourceMode || "")) ? String(sourceMode) : "accepted";
+}
+
+function normalizeTextField(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : undefined;
 }
 
 function formatLabel(format: string) {

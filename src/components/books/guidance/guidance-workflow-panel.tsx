@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Alert,
   Badge,
@@ -19,6 +19,10 @@ import {
 import { useRouter } from "next/navigation";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { getJobProgressDisplay } from "@/lib/ai/job-state";
+import { useAdaptivePolling } from "@/lib/hooks/use-adaptive-polling";
+
+const ACTIVE_POLL_MS = 4000;
+const IDLE_POLL_MS = 30000;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -69,7 +73,7 @@ const STRATEGY_OPTIONS: { value: RewriteStrategyId; label: string }[] = [
 
 const STATUS_META: Record<TaskStatus, { label: string; color: string }> = {
   todo:        { label: "To do",       color: "gray"   },
-  in_progress: { label: "In progress", color: "blue"   },
+  in_progress: { label: "Marked in progress", color: "blue"   },
   done:        { label: "Done",        color: "green"  },
   skipped:     { label: "Skipped",     color: "orange" },
 };
@@ -124,6 +128,7 @@ function buildItems(content: Record<string, unknown>): ActionItem[] {
 
 type RewriteResult = {
   content?: {
+    revisionJobId?: string;
     attempted?: number;
     rewritten?: number;
     skippedAccepted?: number;
@@ -164,47 +169,74 @@ function RewriteModal({
     if (!item) return;
     setRunning(true);
     setResult(null);
+    const payload = {
+      strategyId: strategy,
+      authorInstructions: instructions.trim() || undefined,
+      maxUnits: 500,
+      coverageMode: "normal" as const,
+      rewriteAccepted,
+    };
     try {
-      const data = await fetchJson<RewriteResult>(
+      const queued = await fetchJson<RewriteResult>(
         `/api/books/${bookId}/rewrite-execute`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            strategyId: strategy,
-            authorInstructions: instructions.trim() || undefined,
-            maxUnits: 500,
-            coverageMode: "normal",
-            rewriteAccepted,
-          }),
+          body: JSON.stringify({ ...payload, serverManaged: true }),
         },
-        "Guidance rewrite",
+        "Queue guidance rewrite",
       );
-      const attempted = data?.content?.attempted ?? 0;
-      const rewritten = data?.content?.rewritten ?? 0;
-      const skippedAccepted = data?.content?.skippedAccepted ?? 0;
-
-      if (attempted === 0 && skippedAccepted > 0 && !rewriteAccepted) {
-        setResult({
-          type: "warning",
-          message: `All ${skippedAccepted} paragraph${skippedAccepted !== 1 ? "s" : ""} already have accepted revisions. Enable "Re-run on accepted paragraphs" below and try again to rewrite existing content.`,
-        });
-      } else if (attempted === 0) {
-        setResult({
-          type: "warning",
-          message: "No eligible paragraphs found. All paragraphs may be locked, too short, or already have pending drafts.",
-        });
-      } else {
-        setResult({
-          type: "success",
-          message: `${rewritten} of ${attempted} paragraph${attempted !== 1 ? "s" : ""} queued for rewrite. Review drafts in the Revisions page.`,
-        });
-        onSuccess(item.key);
-        router.refresh();
+      const revisionJobId = queued?.content?.revisionJobId;
+      if (!revisionJobId) {
+        throw new Error("Rewrite job was not created.");
       }
+
+      setResult({
+        type: "success",
+        message: "Rewrite was queued and is now running in the background.",
+      });
+
+      void fetchJson<RewriteResult>(
+        `/api/books/${bookId}/rewrite-execute`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...payload, jobId: revisionJobId }),
+        },
+        "Guidance rewrite worker",
+      )
+        .then((data) => {
+          const attempted = data?.content?.attempted ?? 0;
+          const rewritten = data?.content?.rewritten ?? 0;
+          const skippedAccepted = data?.content?.skippedAccepted ?? 0;
+
+          if (attempted === 0 && skippedAccepted > 0 && !rewriteAccepted) {
+            setResult({
+              type: "warning",
+              message: `All ${skippedAccepted} paragraph${skippedAccepted !== 1 ? "s" : ""} already have accepted revisions. Enable "Re-run on accepted paragraphs" below and try again to rewrite existing content.`,
+            });
+          } else if (attempted === 0) {
+            setResult({
+              type: "warning",
+              message: "No eligible paragraphs found. All paragraphs may be locked, too short, or already have pending drafts.",
+            });
+          } else {
+            setResult({
+              type: "success",
+              message: `${rewritten} of ${attempted} paragraph${attempted !== 1 ? "s" : ""} queued for rewrite. Review drafts in the Revisions page.`,
+            });
+            onSuccess(item.key);
+            router.refresh();
+          }
+        })
+        .catch((err) => {
+          setResult({ type: "error", message: err instanceof Error ? err.message : "Rewrite failed." });
+        })
+        .finally(() => {
+          setRunning(false);
+        });
     } catch (err) {
       setResult({ type: "error", message: err instanceof Error ? err.message : "Rewrite failed." });
-    } finally {
       setRunning(false);
     }
   }
@@ -300,7 +332,7 @@ function TaskCard({
             variant="light"
             style={{ cursor: "pointer" }}
             onClick={onStatusClick}
-            title="Click to advance status"
+            title="Click to cycle status (To do -> Marked in progress -> Done -> Skipped)"
           >
             {meta.label}
           </Badge>
@@ -335,32 +367,35 @@ type ActiveJob = {
 
 function RunningJobsStrip({ bookId, onAllDone }: { bookId: string; onAllDone: () => void }) {
   const [jobs, setJobs] = useState<ActiveJob[]>([]);
-  const prevAllDone = useRef(false);
+  const hasSeenRunningJobs = useRef(false);
 
-  useEffect(() => {
-    let active = true;
+  const pollJobs = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/books/${bookId}/jobs`, { cache: "no-store" });
+      const data = await res.json();
+      const all: ActiveJob[] = data.content?.jobs ?? [];
+      const running = all.filter((job) => ["running", "queued", "paused"].includes(job.status ?? ""));
+      setJobs(running);
 
-    async function poll() {
-      try {
-        const res = await fetch(`/api/books/${bookId}/jobs`, { cache: "no-store" });
-        const data = await res.json();
-        const all: ActiveJob[] = data.content?.jobs ?? [];
-        const running = all.filter((j) => ["running", "queued", "paused"].includes(j.status ?? ""));
-        if (!active) return;
-        setJobs(running);
-
-        const allDoneNow = running.length === 0;
-        if (allDoneNow && !prevAllDone.current) onAllDone();
-        prevAllDone.current = allDoneNow;
-      } catch {
-        // silent — non-critical
+      if (running.length > 0) {
+        hasSeenRunningJobs.current = true;
+      } else if (hasSeenRunningJobs.current) {
+        onAllDone();
+        hasSeenRunningJobs.current = false;
       }
+      return running.length > 0;
+    } catch {
+      // Back off when polling fails to avoid hammering the jobs endpoint.
+      return false;
     }
-
-    void poll();
-    const interval = window.setInterval(() => void poll(), 2500);
-    return () => { active = false; window.clearInterval(interval); };
   }, [bookId, onAllDone]);
+
+  useAdaptivePolling(pollJobs, {
+    activeIntervalMs: ACTIVE_POLL_MS,
+    idleIntervalMs: IDLE_POLL_MS,
+    pauseWhenHidden: true,
+    coordinatorKey: `book-jobs:${bookId}`,
+  });
 
   if (jobs.length === 0) return null;
 
@@ -466,14 +501,27 @@ export function GuidanceWorkflowPanel({
     }
   }
 
-  const done        = items.filter((i) => statusFor(i.key) === "done").length;
-  const skipped     = items.filter((i) => statusFor(i.key) === "skipped").length;
-  const in_progress = items.filter((i) => statusFor(i.key) === "in_progress").length;
-  const addressed   = done + skipped + in_progress;
-  const progress    = items.length > 0 ? Math.round((addressed / items.length) * 100) : 0;
-
   const priorities = items.filter((i) => i.group === "priority");
   const actions    = items.filter((i) => i.group === "action");
+
+  const done = items.filter((i) => statusFor(i.key) === "done").length;
+  const skipped = items.filter((i) => statusFor(i.key) === "skipped").length;
+  const inProgress = items.filter((i) => statusFor(i.key) === "in_progress").length;
+
+  const priorityDone = priorities.filter((i) => statusFor(i.key) === "done").length;
+  const priorityInProgress = priorities.filter((i) => statusFor(i.key) === "in_progress").length;
+  const prioritySkipped = priorities.filter((i) => statusFor(i.key) === "skipped").length;
+
+  // Weighted progress: priority tasks count double; in-progress is partial; skipped does not imply completion.
+  const weightedCompleted = items.reduce((sum, item) => {
+    const status = statusFor(item.key);
+    const weight = item.group === "priority" ? 2 : 1;
+    if (status === "done") return sum + weight;
+    if (status === "in_progress") return sum + weight * 0.5;
+    return sum;
+  }, 0);
+  const weightedTotal = items.reduce((sum, item) => sum + (item.group === "priority" ? 2 : 1), 0);
+  const progress = weightedTotal > 0 ? Math.round((weightedCompleted / weightedTotal) * 100) : 0;
 
   return (
     <Paper withBorder radius="md" p="xl" bg="white" mt="xl">
@@ -521,12 +569,20 @@ export function GuidanceWorkflowPanel({
             {items.length > 0 && (
               <Paper withBorder p="md" radius="md" bg="#fbfaf8">
                 <Group justify="space-between" mb={6}>
-                  <Text size="sm" fw={600}>Overall progress</Text>
+                  <Text size="sm" fw={600}>Overall weighted progress</Text>
                   <Text size="sm" c="dimmed">
-                    {addressed} of {items.length} addressed ({done} done · {in_progress} in progress · {skipped} skipped)
+                    {done} done · {inProgress} in progress · {skipped} skipped
                   </Text>
                 </Group>
                 <Progress value={progress} color={progress === 100 ? "green" : "blue"} radius="sm" />
+                <Text size="xs" c="dimmed" mt={6}>
+                  &quot;In progress&quot; means the item is marked as actively worked (or rewrite was started from this card). Live execution appears above in Running jobs.
+                </Text>
+                {priorities.length > 0 && (
+                  <Text size="xs" c="dimmed" mt={6}>
+                    Priority progress: {priorityDone}/{priorities.length} done ({priorityInProgress} in progress · {prioritySkipped} skipped)
+                  </Text>
+                )}
               </Paper>
             )}
 

@@ -72,9 +72,13 @@ function ListField({ label, items }: { label: string; items: string[] }) {
 export function BookConceptPanel({
   creationProject,
   concept,
+  seedLocked,
+  seedSource,
 }: {
   creationProject: CreationProject;
   concept: ConceptData;
+  seedLocked?: boolean;
+  seedSource?: "creation-plan" | "book-metadata";
 }) {
   const [open, setOpen] = useState(false);
 
@@ -92,6 +96,12 @@ export function BookConceptPanel({
           </Text>
         </div>
         <Group gap="xs">
+          {seedLocked && (
+            <Badge color="green" variant="light">Seed locked</Badge>
+          )}
+          {seedLocked && seedSource === "book-metadata" && (
+            <Badge color="blue" variant="light">Loaded from saved seed snapshot</Badge>
+          )}
           {creationProject.genre && <Badge color="teal" variant="light">{creationProject.genre}</Badge>}
           {creationProject.language && creationProject.language !== "English" && (
             <Badge color="indigo" variant="light">{creationProject.language}</Badge>

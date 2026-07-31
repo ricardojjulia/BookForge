@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Alert, Button, Group, Paper, Stack, Text } from "@mantine/core";
 import { useRouter } from "next/navigation";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 
 export function RewritePlanActions({
   bookId,
@@ -23,10 +24,26 @@ export function RewritePlanActions({
     setMessage("");
     setError("");
     try {
+      const queued = await fetchJson<{ content?: { jobId?: string } }>(
+        `/api/books/${bookId}/rewrite-plan`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(mergeMetadataSnapshotBody({ serverManaged: true })),
+        },
+        "Queue rewrite plan generation",
+      );
+      const jobId = queued.content?.jobId;
+      if (!jobId) throw new Error("Rewrite plan queue handoff failed.");
+
       const result = await fetchJson<{ content?: Record<string, unknown> }>(
         `/api/books/${bookId}/rewrite-plan`,
-        { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
-        "Rewrite plan generation",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(mergeMetadataSnapshotBody({ jobId })),
+        },
+        "Rewrite plan worker",
       );
       setPreview(stringValue(result.content?.rewriteObjective) || "Rewrite plan saved. Open the plan section below to review it.");
       setMessage("Rewrite plan saved.");

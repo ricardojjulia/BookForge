@@ -33,7 +33,8 @@ export default async function DashboardPage() {
   const [{ data: books }, { data: reports }, { data: userSettings }] = await Promise.all([
     supabase
       .from("books")
-      .select("id,title,author_name,genre,status,finished_export_id,created_at")
+      .select("id,title,author_name,genre,status,finished_export_id,created_at,updated_at")
+      .order("updated_at", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(12),
     supabase

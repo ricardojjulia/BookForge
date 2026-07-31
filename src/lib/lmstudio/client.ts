@@ -6,6 +6,14 @@ import {
   isLmStudioContextError,
   type LmStudioRuntimeLimits,
 } from "@/lib/lmstudio/runtime-limits";
+import {
+  capContextUsingHealth,
+  classifyLmStudioError,
+  recordModelCallEvent,
+  type ModelCallOutcome,
+  type ModelCallTelemetry,
+  type ModelTaskHealth,
+} from "@/lib/ai/model-performance";
 
 export const DEFAULT_LMSTUDIO_BASE_URL = "http://localhost:1234/v1";
 
@@ -28,6 +36,14 @@ export type PreparedLmStudioModel = {
   /** True when this shim represents a cloud provider (Anthropic, OpenAI, Google). */
   isCloud?: boolean;
 };
+
+/**
+ * Kept separate from PreparedLmStudioModel (never embed a live Supabase client on
+ * that type) because several routes persist the whole prepared model wholesale
+ * into a jsonb column (job settings) — embedding a client reference there would
+ * make it non-serializable.
+ */
+export type ModelCallTelemetryContext = ModelCallTelemetry & { task: string; model: string };
 
 export function createLmStudioClient(settings?: Partial<LmStudioSettings>) {
   return new OpenAI({
@@ -60,6 +76,8 @@ export async function prepareLmStudioModelForTask(input: {
   model: string;
   task: LmStudioTaskKind;
   allowModelLoad?: boolean;
+  /** Empirical health for this exact model+task, used to cap load-time context after known crashes. */
+  modelHealth?: ModelTaskHealth;
 }): Promise<PreparedLmStudioModel> {
   const runtimeLimits = getLmStudioRuntimeLimits(input.settings, input.task);
   const warnings = [...runtimeLimits.warnings];
@@ -117,19 +135,30 @@ export async function prepareLmStudioModelForTask(input: {
 
   const instance = findLoadedInstance(nativeModel, model);
   const loadedContext = instance?.config?.context_length || null;
-  const targetContext = Math.min(
+  const uncappedTargetContext = Math.min(
     input.settings.contextWindowTokens,
     nativeModel.max_context_length || input.settings.contextWindowTokens,
   );
+  const targetContext = input.modelHealth ? capContextUsingHealth(uncappedTargetContext, input.modelHealth) : uncappedTargetContext;
   const targetWarnings =
     targetContext < runtimeLimits.configuredContextTokens
       ? [
           ...warnings,
-          `${model} supports up to ${targetContext.toLocaleString()} context tokens in LM Studio, below the configured ${runtimeLimits.configuredContextTokens.toLocaleString()} token target.`,
+          targetContext < uncappedTargetContext
+            ? `${model} previously crashed at a larger loaded context on this task, so BookForge requested a reduced ${targetContext.toLocaleString()} token context this time.`
+            : `${model} supports up to ${targetContext.toLocaleString()} context tokens in LM Studio, below the configured ${runtimeLimits.configuredContextTokens.toLocaleString()} token target.`,
         ]
       : warnings;
 
-  if (instance && loadedContext && loadedContext >= targetContext) {
+  // A model already loaded at a large context isn't automatically "good enough" —
+  // if history shows this model+task crashes/empties at its currently loaded size,
+  // don't trust it; fall through so it gets reloaded at the capped context instead.
+  const loadedContextIsKnownUnsafe =
+    Boolean(input.modelHealth?.recentIncidentSignatures.length) &&
+    Boolean(loadedContext) &&
+    loadedContext! > targetContext;
+
+  if (instance && loadedContext && loadedContext >= targetContext && !loadedContextIsKnownUnsafe) {
     return {
       model: instance.id || model,
       runtimeLimits: getLmStudioRuntimeLimits({ ...input.settings, contextWindowTokens: loadedContext }, input.task),
@@ -214,23 +243,102 @@ export async function createManagedChatCompletion(
     model?: string;
     max_tokens?: number;
   },
+  validateOutcome?: (content: string) => { outcome: ModelCallOutcome; wordCount?: number },
+  telemetryContext?: ModelCallTelemetryContext,
 ) {
+  const startedAt = Date.now();
   try {
     const paramsWithoutTopP = Object.fromEntries(
       Object.entries(params).filter(([key]) => key !== "top_p"),
     ) as typeof params;
     const safeParams = prepared.isCloud ? paramsWithoutTopP : params;
-    return await client.chat.completions.create({
+    const completion = await client.chat.completions.create({
       ...safeParams,
       model: params.model || prepared.model,
       max_tokens: Math.min(params.max_tokens || prepared.runtimeLimits.maxOutputTokens, prepared.runtimeLimits.maxOutputTokens),
     });
+    recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt);
+    return completion;
   } catch (error) {
+    if (isDeprecatedTemperatureError(error) && "temperature" in params) {
+      const paramsWithoutTemperature = Object.fromEntries(
+        Object.entries(params).filter(([key]) => key !== "temperature"),
+      ) as typeof params;
+      const paramsWithoutTopP = Object.fromEntries(
+        Object.entries(paramsWithoutTemperature).filter(([key]) => key !== "top_p"),
+      ) as typeof paramsWithoutTemperature;
+      const safeRetryParams = prepared.isCloud ? paramsWithoutTopP : paramsWithoutTemperature;
+
+      const completion = await client.chat.completions.create({
+        ...safeRetryParams,
+        model: params.model || prepared.model,
+        max_tokens: Math.min(
+          params.max_tokens || prepared.runtimeLimits.maxOutputTokens,
+          prepared.runtimeLimits.maxOutputTokens,
+        ),
+      });
+      recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt);
+      return completion;
+    }
+
+    if (telemetryContext) {
+      const { outcome, signature } = classifyLmStudioError(error);
+      void recordModelCallEvent(telemetryContext.supabase, {
+        userId: telemetryContext.userId,
+        model: telemetryContext.model,
+        task: telemetryContext.task,
+        contextLength: prepared.runtimeLimits.configuredContextTokens,
+        outcome,
+        errorSignature: signature,
+        durationMs: Date.now() - startedAt,
+      });
+    }
+
     if (isLmStudioContextError(error)) {
       throw new Error(getLmStudioContextErrorMessage(error, prepared.runtimeLimits));
     }
     throw error;
   }
+}
+
+/**
+ * Baseline output-length validation applied to every call that doesn't supply its
+ * own task-specific validator. Deliberately loose (it must not misclassify a
+ * legitimate short JSON payload like `{"score":82}`) — it only catches truly
+ * degenerate responses (empty, or a handful of stray characters/tokens).
+ */
+function defaultValidateOutcome(content: string): { outcome: ModelCallOutcome; wordCount: number } {
+  const trimmed = content.trim();
+  const wordCount = trimmed ? trimmed.split(/\s+/).filter(Boolean).length : 0;
+  if (!trimmed) return { outcome: "empty_completion", wordCount: 0 };
+  if (trimmed.length < 20) return { outcome: "underlength", wordCount };
+  return { outcome: "success", wordCount };
+}
+
+function recordCompletionOutcome(
+  prepared: PreparedLmStudioModel,
+  completion: OpenAI.Chat.Completions.ChatCompletion,
+  validateOutcome: ((content: string) => { outcome: ModelCallOutcome; wordCount?: number }) | undefined,
+  telemetryContext: ModelCallTelemetryContext | undefined,
+  durationMs: number,
+) {
+  if (!telemetryContext) return;
+  const content = completion.choices[0]?.message.content || "";
+  const result = validateOutcome ? validateOutcome(content) : defaultValidateOutcome(content);
+  void recordModelCallEvent(telemetryContext.supabase, {
+    userId: telemetryContext.userId,
+    model: telemetryContext.model,
+    task: telemetryContext.task,
+    contextLength: prepared.runtimeLimits.configuredContextTokens,
+    outcome: result.outcome,
+    wordCount: result.wordCount ?? null,
+    durationMs,
+  });
+}
+
+function isDeprecatedTemperatureError(error: unknown): boolean {
+  const message = getErrorText(error).toLowerCase();
+  return message.includes("temperature") && message.includes("deprecated");
 }
 
 async function loadNativeLmStudioModel(

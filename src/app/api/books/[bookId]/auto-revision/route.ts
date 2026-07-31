@@ -1,6 +1,13 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import {
+  buildJobProgress,
+  createRevisionJobHeartbeat,
+  getRevisionJobStatus,
+  updateRevisionJobProgress,
+  waitWhileRevisionJobPaused,
+} from "@/lib/ai/job-state";
 import { markBookRevising } from "@/lib/books/status";
 import { createClient } from "@/lib/supabase/server";
 
@@ -8,6 +15,8 @@ const schema = z.object({
   action: z.enum(["preview", "run"]).default("preview"),
   trustProfile: z.enum(["careful", "balanced", "full_trust"]).default("full_trust"),
   maxDecisions: z.number().int().positive().max(5000).default(5000),
+  jobId: z.string().uuid().optional(),
+  serverManaged: z.boolean().optional(),
 });
 
 type RevisionRow = {
@@ -101,81 +110,258 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       });
     }
 
-    const { data: job, error: jobError } = await supabase
-      .from("revision_jobs")
-      .insert({
-        book_id: bookId,
-        mode: "auto_revision",
-        status: "running",
-        settings: {
-          trustProfile: body.trustProfile,
-          maxDecisions: body.maxDecisions,
-          pendingDrafts: (revisions || []).length,
-          considered: latestRevisions.length,
-          skippedLocked,
-        },
-        prompt_snapshot:
-          "Auto Revision applies weighted, auditable accept/reject/redo decisions to pending draft revisions while preserving locked passages and continuity warnings.",
-        created_by: user.id,
-        started_at: new Date().toISOString(),
-      })
-      .select("id")
-      .single();
-    if (jobError) throw jobError;
+    const startedAt = new Date().toISOString();
+    const totalUnits = 1;
+    let durableJobId = body.jobId || "";
+    let durableJobStatus = "running";
+    let durableSettings: unknown = {
+      trustProfile: body.trustProfile,
+      maxDecisions: body.maxDecisions,
+      pendingDrafts: (revisions || []).length,
+      considered: latestRevisions.length,
+      skippedLocked,
+      unit: "auto_revision",
+      progress: buildJobProgress({
+        taskName: "Auto-accept pending revision drafts",
+        currentUnit: "Preparing weighted auto-accept decisions",
+        totalUnits,
+        attempted: 1,
+        successful: 0,
+        failed: 0,
+        skipped: 0,
+        startedAt,
+        estimatedSecondsPerUnit: 20,
+      }),
+    };
 
-    const applied = await applyDecisions(supabase, decisions);
-    const completedAt = new Date().toISOString();
-    const summary = summarizeDecisions(decisions);
-    const nextStep = getAutoNextStep(decisions);
+    if (durableJobId) {
+      const { data: existingJob, error: existingJobError } = await supabase
+        .from("revision_jobs")
+        .select("id,status,settings")
+        .eq("id", durableJobId)
+        .eq("book_id", bookId)
+        .eq("created_by", user.id)
+        .single();
+      if (existingJobError) throw existingJobError;
+      if (!existingJob) return NextResponse.json({ error: "Auto-revision job not found." }, { status: 404 });
+      if (existingJob.status === "completed") return NextResponse.json({ ok: true, message: "Auto-revision job already completed." });
+      if (existingJob.status === "failed") return NextResponse.json({ ok: true, message: "Auto-revision job already failed." });
+      durableJobStatus = String(existingJob.status || "running");
+      durableSettings = existingJob.settings || durableSettings;
+    } else {
+      const status = body.serverManaged ? "queued" : "running";
+      const { data: createdJob, error: createdJobError } = await supabase
+        .from("revision_jobs")
+        .insert({
+          book_id: bookId,
+          mode: "auto_revision",
+          status,
+          settings: {
+            trustProfile: body.trustProfile,
+            maxDecisions: body.maxDecisions,
+            pendingDrafts: (revisions || []).length,
+            considered: latestRevisions.length,
+            skippedLocked,
+            unit: "auto_revision",
+            progress: buildJobProgress({
+              taskName: "Auto-accept pending revision drafts",
+              currentUnit: status === "queued" ? "Queued" : "Preparing weighted auto-accept decisions",
+              totalUnits,
+              attempted: 1,
+              successful: 0,
+              failed: 0,
+              skipped: 0,
+              startedAt: status === "running" ? startedAt : null,
+              estimatedSecondsPerUnit: 20,
+            }),
+          },
+          prompt_snapshot:
+            "Auto Revision applies weighted, auditable accept/reject/redo decisions to pending draft revisions while preserving locked passages and continuity warnings.",
+          created_by: user.id,
+          started_at: status === "running" ? startedAt : null,
+        })
+        .select("id")
+        .single();
+      if (createdJobError) throw createdJobError;
+      durableJobId = createdJob.id;
+      durableJobStatus = status;
 
-    const { error: reportError } = await supabase.from("coherence_reports").insert({
-      book_id: bookId,
-      report_type: "auto_revision_decisions",
-      content: {
-        event: "auto_revision_decision_batch",
-        trustProfile: body.trustProfile,
-        randomSeed: randomUUID(),
-        completedAt,
-        summary,
-        skippedLocked,
-        nextStep,
-        decisions,
-        note:
-          "Auto Revision made weighted random decisions. Accepted drafts became active paragraph text; rejected and redo drafts remain auditable in revision history. Locked passages were skipped.",
-      },
+      if (body.serverManaged) {
+        return NextResponse.json({ content: { jobId: durableJobId, queued: true, totalUnits } });
+      }
+    }
+
+    if (durableJobStatus !== "running") {
+      await supabase
+        .from("revision_jobs")
+        .update({ status: "running", started_at: startedAt })
+        .eq("id", durableJobId)
+        .eq("book_id", bookId)
+        .eq("created_by", user.id);
+    }
+
+    const pauseStatus = await waitWhileRevisionJobPaused(supabase, durableJobId);
+    if (pauseStatus === "cancelled") {
+      const completedAt = new Date().toISOString();
+      await supabase
+        .from("revision_jobs")
+        .update({
+          status: "cancelled",
+          completed_at: completedAt,
+          settings: {
+            trustProfile: body.trustProfile,
+            maxDecisions: body.maxDecisions,
+            pendingDrafts: (revisions || []).length,
+            considered: latestRevisions.length,
+            skippedLocked,
+            unit: "auto_revision",
+            progress: buildJobProgress({
+              taskName: "Auto-accept pending revision drafts",
+              currentUnit: "Cancelled",
+              totalUnits,
+              attempted: 0,
+              successful: 0,
+              failed: 0,
+              skipped: 1,
+              startedAt,
+              completedAt,
+              estimatedSecondsPerUnit: 20,
+              message: "Auto revision cancelled before execution started.",
+            }),
+          },
+        })
+        .eq("id", durableJobId);
+      return NextResponse.json({ ok: true, message: "Auto-revision job cancelled." });
+    }
+
+    durableSettings = await updateRevisionJobProgress(supabase, durableJobId, durableSettings, {
+      currentUnit: "Applying weighted auto-accept decisions",
+      totalUnits,
+      attempted: 1,
+      successful: 0,
+      failed: 0,
+      skipped: 0,
     });
-    if (reportError) throw reportError;
 
-    const { error: jobUpdateError } = await supabase
-      .from("revision_jobs")
-      .update({
-        status: "completed",
-        completed_at: completedAt,
-        settings: {
+    const heartbeat = createRevisionJobHeartbeat(supabase, durableJobId, durableSettings, {
+      currentUnit: "Applying weighted auto-accept decisions",
+      totalUnits,
+      attempted: 1,
+      successful: 0,
+      failed: 0,
+      skipped: 0,
+    });
+
+    try {
+      const applied = await applyDecisions(supabase, decisions);
+      const completedAt = new Date().toISOString();
+      const summary = summarizeDecisions(decisions);
+      const nextStep = getAutoNextStep(decisions);
+
+      const { error: reportError } = await supabase.from("coherence_reports").insert({
+        book_id: bookId,
+        report_type: "auto_revision_decisions",
+        content: {
+          event: "auto_revision_decision_batch",
           trustProfile: body.trustProfile,
-          maxDecisions: body.maxDecisions,
-          pendingDrafts: (revisions || []).length,
-          considered: latestRevisions.length,
-          skippedLocked,
-          applied,
+          randomSeed: randomUUID(),
+          completedAt,
           summary,
+          skippedLocked,
+          nextStep,
+          decisions,
+          note:
+            "Auto Revision made weighted random decisions. Accepted drafts became active paragraph text; rejected and redo drafts remain auditable in revision history. Locked passages were skipped.",
+        },
+      });
+      if (reportError) throw reportError;
+
+      const finalStatus = await getRevisionJobStatus(supabase, durableJobId);
+      const completedStatus = finalStatus === "cancelled" ? "cancelled" : "completed";
+
+      const { error: jobUpdateError } = await supabase
+        .from("revision_jobs")
+        .update({
+          status: completedStatus,
+          completed_at: completedAt,
+          settings: {
+            trustProfile: body.trustProfile,
+            maxDecisions: body.maxDecisions,
+            pendingDrafts: (revisions || []).length,
+            considered: latestRevisions.length,
+            skippedLocked,
+            applied,
+            summary,
+            nextStep,
+            unit: "auto_revision",
+            progress: buildJobProgress({
+              taskName: "Auto-accept pending revision drafts",
+              currentUnit: completedStatus === "cancelled" ? "Cancelled" : "Complete",
+              totalUnits,
+              attempted: 1,
+              successful: completedStatus === "cancelled" ? 0 : 1,
+              failed: 0,
+              skipped: completedStatus === "cancelled" ? 1 : 0,
+              startedAt,
+              completedAt,
+              estimatedSecondsPerUnit: 20,
+              message:
+                completedStatus === "cancelled"
+                  ? "Auto revision cancelled during execution."
+                  : "Auto revision decisions applied and reported.",
+            }),
+          },
+        })
+        .eq("id", durableJobId);
+      if (jobUpdateError) throw jobUpdateError;
+
+      await markBookRevising(supabase, bookId);
+
+      return NextResponse.json({
+        content: {
+          jobId: durableJobId,
+          applied,
+          skippedLocked,
+          decisions: summary,
           nextStep,
         },
-      })
-      .eq("id", job.id);
-    if (jobUpdateError) throw jobUpdateError;
-
-    await markBookRevising(supabase, bookId);
-
-    return NextResponse.json({
-      content: {
-        jobId: job.id,
-        applied,
-        skippedLocked,
-        decisions: summary,
-        nextStep,
-      },
-    });
+      });
+    } catch (runError) {
+      const completedAt = new Date().toISOString();
+      const message = getErrorMessage(runError);
+      await supabase
+        .from("revision_jobs")
+        .update({
+          status: "failed",
+          completed_at: completedAt,
+          error_message: message,
+          settings: {
+            trustProfile: body.trustProfile,
+            maxDecisions: body.maxDecisions,
+            pendingDrafts: (revisions || []).length,
+            considered: latestRevisions.length,
+            skippedLocked,
+            unit: "auto_revision",
+            progress: buildJobProgress({
+              taskName: "Auto-accept pending revision drafts",
+              currentUnit: "Failed",
+              totalUnits,
+              attempted: 1,
+              successful: 0,
+              failed: 1,
+              skipped: 0,
+              startedAt,
+              completedAt,
+              estimatedSecondsPerUnit: 20,
+              message,
+            }),
+          },
+        })
+        .eq("id", durableJobId);
+      throw runError;
+    } finally {
+      heartbeat.stop();
+    }
   } catch (error) {
     console.error("Auto revision failed", error);
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
@@ -290,7 +476,7 @@ async function applyDecisions(
     if (decision.action === "accept") {
       const { error: clearError } = await supabase
         .from("revision_versions")
-        .update({ accepted: false })
+        .update({ accepted: false, rejected: true })
         .eq("paragraph_id", version.paragraph_id)
         .eq("book_id", version.book_id);
       if (clearError) throw clearError;

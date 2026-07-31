@@ -84,26 +84,32 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       candidates: getReasoningModelCandidates(settings),
       expectedCalls: 1,
       latencyPreference: "quality",
+      telemetry: { supabase, userId: user.id },
     });
-    const { client, preparedModel, modelSelection } = modelPlan;
+    const { client, preparedModel, modelSelection, telemetryContext } = modelPlan;
 
-    const completion = await createManagedChatCompletion(client, preparedModel, {
-      temperature: Math.min(settings.temperature, 0.35),
-      top_p: settings.topP,
-      max_tokens: 5000,
-      messages: [
-        {
-          role: "user",
-          content: buildAbridgementPlanPrompt({
-            title: book.title,
-            targetReductionPercent: body.targetReductionPercent,
-            manuscriptBlueprint: bible?.content,
-            chapters: inventory,
-          }),
-        },
-      ],
-      
-    });
+    const completion = await createManagedChatCompletion(
+      client,
+      preparedModel,
+      {
+        temperature: Math.min(settings.temperature, 0.35),
+        top_p: settings.topP,
+        max_tokens: 5000,
+        messages: [
+          {
+            role: "user",
+            content: buildAbridgementPlanPrompt({
+              title: book.title,
+              targetReductionPercent: body.targetReductionPercent,
+              manuscriptBlueprint: bible?.content,
+              chapters: inventory,
+            }),
+          },
+        ],
+      },
+      undefined,
+      telemetryContext,
+    );
 
     const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({
       summary: raw,

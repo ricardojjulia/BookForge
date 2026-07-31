@@ -19,6 +19,7 @@ import {
 import { Dropzone } from "@mantine/dropzone";
 import { IconFileText, IconUpload } from "@tabler/icons-react";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { DIALOG_DENSITY_LABELS, DIALOG_DENSITY_LEVELS, type DialogDensity } from "@/lib/dialogue-density";
 
 const genreOptions = [
   "Fiction",
@@ -63,7 +64,6 @@ const targetAudienceOptions = [
   "Church Leaders",
   "Pastors",
   "Small Groups",
-  "Students",
   "Professionals",
   "Academics",
   "New Believers",
@@ -82,6 +82,7 @@ export function ImportManuscriptForm() {
   const [targetAudience, setTargetAudience] = useState("");
   const [pointOfView, setPointOfView] = useState("");
   const [tense, setTense] = useState("");
+  const [dialogDensity, setDialogDensity] = useState<DialogDensity>("normal");
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -98,6 +99,7 @@ export function ImportManuscriptForm() {
     formData.append("targetAudience", targetAudience);
     formData.append("pointOfView", pointOfView);
     formData.append("tense", tense);
+    formData.append("dialogDensity", dialogDensity);
 
     try {
       const result = await fetchJson<{ bookId: string }>(
@@ -161,6 +163,12 @@ export function ImportManuscriptForm() {
             data={["Past", "Present", "Future", "Mixed"]}
             value={tense}
             onChange={(value) => setTense(value || "")}
+          />
+          <Select
+            label="Dialogue density"
+            data={DIALOG_DENSITY_LEVELS.map((level) => ({ label: DIALOG_DENSITY_LABELS[level], value: level }))}
+            value={dialogDensity}
+            onChange={(value) => setDialogDensity((value as DialogDensity) || "normal")}
           />
         </SimpleGrid>
 

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { buildJobProgress, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
+import { buildJobProgress, createRevisionJobHeartbeat, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
 import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
@@ -15,6 +15,8 @@ import { clampStrategySettings, getRewriteStrategy, rewriteStrategies } from "@/
 import { createClient } from "@/lib/supabase/server";
 
 const schema = z.object({
+  jobId: z.string().uuid().optional(),
+  serverManaged: z.boolean().optional(),
   maxUnits: z.number().int().positive().max(5000).optional(),
   campaignId: z.string().uuid().optional(),
   paragraphId: z.string().uuid().optional(),
@@ -115,6 +117,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
 
     const [
+      { data: book },
       { data: bible },
       { data: rewritePlan, error: planError },
       { data: continuityLedger },
@@ -124,6 +127,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       { data: acceptedRevisionRows, error: acceptedRevisionRowsError },
       { data: lockedPassageRows, error: lockedPassageRowsError },
     ] = await Promise.all([
+      supabase.from("books").select("dialog_density").eq("id", bookId).single(),
       supabase.from("book_bibles").select("content,voice_profile").eq("book_id", bookId).maybeSingle(),
       supabase
         .from("coherence_reports")
@@ -206,8 +210,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       expectedCalls,
       latencyPreference: settings.qualityProfile === "premium" ? "quality" : settings.qualityProfile === "fast" ? "fast" : "balanced",
       allowUnload: true,
+      telemetry: { supabase, userId: user.id },
     });
-    const { client, model, preparedModel, modelSelection, availableModels } = modelPlan;
+    const { client, model, preparedModel, modelSelection, availableModels, telemetryContext } = modelPlan;
     const rewriteSelection = selectBestRewriteModel(availableModels, {
       qualityProfile: settings.qualityProfile,
       contextWindowTokens: settings.contextWindowTokens,
@@ -225,54 +230,96 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           : selectedStrategy.instructions,
     };
 
-    const { data: job, error: jobError } = await supabase
-      .from("revision_jobs")
-      .insert({
-        book_id: bookId,
-        mode: "full_book_rewrite",
-        status: "running",
-        settings: {
-          model,
-          preparedModel,
-          modelSelection,
-          campaignId: body.campaignId || null,
-          rewriteModelSelection: rewriteSelection,
-          maxUnits: body.maxUnits || null,
-          rewriteExistingDrafts: body.rewriteExistingDrafts,
-          rewriteAccepted: body.rewriteAccepted,
-          distributeAcrossChapters: body.distributeAcrossChapters,
-          strategyId: rewriteStrategy.id,
-          strategyLabel: rewriteStrategy.label,
-          strategySettings: rewriteStrategy.settings,
-          authorInstructions: body.authorInstructions || null,
-          unit: "paragraph",
-          progress: buildJobProgress({
-            taskName: "Full-book rewrite draft",
-            currentUnit: "Planning eligible paragraphs",
-            totalUnits: body.maxUnits || 0,
-            attempted: 0,
-            successful: 0,
-            failed: 0,
-            skipped: 0,
-            startedAt,
-            estimatedSecondsPerUnit: estimateSecondsPerRewriteUnit(model),
-          }),
-        },
-        prompt_snapshot:
-          "Full-book rewrite executor: paragraph units with Manuscript Blueprint, Rewrite Architect plan, materialized context packet, adjacent chapter summaries, accepted prior revisions, locked passages, Critic priorities, and local paragraph context.",
-        created_by: user.id,
-        started_at: startedAt,
-      })
-      .select("id")
-      .single();
-    if (jobError) throw jobError;
+    let jobId = body.jobId || "";
+    let jobStatus = "running";
+
+    if (jobId) {
+      const { data: existingJob, error: existingJobError } = await supabase
+        .from("revision_jobs")
+        .select("id,status")
+        .eq("id", jobId)
+        .eq("book_id", bookId)
+        .eq("created_by", user.id)
+        .single();
+      if (existingJobError) throw existingJobError;
+      if (!existingJob) return NextResponse.json({ error: "Rewrite job not found." }, { status: 404 });
+      if (existingJob.status === "completed") return NextResponse.json({ ok: true, message: "Rewrite job already completed." });
+      if (existingJob.status === "failed") return NextResponse.json({ ok: true, message: "Rewrite job already failed." });
+      jobStatus = String(existingJob.status || "running");
+    } else {
+      const status = body.serverManaged ? "queued" : "running";
+      const { data: job, error: jobError } = await supabase
+        .from("revision_jobs")
+        .insert({
+          book_id: bookId,
+          mode: "full_book_rewrite",
+          status,
+          settings: {
+            model,
+            preparedModel,
+            modelSelection,
+            campaignId: body.campaignId || null,
+            rewriteModelSelection: rewriteSelection,
+            maxUnits: body.maxUnits || null,
+            rewriteExistingDrafts: body.rewriteExistingDrafts,
+            rewriteAccepted: body.rewriteAccepted,
+            distributeAcrossChapters: body.distributeAcrossChapters,
+            strategyId: rewriteStrategy.id,
+            strategyLabel: rewriteStrategy.label,
+            strategySettings: rewriteStrategy.settings,
+            authorInstructions: body.authorInstructions || null,
+            unit: "paragraph",
+            progress: buildJobProgress({
+              taskName: "Full-book rewrite draft",
+              currentUnit: "Planning eligible paragraphs",
+              totalUnits: body.maxUnits || 0,
+              attempted: 0,
+              successful: 0,
+              failed: 0,
+              skipped: 0,
+              startedAt,
+              estimatedSecondsPerUnit: estimateSecondsPerRewriteUnit(model),
+            }),
+          },
+          prompt_snapshot:
+            "Full-book rewrite executor: paragraph units with Manuscript Blueprint, Rewrite Architect plan, materialized context packet, adjacent chapter summaries, accepted prior revisions, locked passages, Critic priorities, and local paragraph context.",
+          created_by: user.id,
+          started_at: status === "running" ? startedAt : null,
+        })
+        .select("id")
+        .single();
+      if (jobError) throw jobError;
+      jobId = job.id;
+      jobStatus = status;
+
+      if (body.serverManaged) {
+        return NextResponse.json({
+          content: {
+            jobId,
+            revisionJobId: jobId,
+            queued: true,
+            totalUnits: body.maxUnits || expectedCalls,
+          },
+        });
+      }
+    }
+
+    if (jobStatus !== "running") {
+      const { error: resumeError } = await supabase
+        .from("revision_jobs")
+        .update({ status: "running", started_at: startedAt })
+        .eq("id", jobId)
+        .eq("book_id", bookId)
+        .eq("created_by", user.id);
+      if (resumeError) throw resumeError;
+    }
 
     if (body.campaignId) {
       const { error: campaignStartError } = await supabase
         .from("rewrite_campaigns")
         .update({
           status: "running",
-          last_revision_job_id: job.id,
+          last_revision_job_id: jobId,
           last_error: null,
           updated_at: new Date().toISOString(),
         })
@@ -360,7 +407,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       body.maxUnits,
     );
     attempted = 0;
-    jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+    jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
       taskName: "Full-book rewrite draft",
       currentUnit: eligibleUnits.length ? `Rewrite unit 1 of ${eligibleUnits.length}` : "No eligible units",
       totalUnits: eligibleUnits.length,
@@ -377,18 +424,26 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     });
 
     for (const [unitIndex, unit] of eligibleUnits.entries()) {
-      const pauseStatus = await waitWhileRevisionJobPaused(supabase, job.id);
+      const pauseStatus = await waitWhileRevisionJobPaused(supabase, jobId);
       if (pauseStatus === "cancelled") {
         break;
       }
-      const currentStatus = await getRevisionJobStatus(supabase, job.id);
+      const currentStatus = await getRevisionJobStatus(supabase, jobId);
       if (currentStatus === "cancelled") {
         break;
       }
 
       const { chapter, chapterIndex, paragraph, paragraphIndex, rows } = unit;
       attempted += 1;
-      jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+      jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+        currentUnit: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number} (${unitIndex + 1}/${eligibleUnits.length})`,
+        totalUnits: eligibleUnits.length,
+        attempted,
+        successful: rewritten,
+        failed: 0,
+        skipped,
+      });
+      const heartbeat = createRevisionJobHeartbeat(supabase, jobId, jobSettings, {
         currentUnit: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number} (${unitIndex + 1}/${eligibleUnits.length})`,
         totalUnits: eligibleUnits.length,
         attempted,
@@ -401,6 +456,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         const contextPacket = buildRewriteContextPacket({
           manuscriptBlueprint: bible?.content,
           rewritePlan: normalizedRewritePlan,
+          dialogDensity: book?.dialog_density,
           chapter,
           previousChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex - 1]?.summary,
           nextChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex + 1]?.summary,
@@ -433,20 +489,25 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           text: paragraph.original_text,
         });
 
-        const completion = await createManagedChatCompletion(client, preparedModel, {
-          temperature: Math.min(settings.temperature, 0.55),
-          top_p: settings.topP,
-          max_tokens: 1800,
-          messages: [{ role: "user", content: prompt }],
-          
-        });
+        const completion = await createManagedChatCompletion(
+          client,
+          preparedModel,
+          {
+            temperature: Math.min(settings.temperature, 0.55),
+            top_p: settings.topP,
+            max_tokens: 1800,
+            messages: [{ role: "user", content: prompt }],
+          },
+          undefined,
+          telemetryContext,
+        );
 
         const parsed = parseRewriteResponse(completion.choices[0]?.message.content || "{}");
         const revisedText = extractRevisedText(parsed) || paragraph.original_text;
         const continuityWarnings = extractArray(parsed, "continuityWarnings");
 
         const { error: versionError } = await supabase.from("revision_versions").insert({
-          revision_job_id: job.id,
+          revision_job_id: jobId,
           book_id: bookId,
           chapter_id: chapter.id,
           scene_id: paragraph.scene_id,
@@ -460,7 +521,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
         rewritten += 1;
         warnings.push(...continuityWarnings);
-        jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+        jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
           currentUnit:
             unitIndex + 1 >= eligibleUnits.length
               ? "Finalizing rewrite job"
@@ -474,7 +535,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         });
       } catch (unitError) {
         const message = getErrorMessage(unitError);
-        jobSettings = await updateRevisionJobProgress(supabase, job.id, jobSettings, {
+        jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
           currentUnit: `Failed at chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`,
           totalUnits: eligibleUnits.length,
           attempted,
@@ -492,11 +553,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           ],
         });
         throw unitError;
+      } finally {
+        heartbeat.stop();
       }
     }
 
     const completedAt = new Date().toISOString();
-    const finalStatus = await getRevisionJobStatus(supabase, job.id);
+    const finalStatus = await getRevisionJobStatus(supabase, jobId);
     const completedStatus = finalStatus === "cancelled" ? "cancelled" : "completed";
     const { error: updateError } = await supabase
       .from("revision_jobs")
@@ -543,7 +606,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           }),
         },
       })
-      .eq("id", job.id);
+      .eq("id", jobId);
     if (updateError) throw updateError;
 
     if (body.campaignId) {
@@ -569,7 +632,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           fully_covered_chapters: campaignStats.fullyCoveredChapters,
           total_chapters: campaignStats.totalChapters,
           batches_run: Number(campaign?.batches_run || 0) + 1,
-          last_revision_job_id: job.id,
+          last_revision_job_id: jobId,
           completed_at: campaignComplete || completedStatus === "cancelled" ? completedAt : null,
           updated_at: completedAt,
         })
@@ -582,7 +645,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       book_id: bookId,
       report_type: "rewrite_execution",
       content: {
-        revisionJobId: job.id,
+        revisionJobId: jobId,
         model,
         attempted,
         rewritten,
@@ -598,7 +661,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     return NextResponse.json({
       content: {
-        revisionJobId: job.id,
+        revisionJobId: jobId,
         model,
         attempted,
         rewritten,

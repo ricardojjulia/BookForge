@@ -1,9 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Alert, Button, Paper, PasswordInput, Stack, Text, TextInput, Title } from "@mantine/core";
 import { createClient } from "@/lib/supabase/client";
+
+function isEnterKey(event: KeyboardEvent<HTMLInputElement>) {
+  return event.key === "Enter";
+}
 
 export function AuthForm() {
   const router = useRouter();
@@ -46,8 +50,14 @@ export function AuthForm() {
           label="Password"
           value={password}
           onChange={(event) => setPassword(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (isEnterKey(event)) {
+              event.preventDefault();
+              void submit();
+            }
+          }}
         />
-        <Button color="grape" loading={loading} onClick={submit}>
+        <Button color="grape" loading={loading} onClick={() => { void submit(); }}>
           {mode === "signin" ? "Login" : "Sign up"}
         </Button>
         <Button variant="subtle" color="dark" onClick={() => setMode(mode === "signin" ? "signup" : "signin")}>

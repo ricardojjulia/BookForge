@@ -32,11 +32,30 @@ export async function GET(_req: Request, { params }: { params: Promise<{ bookId:
     return acc;
   }, {});
 
+  const paragraphChapterById = new Map((paragraphs || []).map((paragraph) => [paragraph.id, paragraph.chapter_id]));
+  const pendingParagraphIdsByChapter = new Map<string, Set<string>>();
+  const pendingVersionsByChapter = new Map<string, number>();
+
+  (versions || []).forEach((version) => {
+    if (version.accepted || version.rejected || !version.paragraph_id) return;
+    const chapterId = paragraphChapterById.get(version.paragraph_id);
+    if (!chapterId) return;
+
+    if (!pendingParagraphIdsByChapter.has(chapterId)) {
+      pendingParagraphIdsByChapter.set(chapterId, new Set());
+    }
+    pendingParagraphIdsByChapter.get(chapterId)?.add(version.paragraph_id);
+    pendingVersionsByChapter.set(chapterId, (pendingVersionsByChapter.get(chapterId) || 0) + 1);
+  });
+
   const chapterStats = (chapters || []).map((chapter) => {
     const chapterParagraphs = (paragraphs || []).filter((p) => p.chapter_id === chapter.id);
     const originalWords = chapterParagraphs.reduce((sum, p) => sum + wordCount(p.original_text), 0);
     const acceptedWords = chapterParagraphs.reduce((sum, p) => sum + wordCount(p.accepted_text || p.original_text), 0);
     const acceptedParagraphs = chapterParagraphs.filter((p) => p.accepted_text).length;
+    const pendingParagraphs = pendingParagraphIdsByChapter.get(chapter.id)?.size || 0;
+    const pendingVersions = pendingVersionsByChapter.get(chapter.id) || 0;
+    const uncoveredParagraphs = Math.max(0, chapterParagraphs.length - acceptedParagraphs);
     return {
       chapterId: chapter.id,
       chapterNumber: chapter.chapter_number,
@@ -47,6 +66,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ bookId:
       originalWords,
       acceptedWords,
       wordDelta: acceptedWords - originalWords,
+      pendingParagraphs,
+      pendingVersions,
+      uncoveredParagraphs,
     };
   });
 

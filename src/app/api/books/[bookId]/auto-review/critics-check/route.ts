@@ -10,9 +10,11 @@ const CRITIC_LENSES = [
   "market_fit",
   "contemporary_view",
   "revision_priorities",
+  "dialogue_density",
 ] as const;
 
 const GREEN_THRESHOLD = 70;
+const CRITIC_REPORT_TYPES = CRITIC_LENSES.flatMap((lens) => [`critic_post:${lens}`, `critic:${lens}`]);
 
 export async function GET(_: Request, { params }: { params: Promise<{ bookId: string }> }) {
   try {
@@ -26,6 +28,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ bookId: st
       .from("coherence_reports")
       .select("report_type,content,created_at")
       .eq("book_id", bookId)
+      .in("report_type", CRITIC_REPORT_TYPES)
       .order("created_at", { ascending: false });
 
     const reports = allReports || [];

@@ -19,6 +19,27 @@ type ExportRow = {
   completed_at: string | null;
 };
 
+type ExportDefaults = {
+  format?: string;
+  sourceMode?: string;
+  includeFrontMatter?: boolean;
+  includeBackMatter?: boolean;
+  useOriginalForLocked?: boolean;
+  abridgedMode?: boolean;
+  epubMetadata?: {
+    language?: string;
+    publisher?: string;
+    copyright?: string;
+    description?: string;
+  } | null;
+  pdfOptions?: {
+    fontSize?: number;
+    lineGap?: number;
+    pageNumbers?: boolean;
+    pageSize?: "LETTER" | "A4";
+  } | null;
+};
+
 type ChapterRow = {
   id: string;
   chapter_number: number;
@@ -126,6 +147,7 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
   }
 
   const exportRows = await addSignedUrls(supabase, (exports || []) as ExportRow[]);
+  const latestExportDefaults = ((exports || [])[0]?.metadata || null) as ExportDefaults | null;
   const chapterReadiness = buildChapterReadiness(
     (chapters || []) as ChapterRow[],
     (paragraphs || []) as ParagraphRow[],
@@ -195,6 +217,7 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
           totalParagraphs={totalParagraphs || 0}
           lockedParagraphs={lockedParagraphs || 0}
           pendingDraftCount={pendingDrafts || 0}
+          initialDefaults={latestExportDefaults}
         />
 
         <FinalReadinessPanel readiness={finalReadiness} />
