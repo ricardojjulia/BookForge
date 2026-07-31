@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Accordion, Badge, Button, Group, JsonInput, Pagination, Paper, Select, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { IconInfoCircle } from "@tabler/icons-react";
+import { Accordion, ActionIcon, Badge, Button, Group, JsonInput, Pagination, Paper, Select, SimpleGrid, Stack, Text, Title, Tooltip } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { useRouter } from "next/navigation";
 import { extractCriticScore } from "@/lib/critic/score";
-import { summarizeCriticContent } from "@/lib/critic/summary";
+import { CRITIC_SUMMARY_FALLBACK, summarizeCriticContent } from "@/lib/critic/summary";
 
 type CriticReport = {
   id: string;
@@ -65,6 +66,8 @@ export function CriticReportsPanel({ bookId, reports }: { bookId: string; report
               {visibleReports.map((report) => {
                 const content = report.content || {};
                 const score = extractCriticScore(content);
+                const summary = summarizeCriticContent(content);
+                const isFallbackSummary = summary === CRITIC_SUMMARY_FALLBACK;
                 return (
                   <Accordion.Item key={report.id} value={report.id}>
                     <Accordion.Control>
@@ -84,8 +87,22 @@ export function CriticReportsPanel({ bookId, reports }: { bookId: string; report
                     </Accordion.Control>
                     <Accordion.Panel>
                       <Stack>
-                        <Text>{summarizeCriticContent(content)}</Text>
-                        {report.report_type.startsWith("critic:") && (
+                        <Group gap={6} align="center" wrap="nowrap">
+                          <Text style={{ flex: 1 }}>{summary}</Text>
+                          {isFallbackSummary && (
+                            <Tooltip
+                              label="This can happen when the model returns a score but skips structured findings or returns an unexpected JSON shape. Recheck usually regenerates a full narrative."
+                              multiline
+                              w={320}
+                              withArrow
+                            >
+                              <ActionIcon variant="subtle" color="gray" size="sm" aria-label="Why this can happen">
+                                <IconInfoCircle size={14} />
+                              </ActionIcon>
+                            </Tooltip>
+                          )}
+                        </Group>
+                        {(report.report_type.startsWith("critic:") || report.report_type.startsWith("critic_post:")) && (
                           <Group>
                             <RecheckCriticButton bookId={bookId} reportType={report.report_type} />
                           </Group>
@@ -158,6 +175,9 @@ function FindingsToggle({ content }: { content: Record<string, unknown> }) {
       </Button>
       {opened && (
         <Stack mt="sm">
+          <ReportCards title="Key findings" items={arrayItems(content.findings)} />
+          <ReportCards title="Observations" items={arrayItems(content.observations)} />
+          <ReportCards title="Issues" items={arrayItems(content.issues)} />
           <ReportCards title="Highest-leverage fixes" items={arrayItems(content.highestLeverageFixes)} />
           <ReportCards title="Recommended fixes" items={arrayItems(content.recommendedFixes)} />
           <ReportCards title="Risks" items={arrayItems(content.risks)} />

@@ -25,6 +25,7 @@ import {
   IconExternalLink,
 } from "@tabler/icons-react";
 import { createClient } from "@/lib/supabase/client";
+import { PROVIDER_META } from "@/lib/ai/providers";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -37,10 +38,12 @@ const CLOUD_PROVIDERS: { value: CloudProvider; label: string }[] = [
   { value: "google",     label: "Google Gemini" },
 ];
 
+// Sourced from the shared provider catalog (@/lib/ai/providers) so the model
+// list here can never drift out of sync with the rest of the app.
 const CLOUD_MODELS: Record<CloudProvider, string[]> = {
-  openai:    ["gpt-4o", "gpt-4o-mini", "o1-mini"],
-  anthropic: ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5-20251001"],
-  google:    ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+  openai: PROVIDER_META.find((p) => p.id === "openai")?.defaultModels ?? [],
+  anthropic: PROVIDER_META.find((p) => p.id === "anthropic")?.defaultModels ?? [],
+  google: PROVIDER_META.find((p) => p.id === "google")?.defaultModels ?? [],
 };
 
 const CLOUD_API_LINKS: Record<CloudProvider, string> = {

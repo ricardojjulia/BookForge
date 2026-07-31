@@ -92,7 +92,9 @@ Important:
 - Flag concerns instead of silently making major changes.`;
 }
 
-export function buildBookBiblePrompt(text: string) {
+export function buildBookBiblePrompt(text: string, options?: { maxSampleChars?: number }) {
+  const maxSampleChars = Math.max(2000, Math.min(60000, Math.floor(options?.maxSampleChars || 24000)));
+  const manuscriptSample = text.slice(0, maxSampleChars);
   return `Generate a structured Manuscript Blueprint for this manuscript sample.
 
 Return only valid JSON. Do not use markdown fences. Do not include comments. Use double-quoted property names and string values.
@@ -118,7 +120,7 @@ Return JSON with:
 }
 
 MANUSCRIPT SAMPLE:
-${text.slice(0, 24000)}`;
+${manuscriptSample}`;
 }
 
 export function buildChapterSummaryPrompt(input: { title: string; text: string }) {

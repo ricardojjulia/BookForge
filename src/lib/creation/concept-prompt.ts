@@ -1,3 +1,5 @@
+import { describeDialogueDensity } from "@/lib/dialogue-density";
+
 export function buildCreationConceptPrompt(input: {
   workingTitle: string;
   idea: string;
@@ -8,6 +10,7 @@ export function buildCreationConceptPrompt(input: {
   tone: string;
   boundaries: string;
   creationMode: string;
+  dialogDensity: string;
   estimatedWords: number;
   expectedChapters: number;
 }) {
@@ -35,6 +38,9 @@ ${input.targetPages} pages, approximately ${input.estimatedWords} words, around 
 
 Tone:
 ${input.tone || "Author has not specified tone yet."}
+
+Dialogue density:
+${describeDialogueDensity(input.dialogDensity)}
 
 Contemporary View / forbidden boundaries:
 ${input.boundaries || "No special boundaries provided."}

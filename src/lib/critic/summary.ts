@@ -1,3 +1,6 @@
+export const CRITIC_SUMMARY_FALLBACK =
+  "Score was captured, but this report did not include readable findings. Recheck this lens to regenerate a fuller narrative.";
+
 export function summarizeCriticContent(content: Record<string, unknown>) {
   const explicit =
     stringValue(content.executiveSummary) ||
@@ -9,6 +12,11 @@ export function summarizeCriticContent(content: Record<string, unknown>) {
   const strongestRisk = firstReadableItem(content.risks);
   const strongestFix = firstReadableItem(content.highestLeverageFixes) || firstReadableItem(content.recommendedFixes);
   const strongestStrength = firstReadableItem(content.strengths);
+  const strongestFinding =
+    firstReadableItem(content.findings) ||
+    firstReadableItem(content.keyFindings) ||
+    firstReadableItem(content.observations) ||
+    firstReadableItem(content.issues);
   const chapterNote = firstReadableItem(content.chapterNotes);
   const voiceNote = firstReadableItem(content.voiceAndStyleNotes);
   const continuityFlag = firstReadableItem(content.continuityFlags);
@@ -16,6 +24,7 @@ export function summarizeCriticContent(content: Record<string, unknown>) {
 
   const sentences = [
     strongestStrength ? `Strength: ${strongestStrength}` : "",
+    strongestFinding ? `Key finding: ${strongestFinding}` : "",
     strongestRisk ? `Primary concern: ${strongestRisk}` : "",
     strongestFix ? `Best next fix: ${strongestFix}` : "",
     chapterNote ? `Chapter note: ${chapterNote}` : "",
@@ -29,7 +38,7 @@ export function summarizeCriticContent(content: Record<string, unknown>) {
   const raw = stringValue(content.rawModelResponse);
   if (raw) return raw.slice(0, 800);
 
-  return "The model returned a score but did not provide readable findings. Recheck this lens to generate a fuller report.";
+  return CRITIC_SUMMARY_FALLBACK;
 }
 
 function firstReadableItem(value: unknown) {
@@ -48,17 +57,25 @@ function readableItem(item: unknown): string {
   const title =
     stringValue(record.fix) ||
     stringValue(record.title) ||
+    stringValue(record.finding) ||
+    stringValue(record.message) ||
     stringValue(record.issueType) ||
     stringValue(record.area) ||
     stringValue(record.category) ||
     stringValue(record.focus);
   const detail =
+    stringValue(record.text) ||
+    stringValue(record.details) ||
     stringValue(record.recommendation) ||
     stringValue(record.suggestedFix) ||
     stringValue(record.description) ||
     stringValue(record.note) ||
     stringValue(record.reason) ||
     stringValue(record.observation);
+
+  if (!title && !detail) {
+    return firstReadableItem(record.items) || firstReadableItem(record.points) || "";
+  }
 
   if (title && detail) return `${title}: ${detail}`;
   return title || detail;

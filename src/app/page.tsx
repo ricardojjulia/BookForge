@@ -68,14 +68,16 @@ export default function Home() {
         <SimpleGrid cols={{ base: 1, md: 2 }} spacing={48} verticalSpacing={48}>
           <Stack gap="lg" justify="center">
             <Badge color="grape" variant="light" w="fit-content">
-              Local AI revision studio
+              Commercial-ready manuscript revision platform
             </Badge>
             <Title fz={{ base: 44, md: 68 }} lh={1.02} maw={760}>
-              Revise a full manuscript without losing the book.
+              Publish-ready revision power without losing your voice.
             </Title>
             <Text fz="xl" c="dimmed" maw={700}>
-              Your manuscript is stored securely in your Supabase project. AI
-              revision runs locally through LM Studio.
+              Build a stronger manuscript with structured AI workflows built for
+              serious authors and publishing teams. Your book stays secure in your
+              Supabase project, and AI can run locally through LM Studio or with
+              cloud providers when you need scale.
             </Text>
             <Group mt="md">
               <Button component="a" href="/books/new" size="lg" color="grape">
@@ -94,21 +96,25 @@ export default function Home() {
                   <IconServer size={24} />
                 </ThemeIcon>
                 <div>
-                  <Title order={3}>Built for structured, author-controlled revision</Title>
+                  <Title order={3}>Built for structured, author-controlled growth</Title>
                   <Text c="dimmed">
-                    Supabase stores the book structure and history. Run AI locally with
-                    LM Studio or connect a cloud provider — OpenAI, Anthropic, or Google
-                    — from Settings.
+                    Every chapter, scene, and revision is tracked with full history,
+                    so teams can collaborate confidently and scale quality across the
+                    entire manuscript lifecycle. Use LM Studio locally by default, or
+                    connect OpenAI, Anthropic, or Google from Settings.
                   </Text>
                 </div>
               </Group>
               <Paper p="md" radius="sm" bg="#f5f0f7">
                 <Group gap="sm" mb="xs">
                   <IconChecklist size={18} />
-                  <Text fw={700}>Guardrails</Text>
+                  <Text fw={700}>Brand-safe guardrails</Text>
                 </Group>
                 <Text c="dimmed">
-                  Your voice, your story, your call. Use as much or as little of the toolkit as your manuscript needs — every feature is there to serve the work, not replace the author.
+                  Your voice leads every decision. Original text stays protected,
+                  revision history stays auditable, and acceptance is always manual.
+                  Use as much automation as you want, with full author control at
+                  every step.
                 </Text>
               </Paper>
             </Stack>

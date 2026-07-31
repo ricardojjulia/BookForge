@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 
 const schema = z.object({
   jobId: z.string().uuid(),
@@ -35,6 +36,16 @@ const STRATEGY_BY_MODE: Record<"full_review" | "make_shorter" | "make_longer", {
 };
 
 const MAX_ITERATIONS = 3;
+const STAGE_MAX_ATTEMPTS = 3;
+
+function isTransientStageError(error: unknown) {
+  const message = getError(error);
+  return /(fetch failed|Failed to fetch|ECONNRESET|ECONNREFUSED|ETIMEDOUT|HeadersTimeout|UND_ERR_|socket hang up|network error|timeout)/i.test(message);
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 type AutoReviewJobRow = {
   id: string;
@@ -221,8 +232,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         if (!queueRes.ok || queueData.error) {
           throw new Error(String(queueData.error || `Stage queue failed: ${path}`));
         }
-        const queuedContent = queueData.content as { jobId?: string } | undefined;
-        const stageJobId = queuedContent?.jobId;
+        const queuedContent = queueData.content as { jobId?: string; revisionJobId?: string } | undefined;
+        const stageJobId = queuedContent?.jobId || queuedContent?.revisionJobId || (queueData.jobId as string | undefined);
         if (!stageJobId) {
           throw new Error(`Stage queue handoff missing job id: ${path}`);
         }
@@ -291,6 +302,30 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     const mode = body.mode;
     const strategy = STRATEGY_BY_MODE[mode];
 
+    const runStageWithRetry = async <T>(stage: string, execute: () => Promise<T>): Promise<T> => {
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= STAGE_MAX_ATTEMPTS; attempt++) {
+        try {
+          return await execute();
+        } catch (error) {
+          lastError = error;
+          const canRetry = isTransientStageError(error) && attempt < STAGE_MAX_ATTEMPTS;
+          if (!canRetry) throw error;
+
+          const delayMs = attempt * 2000;
+          await updateJob({
+            logEntry: {
+              type: "info",
+              iteration: currentIteration,
+              message: `${stage} transient failure (${getError(error)}). Retrying ${attempt + 1}/${STAGE_MAX_ATTEMPTS} in ${Math.round(delayMs / 1000)}s.`,
+            },
+          });
+          await wait(delayMs);
+        }
+      }
+      throw lastError;
+    };
+
     const stageOrder: string[] = [
       "analyze",
       "summarize",
@@ -319,42 +354,42 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       currentStage = stage;
 
       if (stage === "analyze") {
-        await callStage(`/api/books/${bookId}/analyze`, {});
+        await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/analyze`, {}));
         await addStage(stage, "Manuscript analysis completed.");
       } else if (stage === "summarize") {
-        await callStage(`/api/books/${bookId}/chapters/summarize`, {});
+        await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/chapters/summarize`, {}));
         await addStage(stage, "Chapter summaries completed.");
       } else if (stage.startsWith("critic_baseline:")) {
         const lens = stage.split(":")[1];
-        await callStage(`/api/books/${bookId}/critic`, { lens, stage: "baseline" });
+        await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/critic`, { lens, stage: "baseline" }));
         await addStage(stage, `Baseline critic ${lens} completed.`);
       } else if (stage === "rewrite_plan") {
-        await callStage(`/api/books/${bookId}/rewrite-plan`, {});
+        await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/rewrite-plan`, {}));
         await addStage(stage, "Rewrite plan generated.");
       } else if (stage === "rewrite_execute") {
-        await callStage(`/api/books/${bookId}/rewrite-execute`, {
+        await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/rewrite-execute`, {
           maxUnits: 5000,
           strategyId: strategy.strategyId,
           strategySettings: strategy.strategySettings,
           distributeAcrossChapters: true,
-        });
+        }));
         await addStage(stage, "Rewrite execution completed.");
       } else if (stage === "auto_accept") {
-        await callStage(`/api/books/${bookId}/auto-revision`, {
+        await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/auto-revision`, {
           action: "run",
           trustProfile: "full_trust",
           maxDecisions: 5000,
-        });
+        }));
         await addStage(stage, "Auto-accept completed.");
       } else if (stage === "drift_check") {
-        await callStage(`/api/books/${bookId}/drift-check`, {});
+        await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/drift-check`, {}));
         await addStage(stage, "Drift check completed.");
       } else if (stage.startsWith("critic_post:")) {
         const lens = stage.split(":")[1];
-        await callStage(`/api/books/${bookId}/critic`, { lens, stage: "post_rewrite" });
+        await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/critic`, { lens, stage: "post_rewrite" }));
         await addStage(stage, `Post-rewrite critic ${lens} completed.`);
       } else if (stage === "critics_check") {
-        const result = await callStage(`/api/books/${bookId}/auto-review/critics-check`);
+        const result = await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/auto-review/critics-check`));
         const allGreen = Boolean(result.allGreen);
         const greenCount = Number(result.greenCount || 0);
         const total = Number(result.total || 0);
@@ -385,16 +420,16 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           continue;
         }
       } else if (stage === "export") {
-        const result = await callStage(`/api/books/${bookId}/export`, {
+        const result = await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/export`, {
           format: "docx",
           sourceMode: "accepted",
           includeFrontMatter: true,
           includeBackMatter: true,
-        });
+        }));
         exportId = (result.exportId as string | undefined) || (result.export as { id?: string } | undefined)?.id || exportId;
         await addStage(stage, "Export completed.", { exportId });
       } else if (stage === "mark_finished") {
-        await callStage(`/api/books/${bookId}/mark-finished`, { exportId });
+        await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/mark-finished`, { exportId }));
         await addStage(stage, "Book marked finished.");
       }
     }
@@ -412,19 +447,21 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     return NextResponse.json({ ok: true, jobId: body.jobId, exportId });
   } catch (error) {
     console.error("Auto-review worker failed", error);
+    const normalizedError = getLmStudioErrorMessage(error, getError(error), { task: currentStage });
+    const resumableError = `${normalizedError} Resume from Auto-Review Wizard and completed stages will be skipped.`;
     try {
       const { bookId } = await context.params;
       if (parsedBody?.jobId) {
         const supabase = await createClient();
         await supabase
           .from("auto_review_jobs")
-          .update({ status: "failed", current_stage: currentStage, error: getError(error), completed_at: new Date().toISOString() })
+          .update({ status: "failed", current_stage: currentStage, error: resumableError, completed_at: new Date().toISOString() })
           .eq("id", parsedBody.jobId)
           .eq("book_id", bookId);
       }
     } catch {
       // best effort
     }
-    return NextResponse.json({ error: getError(error) }, { status: 500 });
+    return NextResponse.json({ error: resumableError }, { status: 500 });
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge, Group, Loader, Paper, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
+import { Alert, Badge, Group, Loader, Paper, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
 
 type ChapterStat = {
   chapterId: string;
@@ -13,6 +13,9 @@ type ChapterStat = {
   originalWords: number;
   acceptedWords: number;
   wordDelta: number;
+  pendingParagraphs: number;
+  pendingVersions: number;
+  uncoveredParagraphs: number;
 };
 
 type Stats = {
@@ -62,6 +65,11 @@ export function RevisionStatsPanel({ bookId }: Props) {
         <StatCard label="Pending" value={stats.pendingVersions.toLocaleString()} color="yellow" />
       </SimpleGrid>
 
+      <Alert color="blue" variant="light" mb="xl">
+        Accepted % is coverage (paragraphs with accepted text), not pending queue workload. A chapter can be below
+        100% and still have no pending review decisions.
+      </Alert>
+
       {Object.keys(stats.modeBreakdown).length > 0 && (
         <Stack gap="xs" mb="xl">
           <Text size="sm" fw={500}>Revisions by mode</Text>
@@ -86,6 +94,7 @@ export function RevisionStatsPanel({ bookId }: Props) {
                 <th>Orig. words</th>
                 <th>Current words</th>
                 <th>Delta</th>
+                <th>Action needed</th>
               </tr>
             </thead>
             <tbody>
@@ -103,6 +112,21 @@ export function RevisionStatsPanel({ bookId }: Props) {
                     <Text size="sm" c={c.wordDelta > 0 ? "teal" : c.wordDelta < 0 ? "red" : "dimmed"}>
                       {c.wordDelta >= 0 ? "+" : ""}{c.wordDelta}
                     </Text>
+                  </td>
+                  <td>
+                    {c.pendingParagraphs > 0 ? (
+                      <Badge color="yellow" variant="light" size="sm">
+                        {c.pendingParagraphs} paragraph(s) need review ({c.pendingVersions} draft version(s))
+                      </Badge>
+                    ) : c.uncoveredParagraphs > 0 ? (
+                      <Badge color="blue" variant="light" size="sm">
+                        No pending decisions. {c.uncoveredParagraphs} paragraph(s) still on original text.
+                      </Badge>
+                    ) : (
+                      <Badge color="green" variant="light" size="sm">
+                        Fully accepted
+                      </Badge>
+                    )}
                   </td>
                 </tr>
               ))}

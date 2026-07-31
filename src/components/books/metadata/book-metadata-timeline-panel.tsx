@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Badge, Button, Group, Paper, Select, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
 import { useRouter } from "next/navigation";
 import { fetchJson } from "@/lib/http/fetch-json";
@@ -54,6 +54,7 @@ export function BookMetadataTimelinePanel({ bookId }: { bookId: string }) {
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [compareSnapshotId, setCompareSnapshotId] = useState<string | null>(null);
+  const selectedSnapshotIdRef = useRef<string | null>(null);
 
   const selectedSnapshot = useMemo(
     () => snapshots.find((snapshot) => snapshot.id === selectedSnapshotId) || snapshots.find((snapshot) => snapshot.status === "active") || snapshots[0] || null,
@@ -68,21 +69,40 @@ export function BookMetadataTimelinePanel({ bookId }: { bookId: string }) {
     return buildSnapshotComparison(selectedSnapshot, compareSnapshot);
   }, [compareSnapshot, selectedSnapshot]);
 
-  useEffect(() => {
-    void loadSnapshots();
-  }, [bookId]);
+  const selectInitialSnapshot = useCallback((nextSnapshots: Snapshot[]) => {
+    if (!nextSnapshots.length) {
+      setSelectedSnapshotId(null);
+      return;
+    }
 
-  useEffect(() => {
-    if (!snapshots.length) return;
     const stored = readSelectedMetadataSnapshot();
-    const storedSelection = stored && snapshots.some((snapshot) => snapshot.id === stored.snapshotId) ? stored : null;
-    const nextSelection = storedSelection || selectedSnapshot || snapshots.find((snapshot) => snapshot.status === "active") || snapshots[0] || null;
+    const storedSelection =
+      stored && nextSnapshots.some((snapshot) => snapshot.id === stored.snapshotId)
+        ? nextSnapshots.find((snapshot) => snapshot.id === stored.snapshotId) || null
+        : null;
+
+    const currentSelection =
+      selectedSnapshotIdRef.current && nextSnapshots.some((snapshot) => snapshot.id === selectedSnapshotIdRef.current)
+        ? nextSnapshots.find((snapshot) => snapshot.id === selectedSnapshotIdRef.current) || null
+        : null;
+
+    const nextSelection =
+      storedSelection ||
+      currentSelection ||
+      nextSnapshots.find((snapshot) => snapshot.status === "active") ||
+      nextSnapshots[0] ||
+      null;
+
     if (!nextSelection) return;
     setSelectedSnapshotId(nextSelection.id);
     writeSelectedMetadataSnapshot({ snapshotId: nextSelection.id, branchName: nextSelection.branchName });
-  }, [selectedSnapshot, snapshots]);
+  }, []);
 
-  async function loadSnapshots() {
+  useEffect(() => {
+    selectedSnapshotIdRef.current = selectedSnapshotId;
+  }, [selectedSnapshotId]);
+
+  const loadSnapshots = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -90,17 +110,30 @@ export function BookMetadataTimelinePanel({ bookId }: { bookId: string }) {
       if (result.unavailable) {
         setSnapshots([]);
         setBranches([]);
+        setSelectedSnapshotId(null);
         setNote(result.reason || "Metadata timeline tables are not installed.");
         return;
       }
-      setSnapshots(result.snapshots || []);
+      const nextSnapshots = result.snapshots || [];
+      setSnapshots(nextSnapshots);
       setBranches(result.branches || []);
+      selectInitialSnapshot(nextSnapshots);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load metadata timeline.");
     } finally {
       setLoading(false);
     }
-  }
+  }, [bookId, selectInitialSnapshot]);
+
+  useEffect(() => {
+    const timerId = window.setTimeout(() => {
+      void loadSnapshots();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [loadSnapshots]);
 
   async function createBaselineSnapshot() {
     setBusyAction("create");

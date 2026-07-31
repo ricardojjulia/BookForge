@@ -22,6 +22,7 @@ const schema = z.object({
       "market_fit",
       "contemporary_view",
       "revision_priorities",
+      "dialogue_density",
     ])
     .default("revision_priorities"),
   stage: z.enum(["baseline", "post_rewrite"]).default("baseline"),

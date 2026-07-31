@@ -85,8 +85,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       expectedCalls: chapterRows.length,
       latencyPreference: settings.qualityProfile === "premium" ? "quality" : "balanced",
       allowUnload: chapterRows.length >= 3,
+      telemetry: { supabase, userId: user.id },
     });
-    const { client, model, preparedModel, modelSelection } = modelPlan;
+    const { client, model, preparedModel, modelSelection, telemetryContext } = modelPlan;
     const plan = estimateAiCallPlan({
       task: "book-bible",
       selectedModel: model,
@@ -212,13 +213,18 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       try {
         const prompt = buildChapterSummaryPrompt({ title, text: chapter.original_text || "" });
 
-        const completion = await createManagedChatCompletion(client, preparedModel, {
-          temperature: Math.min(settings.temperature, 0.45),
-          top_p: settings.topP,
-          max_tokens: 1800,
-          messages: [{ role: "user", content: prompt }],
-          
-        });
+        const completion = await createManagedChatCompletion(
+          client,
+          preparedModel,
+          {
+            temperature: Math.min(settings.temperature, 0.45),
+            top_p: settings.topP,
+            max_tokens: 1800,
+            messages: [{ role: "user", content: prompt }],
+          },
+          undefined,
+          telemetryContext,
+        );
 
         const raw = completion.choices[0]?.message.content || "{}";
         const parsed = parseChapterSummaryModelResponse(raw);

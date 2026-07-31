@@ -6,11 +6,19 @@ import {
   testLmStudioConnection,
   unloadNativeLmStudioModel,
   type LmStudioTaskKind,
+  type ModelCallTelemetryContext,
   type NativeLmStudioModel,
   type PreparedLmStudioModel,
 } from "@/lib/lmstudio/client";
 import type { LmStudioModelSelection } from "@/lib/lmstudio/model-selection";
 import { createProviderClient, PROVIDER_META } from "@/lib/ai/providers";
+import {
+  getHealthFor,
+  getModelsTaskHealth,
+  scoreHealthAdjustment,
+  type ModelCallTelemetry,
+  type ModelTaskHealth,
+} from "@/lib/ai/model-performance";
 import type { LmStudioSettings } from "@/lib/types";
 
 type ModelCandidate = {
@@ -25,6 +33,8 @@ export type LmStudioTaskProfile = {
   latencyPreference?: "fast" | "balanced" | "quality";
   allowModelLoad?: boolean;
   allowUnload?: boolean;
+  /** When present, scoring is adjusted by empirical per-model history and the call is recorded to model_call_events. */
+  telemetry?: ModelCallTelemetry;
 };
 
 export type PreparedLmStudioTaskModel = {
@@ -37,6 +47,13 @@ export type PreparedLmStudioTaskModel = {
   };
   availableModels: string[];
   nativeModelsAvailable: boolean;
+  /**
+   * Deliberately NOT part of `preparedModel` — several routes persist that object
+   * wholesale into a jsonb column, and this carries a live Supabase client that
+   * would break JSON serialization there. Pass this separately into
+   * createManagedChatCompletion's telemetryContext argument instead.
+   */
+  telemetryContext?: ModelCallTelemetryContext;
 };
 
 type ScoredModel = {
@@ -46,6 +63,8 @@ type ScoredModel = {
   loaded: boolean;
   loadedContextTokens: number | null;
   configuredLabel: string | null;
+  /** Canonical loaded-instance/native-key identity, used for empirical health lookups so aliases (e.g. "model@6bit" vs "model") of the same loaded model share history. */
+  healthKey: string;
 };
 
 export async function selectAndPrepareLmStudioModel(
@@ -60,27 +79,41 @@ export async function selectAndPrepareLmStudioModel(
   const configuredModels = profile.candidates.map((candidate) =>
     candidate.model ? `${candidate.label}: ${candidate.model}` : `${candidate.label}: not configured`,
   );
+  const health = profile.telemetry
+    ? await getModelsTaskHealth(profile.telemetry.supabase, {
+        userId: profile.telemetry.userId,
+        models: availableModels,
+        task: profile.task,
+      })
+    : new Map<string, ModelTaskHealth>();
   const candidates = scoreCandidates({
     nativeModels: nativeResult.models,
     availableModels,
     configuredCandidates: profile.candidates,
     settings,
     profile,
+    health,
   });
+  const fallbackModel = profile.candidates.find((candidate) => candidate.model)?.model || availableModels[0] || "local-model";
   const selected = candidates[0] || {
-    model: profile.candidates.find((candidate) => candidate.model)?.model || availableModels[0] || "local-model",
+    model: fallbackModel,
     score: 0,
     reason: "Default fallback because no suitable LM Studio model was detected.",
     loaded: false,
     loadedContextTokens: null,
     configuredLabel: null,
+    healthKey: fallbackModel,
   };
   const preparedModel = await prepareLmStudioModelForTask({
     settings,
     model: selected.model,
     task: profile.task,
     allowModelLoad: profile.allowModelLoad ?? true,
+    modelHealth: getHealthFor(health, selected.healthKey),
   });
+  const telemetryContext: ModelCallTelemetryContext | undefined = profile.telemetry
+    ? { ...profile.telemetry, task: profile.task, model: preparedModel.model || selected.model }
+    : undefined;
   const unloadedInstances =
     profile.allowUnload && (profile.expectedCalls || 0) >= 3
       ? await unloadUnusedLoadedModels(settings, nativeResult.models, preparedModel.model)
@@ -91,6 +124,7 @@ export async function selectAndPrepareLmStudioModel(
     preparedModel,
     availableModels,
     nativeModelsAvailable: nativeResult.available,
+    telemetryContext,
     modelSelection: {
       model: preparedModel.model || selected.model,
       source: selected.configuredLabel || selected.reason,
@@ -120,14 +154,36 @@ async function getOpenAiModels(settings: LmStudioSettings) {
   }
 }
 
+/**
+ * The canonical identity for a native model entry: prefer the actual loaded
+ * instance id (what LM Studio is really running), falling back to its catalog
+ * key. This is the one string used for scoring, health tracking, and display —
+ * `display_name`/`selected_variant`/OpenAI-compat quant-suffixed aliases (e.g.
+ * "qwen/qwen3.6-35b-a3b@6bit") are all names for the same physical model and
+ * must not appear as separate entries.
+ */
+function canonicalModelId(model: NativeLmStudioModel): string {
+  return model.loaded_instances?.[0]?.id || model.key;
+}
+
+/**
+ * Builds the deduplicated list of model identities to score/display: one
+ * canonical entry per native model, plus any OpenAI-compat-listed name that
+ * doesn't already alias a known native model (e.g. a model LM Studio's native
+ * API doesn't report, only its OpenAI-compatible endpoint does).
+ */
 function mergeAvailableModels(nativeModels: NativeLmStudioModel[], openAiModels: string[]) {
-  return Array.from(
-    new Set([
-      ...openAiModels,
-      ...nativeModels.flatMap((model) => [model.key, model.display_name, model.selected_variant].filter(isString)),
-      ...nativeModels.flatMap((model) => (model.loaded_instances || []).map((instance) => instance.id)),
-    ]),
-  ).filter(Boolean);
+  const knownAliases = new Set(
+    nativeModels.flatMap((model) =>
+      [model.key, model.display_name, model.selected_variant, ...(model.loaded_instances || []).map((instance) => instance.id)].filter(
+        isString,
+      ),
+    ),
+  );
+  const canonicalNativeIds = nativeModels.map(canonicalModelId).filter(isString);
+  const unaliasedOpenAiModels = openAiModels.filter((name) => !knownAliases.has(name));
+
+  return Array.from(new Set([...canonicalNativeIds, ...unaliasedOpenAiModels])).filter(Boolean);
 }
 
 function scoreCandidates(input: {
@@ -136,6 +192,7 @@ function scoreCandidates(input: {
   configuredCandidates: ModelCandidate[];
   settings: LmStudioSettings;
   profile: LmStudioTaskProfile;
+  health: Map<string, ModelTaskHealth>;
 }) {
   const configuredByModel = new Map(
     input.configuredCandidates.filter((candidate) => candidate.model).map((candidate) => [candidate.model as string, candidate.label]),
@@ -153,11 +210,13 @@ function scoreModel(
     nativeModels: NativeLmStudioModel[];
     settings: LmStudioSettings;
     profile: LmStudioTaskProfile;
+    health: Map<string, ModelTaskHealth>;
   },
 ): ScoredModel {
   const name = model.toLowerCase();
   const native = findNativeModel(input.nativeModels, model);
   const loadedInstance = native?.loaded_instances?.find((instance) => instance.id === model) || native?.loaded_instances?.[0] || null;
+  const healthKey = native ? canonicalModelId(native) : model;
   const loadedContextTokens = loadedInstance?.config?.context_length || null;
   const maxContextTokens = native?.max_context_length || loadedContextTokens || input.settings.contextWindowTokens;
   const requiredContextTokens = Math.min(input.settings.contextWindowTokens, maxContextTokens);
@@ -165,7 +224,7 @@ function scoreModel(
   const reasons: string[] = [];
   let score = 0;
 
-  if (isEmbeddingOrReranker(name)) return { model, score: 0, reason: "Embedding/reranker model is not valid for chat tasks.", loaded: false, loadedContextTokens: null, configuredLabel };
+  if (isEmbeddingOrReranker(name)) return { model, score: 0, reason: "Embedding/reranker model is not valid for chat tasks.", loaded: false, loadedContextTokens: null, configuredLabel, healthKey };
   add(20, "generation model");
   if (configuredLabel) add(12, `${configuredLabel} setting`);
   if (loadedContextTokens && loadedContextTokens >= requiredContextTokens) add(expectedCalls <= 2 ? 34 : 24, "already loaded with enough context");
@@ -193,6 +252,9 @@ function scoreModel(
   if (input.profile.latencyPreference === "fast" && getModelSizeB(name) >= 30) add(-10, "slower than fast preference");
   if (input.profile.latencyPreference === "quality" && getModelSizeB(name) >= 30) add(8, "quality preference");
 
+  const healthAdjustment = scoreHealthAdjustment(getHealthFor(input.health, healthKey));
+  if (healthAdjustment.reason) add(healthAdjustment.points, healthAdjustment.reason);
+
   return {
     model,
     score: Math.max(0, score),
@@ -200,6 +262,7 @@ function scoreModel(
     loaded: Boolean(loadedContextTokens),
     loadedContextTokens,
     configuredLabel,
+    healthKey,
   };
 
   function add(points: number, reason: string) {

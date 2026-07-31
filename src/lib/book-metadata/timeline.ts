@@ -99,10 +99,12 @@ export async function resolveMetadataSnapshotContext(
       .select(snapshotSelectColumns())
       .eq("book_id", bookId)
       .eq("id", explicitSnapshotId)
-      .single();
+      .maybeSingle();
     if (error) throw error;
-    if (!snapshot) throw new Error("Metadata snapshot not found for this book.");
-    return { snapshot: snapshot as MetadataSnapshotRecord, branchName: snapshot.branch_name, sourceType: "explicit_snapshot" };
+    if (snapshot) {
+      const snapshotRecord = snapshot as unknown as MetadataSnapshotRecord;
+      return { snapshot: snapshotRecord, branchName: snapshotRecord.branch_name, sourceType: "explicit_snapshot" };
+    }
   }
 
   const explicitBranchName = stringOrNull(options?.metadataBranchName);
@@ -114,7 +116,9 @@ export async function resolveMetadataSnapshotContext(
     .maybeSingle();
   if (defaultBranchError) throw defaultBranchError;
 
-  const branchName = explicitBranchName || defaultBranch?.name || "main";
+  const defaultBranchRecord = defaultBranch as unknown as MetadataBranchRecord | null;
+
+  const branchName = explicitBranchName || defaultBranchRecord?.name || "main";
 
   const { data: activeByBranch, error: activeByBranchError } = await supabase
     .from("book_metadata_snapshots")
@@ -126,7 +130,7 @@ export async function resolveMetadataSnapshotContext(
     .limit(1);
   if (activeByBranchError) throw activeByBranchError;
 
-  const branchSnapshot = (activeByBranch || [])[0] as MetadataSnapshotRecord | undefined;
+  const branchSnapshot = (activeByBranch || [])[0] as unknown as MetadataSnapshotRecord | undefined;
   if (branchSnapshot) return { snapshot: branchSnapshot, branchName, sourceType: "branch_active" };
 
   const { data: activeAny, error: activeAnyError } = await supabase
@@ -138,10 +142,84 @@ export async function resolveMetadataSnapshotContext(
     .limit(1);
   if (activeAnyError) throw activeAnyError;
 
-  const fallbackSnapshot = (activeAny || [])[0] as MetadataSnapshotRecord | undefined;
+  const fallbackSnapshot = (activeAny || [])[0] as unknown as MetadataSnapshotRecord | undefined;
   if (fallbackSnapshot) return { snapshot: fallbackSnapshot, branchName: fallbackSnapshot.branch_name, sourceType: "active_snapshot" };
 
-  throw new Error("No active metadata snapshot exists yet. Create or activate one before running critic or rewrite workflows.");
+  // Self-heal empty metadata timelines by seeding a default active snapshot from current book state.
+  const book = await loadAccessibleBook(supabase, bookId);
+  if (!book) throw new Error("Book not found.");
+
+  const {
+    data: {
+      user,
+    },
+  } = await supabase.auth.getUser();
+
+  const now = new Date().toISOString();
+  const seedBranchName = branchName || "main";
+
+  const { error: deactivateError } = await supabase
+    .from("book_metadata_snapshots")
+    .update({ status: "draft", updated_at: now })
+    .eq("book_id", bookId)
+    .eq("branch_name", seedBranchName)
+    .eq("status", "active");
+  if (deactivateError) throw deactivateError;
+
+  const { data: seededSnapshot, error: seedSnapshotError } = await supabase
+    .from("book_metadata_snapshots")
+    .insert({
+      book_id: bookId,
+      branch_name: seedBranchName,
+      parent_snapshot_id: null,
+      status: "active",
+      title: `${book.title || "Untitled book"} baseline`,
+      summary: "Initial metadata baseline seeded from current book state.",
+      metadata_json: buildMetadataJson(book, { branchName: seedBranchName, sourceType: "initial_plan" }),
+      source_type: "initial_plan",
+      source_ref_id: null,
+      created_by: user?.id || null,
+      created_at: now,
+      updated_at: now,
+    })
+    .select(snapshotSelectColumns())
+    .maybeSingle();
+  if (seedSnapshotError) throw seedSnapshotError;
+
+  const seededSnapshotRecord = seededSnapshot as unknown as MetadataSnapshotRecord | null;
+  let activeSeedRecord = seededSnapshotRecord;
+
+  if (!activeSeedRecord) {
+    const { data: refreshedActiveRows, error: refreshedActiveError } = await supabase
+      .from("book_metadata_snapshots")
+      .select(snapshotSelectColumns())
+      .eq("book_id", bookId)
+      .eq("branch_name", seedBranchName)
+      .eq("status", "active")
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    if (refreshedActiveError) throw refreshedActiveError;
+    activeSeedRecord = ((refreshedActiveRows || [])[0] as unknown as MetadataSnapshotRecord | undefined) || null;
+  }
+
+  if (!activeSeedRecord) {
+    throw new Error("Unable to create or resolve an active metadata snapshot.");
+  }
+
+  const { error: branchUpsertError } = await supabase.from("book_metadata_branches").upsert(
+    {
+      book_id: bookId,
+      name: seedBranchName,
+      head_snapshot_id: activeSeedRecord.id,
+      is_default: seedBranchName === "main",
+      created_by: user?.id || null,
+      updated_at: now,
+    },
+    { onConflict: "book_id,name" },
+  );
+  if (branchUpsertError) throw branchUpsertError;
+
+  return { snapshot: activeSeedRecord, branchName: seedBranchName, sourceType: "active_snapshot" };
 }
 
 export function buildMetadataJson(

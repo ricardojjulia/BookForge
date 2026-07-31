@@ -18,6 +18,7 @@ const lensDescriptions: Record<CriticLens, string> = {
   market_fit: "Market fit and reader promise",
   contemporary_view: "Contemporary View alignment",
   revision_priorities: "Highest-leverage revision priorities",
+  dialogue_density: "Dialogue density vs. author's setting",
 };
 
 export function CriticScoreboard({ reports }: { reports: CriticReport[] }) {

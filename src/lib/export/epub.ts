@@ -7,6 +7,7 @@ import {
   type MatterSectionForExport,
   type ParagraphForExport,
 } from "@/lib/export/markdown";
+import { repairCommonMojibake } from "@/lib/text/repair-mojibake";
 
 type EpubSection = {
   id: string;
@@ -85,7 +86,7 @@ function buildEpubSections(input: BuildMarkdownInput) {
       .sort((a, b) => a.paragraph_number - b.paragraph_number);
     if (!chapterParagraphs.length) return;
 
-    const title = chapter.title?.trim() || `Chapter ${chapter.chapter_number}`;
+    const title = repairCommonMojibake(chapter.title?.trim() || `Chapter ${chapter.chapter_number}`);
     const body: string[] = [`<h1>${escapeXml(title)}</h1>`];
     let previousSceneId: string | null = null;
 
@@ -114,12 +115,12 @@ function buildEpubSections(input: BuildMarkdownInput) {
 
 function appendMatterSections(sections: EpubSection[], matterSections: MatterSectionForExport[], prefix: string) {
   matterSections.forEach((section, index) => {
-    const title = section.title?.trim() || humanizeSectionType(section.section_type);
+    const title = repairCommonMojibake(section.title?.trim() || humanizeSectionType(section.section_type));
     sections.push({
       id: `${prefix}-${index + 1}`,
       href: `${prefix}-${index + 1}.xhtml`,
       title,
-      body: [`<h1>${escapeXml(title)}</h1>`, ...textToParagraphs(section.content)].join("\n"),
+      body: [`<h1>${escapeXml(title)}</h1>`, ...textToParagraphs(repairCommonMojibake(section.content))].join("\n"),
     });
   });
 }
@@ -129,7 +130,7 @@ function buildPackage(input: BuildMarkdownInput, sections: EpubSection[], bookId
     .map((section) => `<item id="${section.id}" href="${section.href}" media-type="application/xhtml+xml"/>`)
     .join("\n    ");
   const spineItems = sections.map((section) => `<itemref idref="${section.id}"/>`).join("\n    ");
-  const author = input.book.author_name ? `<dc:creator>${escapeXml(input.book.author_name)}</dc:creator>` : "";
+  const author = input.book.author_name ? `<dc:creator>${escapeXml(repairCommonMojibake(input.book.author_name))}</dc:creator>` : "";
   const publisher = metadata.publisher ? `<dc:publisher>${escapeXml(metadata.publisher)}</dc:publisher>` : "";
   const rights = metadata.copyright ? `<dc:rights>${escapeXml(metadata.copyright)}</dc:rights>` : "";
   const description = metadata.description ? `<dc:description>${escapeXml(metadata.description)}</dc:description>` : "";
@@ -139,7 +140,7 @@ function buildPackage(input: BuildMarkdownInput, sections: EpubSection[], bookId
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookforge-id">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="bookforge-id">${bookId}</dc:identifier>
-    <dc:title>${escapeXml(input.book.title || "Untitled Book")}</dc:title>
+    <dc:title>${escapeXml(repairCommonMojibake(input.book.title || "Untitled Book"))}</dc:title>
     ${author}
     ${publisher}
     ${rights}
@@ -165,7 +166,7 @@ function buildNav(input: BuildMarkdownInput, sections: EpubSection[]) {
 
   return buildXhtmlDocument(
     "Table of Contents",
-    `<h1>${escapeXml(input.book.title || "Table of Contents")}</h1>
+    `<h1>${escapeXml(repairCommonMojibake(input.book.title || "Table of Contents"))}</h1>
     <nav epub:type="toc" id="toc">
       <h2>Contents</h2>
       <ol>

@@ -52,6 +52,7 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
       candidates: getReasoningModelCandidates(settings),
       expectedCalls: 1,
       latencyPreference: "quality",
+      telemetry: { supabase, userId: user.id },
     });
     const fit = selectBestRewriteModel(modelPlan.availableModels, {
       qualityProfile: settings.qualityProfile,
@@ -59,7 +60,7 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
     });
     const selectedModel = modelPlan.model;
     const selectedFit = fit.candidates.find((candidate) => candidate.model === selectedModel) || fit.best;
-    const { client, preparedModel, modelSelection } = modelPlan;
+    const { client, preparedModel, modelSelection, telemetryContext } = modelPlan;
 
     const criticReports = (reports || [])
       .filter((report) => String(report.report_type).startsWith("critic:"))
@@ -70,13 +71,18 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
       .map((report) => ({ content: report.content as Record<string, unknown> | null }))
       .slice(0, 3);
 
-    const completion = await createManagedChatCompletion(client, preparedModel, {
-      temperature: Math.min(settings.temperature, 0.45),
-      top_p: settings.topP,
-      max_tokens: 3000,
-      messages: [{ role: "user", content: buildHumanizeGuidancePrompt({ criticReports, driftReports }) }],
-      
-    });
+    const completion = await createManagedChatCompletion(
+      client,
+      preparedModel,
+      {
+        temperature: Math.min(settings.temperature, 0.45),
+        top_p: settings.topP,
+        max_tokens: 3000,
+        messages: [{ role: "user", content: buildHumanizeGuidancePrompt({ criticReports, driftReports }) }],
+      },
+      undefined,
+      telemetryContext,
+    );
 
     const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({
       headline: "Humanized guidance",

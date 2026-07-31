@@ -81,7 +81,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         .eq("id", jobId)
         .eq("book_id", bookId)
         .eq("created_by", user.id)
-        .single();
+        .maybeSingle();
       if (existingJobError) throw existingJobError;
       if (!existingJob) return NextResponse.json({ error: "Rewrite plan job not found." }, { status: 404 });
       if (existingJob.status === "completed") return NextResponse.json({ ok: true, message: "Rewrite plan job already completed." });
@@ -192,7 +192,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         { count: scenes },
         { count: paragraphs },
       ] = await Promise.all([
-        supabase.from("books").select("title,genre,target_audience").eq("id", bookId).single(),
+        supabase.from("books").select("title,genre,target_audience,dialog_density").eq("id", bookId).single(),
         supabase.from("book_bibles").select("content").eq("book_id", bookId).maybeSingle(),
         supabase
           .from("chapters")
@@ -220,8 +220,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         candidates: getReasoningModelCandidates(settings),
         expectedCalls: 1,
         latencyPreference: "quality",
+        telemetry: { supabase, userId: user.id },
       });
-      const { client, model, preparedModel, modelSelection, availableModels } = modelPlan;
+      const { client, model, preparedModel, modelSelection, availableModels, telemetryContext } = modelPlan;
       const rewriteModelSelection = selectBestRewriteModel(availableModels, {
         qualityProfile: settings.qualityProfile,
         contextWindowTokens: settings.contextWindowTokens,
@@ -241,6 +242,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         title: book.title,
         genre: book.genre,
         targetAudience: book.target_audience,
+        dialogDensity: book.dialog_density,
         manuscriptBlueprint: bible?.content,
         rewriteModelSelection,
         chapters: chapters || [],
@@ -248,11 +250,17 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         promptCharBudget: preparedModel.runtimeLimits.promptCharBudget,
       });
 
-      const completion = await createManagedChatCompletion(client, preparedModel, {
-        temperature: Math.min(settings.temperature, 0.35),
-        top_p: settings.topP,
-        messages: [{ role: "user", content: prompt }],
-      });
+      const completion = await createManagedChatCompletion(
+        client,
+        preparedModel,
+        {
+          temperature: Math.min(settings.temperature, 0.35),
+          top_p: settings.topP,
+          messages: [{ role: "user", content: prompt }],
+        },
+        undefined,
+        telemetryContext,
+      );
 
       const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({
         rewriteObjective: raw,

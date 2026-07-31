@@ -212,6 +212,7 @@ export async function POST(
       candidates: getReasoningModelCandidates(settings),
       expectedCalls: 1,
       latencyPreference: "balanced",
+      telemetry: { supabase, userId: user.id },
     });
 
     const conversationMessages: ChatMessageRow[] = (recentMessages || [])
@@ -255,16 +256,16 @@ export async function POST(
           content: body.userMessage,
         },
       ],
-    });
+    }, undefined, modelPlan.telemetryContext);
 
     const rawAssistantText = completion.choices[0]?.message?.content?.trim() || "I could not produce a response.";
     const editProposal =
       selectedMode === "edit"
         ? extractEditProposal(rawAssistantText)
-        : null;
+        : undefined;
     const assistantText =
       selectedMode === "edit"
-        ? editProposal.summary
+        ? (editProposal?.summary || rawAssistantText)
         : rawAssistantText;
 
     const toolSuggestions =
@@ -278,7 +279,7 @@ export async function POST(
       scopeIds: body.scopeIds || [],
     };
 
-    if (selectedMode === "edit") {
+    if (selectedMode === "edit" && editProposal) {
       contentJson.proposals = editProposal.proposals;
       contentJson.safetyNotes = editProposal.safetyNotes;
     }
@@ -455,27 +456,29 @@ function extractEditProposal(raw: string) {
 function normalizeRevisionDrafts(input: unknown): RevisionDraftProposalItem[] {
   if (!Array.isArray(input)) return [];
 
-  return input
-    .map((item) => {
-      if (!item || typeof item !== "object") return null;
-      const row = item as Record<string, unknown>;
-      const paragraphId = stringValue(row.paragraphId);
-      const chapterNumber = numberValue(row.chapterNumber);
-      const paragraphNumber = numberValue(row.paragraphNumber);
-      const revisedText = stringValue(row.revisedText);
-      const revisionNotes = stringValue(row.revisionNotes);
-      if (!revisedText) return null;
-      if (!paragraphId && (!chapterNumber || !paragraphNumber)) return null;
+  const drafts: RevisionDraftProposalItem[] = [];
 
-      return {
-        paragraphId: paragraphId || undefined,
-        chapterNumber: chapterNumber || undefined,
-        paragraphNumber: paragraphNumber || undefined,
-        revisedText,
-        revisionNotes: revisionNotes || undefined,
-      } satisfies RevisionDraftProposalItem;
-    })
-    .filter((item): item is RevisionDraftProposalItem => Boolean(item));
+  for (const item of input) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const paragraphId = stringValue(row.paragraphId);
+    const chapterNumber = numberValue(row.chapterNumber);
+    const paragraphNumber = numberValue(row.paragraphNumber);
+    const revisedText = stringValue(row.revisedText);
+    const revisionNotes = stringValue(row.revisionNotes);
+    if (!revisedText) continue;
+    if (!paragraphId && (!chapterNumber || !paragraphNumber)) continue;
+
+    drafts.push({
+      paragraphId: paragraphId || undefined,
+      chapterNumber: chapterNumber || undefined,
+      paragraphNumber: paragraphNumber || undefined,
+      revisedText,
+      revisionNotes: revisionNotes || undefined,
+    });
+  }
+
+  return drafts;
 }
 
 function normalizeMetadataChanges(input: unknown): MetadataProposalChanges {

@@ -11,6 +11,7 @@ import { ChapterSummaryViewer } from "@/components/books/chapter-summary-viewer"
 import { ChapterMetadataPanel } from "@/components/books/chapter-metadata-panel";
 import { DeleteBookButton } from "@/components/books/delete-book-button";
 import { PersistentAiJobsPanel } from "@/components/books/jobs/persistent-ai-jobs-panel";
+import { LiveProcessBanner } from "@/components/books/jobs/live-process-banner";
 import { BookInputsManager } from "@/components/books/inputs/book-inputs-manager";
 import { PassageLockManager } from "@/components/books/passage-lock-manager";
 import { CollaborationPanel } from "@/components/books/collaboration-panel";
@@ -59,6 +60,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
     { data: reports },
     { count: acceptedParagraphs },
     { count: pendingDrafts },
+    { data: pendingDraftRows },
     { data: paragraphRows },
     { data: sceneRows },
     { data: latestRewriteJob },
@@ -116,6 +118,13 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         .eq("accepted", false)
         .eq("rejected", false),
       supabase
+        .from("revision_versions")
+        .select("paragraph_id")
+        .eq("book_id", bookId)
+        .eq("accepted", false)
+        .eq("rejected", false)
+        .not("paragraph_id", "is", null),
+      supabase
         .from("paragraphs")
         .select("id,chapter_id,scene_id,paragraph_number,original_text,is_locked")
         .eq("book_id", bookId)
@@ -172,6 +181,39 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
     : { data: null };
   const acceptedConcept = creationPlanVersions?.find((v) => v.version_type === "concept")?.content as Record<string, unknown> | null | undefined;
   const acceptedArchitecture = creationPlanVersions?.find((v) => v.version_type === "architecture")?.content as Record<string, unknown> | null | undefined;
+  const bookMetadata = book?.metadata && typeof book.metadata === "object" ? (book.metadata as Record<string, unknown>) : null;
+  const creationSeed =
+    bookMetadata?.creationSeed && typeof bookMetadata.creationSeed === "object"
+      ? (bookMetadata.creationSeed as Record<string, unknown>)
+      : null;
+  const seededConcept =
+    creationSeed?.acceptedConcept && typeof creationSeed.acceptedConcept === "object"
+      ? (creationSeed.acceptedConcept as Record<string, unknown>)
+      : null;
+  const seededArchitecture =
+    creationSeed?.acceptedArchitecture && typeof creationSeed.acceptedArchitecture === "object"
+      ? (creationSeed.acceptedArchitecture as Record<string, unknown>)
+      : null;
+  const conceptToDisplay = acceptedConcept || seededConcept;
+  const architectureToDisplay = acceptedArchitecture || seededArchitecture;
+  const conceptSeedSource = acceptedConcept ? "creation-plan" : seededConcept ? "book-metadata" : null;
+  const fallbackConceptProject = {
+    working_title: book?.title || null,
+    genre: book?.genre || null,
+    target_audience: book?.target_audience || null,
+    language: typeof creationSeed?.language === "string" ? creationSeed.language : null,
+    target_pages: typeof creationSeed?.targetPages === "number" ? creationSeed.targetPages : null,
+    tone: typeof creationSeed?.tone === "string" ? creationSeed.tone : null,
+  };
+  const conceptProjectToDisplay =
+    (creationProject ?? fallbackConceptProject) as {
+      working_title: string | null;
+      genre: string | null;
+      target_audience: string | null;
+      language: string | null;
+      target_pages: number | null;
+      tone: string | null;
+    };
 
   if (error || !book) {
     return (
@@ -209,7 +251,14 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         ),
     ).length || 0;
   const acceptedPercent = paragraphs ? Math.round(((acceptedParagraphs || 0) / paragraphs) * 100) : 0;
-  const postCriticCount = (reports || []).filter((report) => String(report.report_type).startsWith("critic_post:")).length;
+  const pendingDraftParagraphs = new Set(
+    (pendingDraftRows || []).map((row) => row.paragraph_id).filter(Boolean),
+  ).size;
+  const postCriticCount = new Set(
+    (reports || [])
+      .filter((report) => String(report.report_type).startsWith("critic_post:"))
+      .map((report) => String(report.report_type).toLowerCase()),
+  ).size;
   const commandCenter = getBookCommandCenter({
     bookId,
     status: book.status,
@@ -219,7 +268,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
     rewriteReadiness: dashboardReadiness,
     paragraphCount: paragraphs || 0,
     acceptedParagraphCount: acceptedParagraphs || 0,
-    pendingDraftCount: pendingDrafts || 0,
+    pendingDraftCount: pendingDraftParagraphs,
     plannedChapterCount,
     hasLatestRewriteJob: Boolean(latestRewriteJob),
     hasDriftReport: Boolean(latestDriftReport),
@@ -230,6 +279,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
     <AppShell>
       <Container size="xl">
         <DataFreshnessBanner routeKey={`book:${bookId}:dashboard`} fetchedAt={new Date().toISOString()} label="Book dashboard data" />
+        <LiveProcessBanner bookId={bookId} />
         <Group justify="space-between" mb="xl" align="flex-start">
           <div>
             <Group mb="xs">
@@ -253,16 +303,18 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           <Metric label="Critic reports" value={reports?.length || 0} />
         </SimpleGrid>
 
-        {creationProject && acceptedConcept && (
+        {conceptToDisplay && (
           <BookConceptPanel
-            creationProject={creationProject}
-            concept={acceptedConcept}
+            creationProject={conceptProjectToDisplay}
+            concept={conceptToDisplay}
+            seedLocked
+            seedSource={conceptSeedSource === "book-metadata" ? "book-metadata" : "creation-plan"}
           />
         )}
 
-        {creationProject && acceptedArchitecture && (
+        {architectureToDisplay && (
           <ArchitectureRoadmapPanel
-            architecture={acceptedArchitecture}
+            architecture={architectureToDisplay}
             chapters={chapters || []}
             plannedChapterCount={plannedChapterCount}
           />
@@ -273,6 +325,8 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         </Paper>
 
         <WorkflowCommandCenter
+          bookId={bookId}
+          bookTitle={book.title}
           stage={commandCenter.stage}
           stageColor={commandCenter.stageColor}
           guidance={commandCenter.guidance}
@@ -280,7 +334,8 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           actionHref={commandCenter.actionHref}
           acceptedPercent={acceptedPercent}
           acceptedParagraphs={acceptedParagraphs || 0}
-          pendingDrafts={pendingDrafts || 0}
+          pendingDrafts={pendingDraftParagraphs}
+          pendingDraftRevisions={pendingDrafts || 0}
           totalParagraphs={paragraphs || 0}
           postCriticCount={postCriticCount}
           hasDriftReport={Boolean(latestDriftReport)}
@@ -385,7 +440,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           }
           acceptedParagraphs={acceptedParagraphs || 0}
           totalParagraphs={paragraphs || 0}
-          pendingDraftCount={pendingDrafts || 0}
+          pendingDraftCount={pendingDraftParagraphs}
         />
 
         <DriftReportsPanel reports={reports || []} />
@@ -460,6 +515,8 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
 }
 
 function WorkflowCommandCenter({
+  bookId,
+  bookTitle,
   stage,
   stageColor,
   guidance,
@@ -468,10 +525,13 @@ function WorkflowCommandCenter({
   acceptedPercent,
   acceptedParagraphs,
   pendingDrafts,
+  pendingDraftRevisions,
   totalParagraphs,
   postCriticCount,
   hasDriftReport,
 }: {
+  bookId: string;
+  bookTitle: string;
   stage: string;
   stageColor: string;
   guidance: string;
@@ -480,10 +540,15 @@ function WorkflowCommandCenter({
   acceptedPercent: number;
   acceptedParagraphs: number;
   pendingDrafts: number;
+  pendingDraftRevisions: number;
   totalParagraphs: number;
   postCriticCount: number;
   hasDriftReport: boolean;
 }) {
+  const showDirectAutoReviewCta =
+    actionLabel.toLowerCase().includes("auto-review") && actionHref.includes("#studio-actions");
+  const pendingDraftHref = `/books/${bookId}/revisions`;
+
   return (
     <Paper withBorder radius="md" p="lg" bg="#fffdf8" mb="xl">
       <Stack>
@@ -505,9 +570,12 @@ function WorkflowCommandCenter({
               {guidance}
             </Text>
           </div>
-          <Link href={actionHref} style={{ textDecoration: "none" }}>
-            <Button color="grape">{actionLabel}</Button>
-          </Link>
+          <Group gap="xs" align="flex-start">
+            <Link href={actionHref} style={{ textDecoration: "none" }}>
+              <Button color="grape">{actionLabel}</Button>
+            </Link>
+            {showDirectAutoReviewCta && <AutoReviewWizard bookId={bookId} bookTitle={bookTitle} />}
+          </Group>
         </Group>
 
         <div>
@@ -520,9 +588,24 @@ function WorkflowCommandCenter({
             </Text>
           </Group>
           <Progress value={acceptedPercent} color={acceptedPercent >= 90 ? "green" : acceptedPercent >= 50 ? "yellow" : "grape"} radius="xl" />
-          <Text size="xs" c="dimmed" mt={4}>
-            {acceptedPercent}% accepted · {pendingDrafts.toLocaleString()} pending draft revision(s)
-          </Text>
+          {pendingDrafts > 0 ? (
+            <Text size="xs" c="dimmed" mt={4}>
+              {acceptedPercent}% accepted ·{" "}
+              <Link href={pendingDraftHref} style={{ color: "inherit", textDecoration: "underline" }}>
+                {pendingDrafts.toLocaleString()} paragraph(s) with pending drafts
+                {pendingDraftRevisions > pendingDrafts
+                  ? ` (${pendingDraftRevisions.toLocaleString()} total pending draft revision version(s))`
+                  : ""}
+              </Link>
+            </Text>
+          ) : (
+            <Text size="xs" c="dimmed" mt={4}>
+              {acceptedPercent}% accepted · {pendingDrafts.toLocaleString()} paragraph(s) with pending drafts
+              {pendingDraftRevisions > pendingDrafts
+                ? ` (${pendingDraftRevisions.toLocaleString()} total pending draft revision version(s))`
+                : ""}
+            </Text>
+          )}
         </div>
       </Stack>
     </Paper>
@@ -544,6 +627,16 @@ function getBookCommandCenter(input: {
   hasDriftReport: boolean;
   postCriticCount: number;
 }) {
+  if (input.pendingDraftCount > 0) {
+    return {
+      stage: "Review",
+      stageColor: "teal",
+      guidance: `${input.pendingDraftCount.toLocaleString()} paragraph(s) have pending draft revisions waiting for accept/reject decisions.`,
+      actionLabel: "Review Drafts",
+      actionHref: `/books/${input.bookId}/revisions`,
+    };
+  }
+
   if (input.status === "exported") {
     return {
       stage: "Exported",
@@ -558,7 +651,7 @@ function getBookCommandCenter(input: {
     return {
       stage: input.status === "generating" ? "Generating draft" : "Architecture planned",
       stageColor: "blue",
-      guidance: `${input.plannedChapterCount.toLocaleString()} planned chapter shell(s) still need manuscript text before revision work can really begin.`,
+      guidance: `${input.plannedChapterCount.toLocaleString()} planned chapter shell(s) still need manuscript text before revision work can really begin. Open Studio Actions, click Generate Planned Draft, then confirm the AI Task Preflight by clicking Proceed.`,
       actionLabel: "Generate Draft Chapters",
       actionHref: `/books/${input.bookId}#studio-actions`,
     };
@@ -595,16 +688,6 @@ function getBookCommandCenter(input: {
       guidance: `${pendingAction.label}: ${pendingAction.detail}`,
       actionLabel: pendingAction.actionLabel,
       actionHref,
-    };
-  }
-
-  if (input.pendingDraftCount > 0) {
-    return {
-      stage: "Review",
-      stageColor: "teal",
-      guidance: `${input.pendingDraftCount.toLocaleString()} draft revision(s) are waiting for accept/reject decisions.`,
-      actionLabel: "Review Drafts",
-      actionHref: `/books/${input.bookId}/revisions`,
     };
   }
 

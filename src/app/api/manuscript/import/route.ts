@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { extractTextFromFile, parseManuscript } from "@/lib/manuscript/parser";
 import { createClient } from "@/lib/supabase/server";
+import { toDialogDensity } from "@/lib/dialogue-density";
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
     const targetAudience = String(formData.get("targetAudience") || "");
     const pointOfView = String(formData.get("pointOfView") || "");
     const tense = String(formData.get("tense") || "");
+    const dialogDensity = toDialogDensity(String(formData.get("dialogDensity") || ""));
 
     const originalText =
       file instanceof File && file.size > 0 ? await extractTextFromFile(file) : pastedText.trim();
@@ -69,6 +71,7 @@ export async function POST(request: Request) {
         target_audience: targetAudience,
         point_of_view: pointOfView,
         tense,
+        dialog_density: dialogDensity,
         original_file_path: originalFilePath,
       })
       .select("id")

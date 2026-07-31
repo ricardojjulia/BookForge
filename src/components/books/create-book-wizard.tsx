@@ -8,6 +8,7 @@ import {
   Group,
   NumberInput,
   Paper,
+  Progress,
   SegmentedControl,
   Select,
   SimpleGrid,
@@ -20,6 +21,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { DIALOG_DENSITY_LABELS, DIALOG_DENSITY_LEVELS, type DialogDensity } from "@/lib/dialogue-density";
 
 type CloudProviderInfo = {
   provider: string;
@@ -42,6 +44,7 @@ type ModelStatusResponse = {
 };
 
 type CreationMode = "single_safe" | "dual_role_sequential";
+type CreationStage = "intake" | "concept" | "architecture" | "ready";
 
 type ConceptPass = {
   mainTheme?: string;
@@ -84,6 +87,21 @@ type ChapterArchitecture = {
   generationWarnings?: unknown[];
 };
 
+const TONE_OPTIONS = [
+  "Tender",
+  "Pastoral",
+  "Hopeful",
+  "Literary",
+  "Reflective",
+  "Conversational",
+  "Encouraging",
+  "Prophetic",
+  "Bold",
+  "Academic",
+  "Narrative",
+  "Devotional",
+];
+
 export function CreateBookWizard() {
   const router = useRouter();
   const [workingTitle, setWorkingTitle] = useState("");
@@ -95,19 +113,27 @@ export function CreateBookWizard() {
   const [tone, setTone] = useState("");
   const [boundaries, setBoundaries] = useState("");
   const [mode, setMode] = useState<CreationMode>("single_safe");
+  const [dialogDensity, setDialogDensity] = useState<DialogDensity>("normal");
   const [status, setStatus] = useState<ModelStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [conceptLoading, setConceptLoading] = useState(false);
+  const [conceptSaving, setConceptSaving] = useState(false);
   const [architectureLoading, setArchitectureLoading] = useState(false);
   const [acceptingArchitecture, setAcceptingArchitecture] = useState(false);
   const [creationProjectId, setCreationProjectId] = useState<string | null>(null);
   const [concept, setConcept] = useState<ConceptPass | null>(null);
+  const [conceptDirty, setConceptDirty] = useState(false);
+  const [conceptSavedAt, setConceptSavedAt] = useState<string | null>(null);
   const [architecture, setArchitecture] = useState<ChapterArchitecture | null>(null);
   const [error, setError] = useState("");
+  const [statusMessage, setStatusMessage] = useState<string>("");
+  const [statusColor, setStatusColor] = useState<"blue" | "teal" | "yellow" | "red">("blue");
 
   const runModelPreflight = useCallback(async () => {
     setLoading(true);
     setError("");
+    setStatusColor("blue");
+    setStatusMessage("Checking AI engine connectivity...");
     try {
       const result = await fetchJson<ModelStatusResponse>(
         "/api/lmstudio/status",
@@ -115,8 +141,13 @@ export function CreateBookWizard() {
         "Creation model preflight",
       );
       setStatus(result);
+      setStatusColor("teal");
+      setStatusMessage("AI engine status updated.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to check LM Studio.");
+      const message = err instanceof Error ? err.message : "Unable to check LM Studio.";
+      setError(message);
+      setStatusColor("red");
+      setStatusMessage(message);
     } finally {
       setLoading(false);
     }
@@ -133,6 +164,8 @@ export function CreateBookWizard() {
     if (!creationProjectId || !concept) return;
     setArchitectureLoading(true);
     setError("");
+    setStatusColor("blue");
+    setStatusMessage("Generating chapter architecture... This can take a bit.");
     try {
       const result = await fetchJson<{ content?: { architecture?: ChapterArchitecture } }>(
         "/api/creation/architecture",
@@ -146,9 +179,18 @@ export function CreateBookWizard() {
         },
         "Generate chapter architecture",
       );
-      setArchitecture(result.content?.architecture || null);
+      const nextArchitecture = result.content?.architecture || null;
+      if (!nextArchitecture) {
+        throw new Error("Architecture service returned no structure. Please retry.");
+      }
+      setArchitecture(nextArchitecture);
+      setStatusColor("teal");
+      setStatusMessage("Architecture generated. Review it before accepting.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to generate chapter architecture.");
+      const message = err instanceof Error ? err.message : "Unable to generate chapter architecture.";
+      setError(message);
+      setStatusColor("red");
+      setStatusMessage(message);
     } finally {
       setArchitectureLoading(false);
     }
@@ -158,8 +200,17 @@ export function CreateBookWizard() {
     if (!creationProjectId || !architecture) return;
     setAcceptingArchitecture(true);
     setError("");
+    setStatusColor("blue");
+    setStatusMessage("Accepting architecture and opening your new book workspace...");
     try {
-      const result = await fetchJson<{ content?: { bookId?: string; chapterCount?: number } }>(
+      const chapterCount = (architecture.parts || []).reduce((sum, part) => {
+        return sum + (part.chapters?.length || 0);
+      }, 0);
+      if (chapterCount === 0) {
+        throw new Error("This architecture has no chapters yet. Click Regenerate Architecture before accepting.");
+      }
+
+      const result = await fetchJson<{ content?: { bookId?: string; chapterCount?: number; reusedExistingBook?: boolean } }>(
         "/api/creation/accept-architecture",
         {
           method: "POST",
@@ -172,9 +223,22 @@ export function CreateBookWizard() {
         "Accept architecture",
       );
       const bookId = result.content?.bookId;
-      if (bookId) router.push(`/books/${bookId}`);
+      if (!bookId) {
+        throw new Error("Architecture was accepted, but no book id was returned. Refresh and try again.");
+      }
+
+      const destination = `/books/${bookId}`;
+      router.push(destination);
+      window.setTimeout(() => {
+        if (window.location.pathname !== destination) {
+          window.location.assign(destination);
+        }
+      }, 500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to accept architecture.");
+      const message = err instanceof Error ? err.message : "Unable to accept architecture.";
+      setError(message);
+      setStatusColor("red");
+      setStatusMessage(message);
     } finally {
       setAcceptingArchitecture(false);
     }
@@ -183,10 +247,13 @@ export function CreateBookWizard() {
   async function generateConceptPass() {
     setConceptLoading(true);
     setError("");
+    setStatusColor("blue");
+    setStatusMessage("Generating concept pass... This can take 10-30 seconds.");
     try {
       const result = await fetchJson<{
         content?: {
           creationProject?: { id: string };
+          conceptVersion?: { id: string; created_at: string };
           concept?: ConceptPass;
         };
       }>(
@@ -205,16 +272,62 @@ export function CreateBookWizard() {
             tone,
             boundaries,
             creationMode: mode,
+            dialogDensity,
           }),
         },
         "Generate concept pass",
       );
-      setCreationProjectId(result.content?.creationProject?.id || creationProjectId);
-      setConcept(result.content?.concept || null);
+      const nextProjectId = result.content?.creationProject?.id || creationProjectId;
+      const nextConcept = result.content?.concept || null;
+      if (!nextProjectId || !nextConcept) {
+        throw new Error("Concept service returned an incomplete response. Please retry.");
+      }
+      setCreationProjectId(nextProjectId);
+      setConcept(nextConcept);
+      setConceptDirty(false);
+      setConceptSavedAt(result.content?.conceptVersion?.created_at || new Date().toISOString());
+      setStatusColor("teal");
+      setStatusMessage("Concept pass generated. Review and edit it below.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to generate concept pass.");
+      const message = err instanceof Error ? err.message : "Unable to generate concept pass.";
+      setError(message);
+      setStatusColor("red");
+      setStatusMessage(message);
     } finally {
       setConceptLoading(false);
+    }
+  }
+
+  async function saveConceptOnly() {
+    if (!creationProjectId || !concept) return;
+    setConceptSaving(true);
+    setError("");
+    setStatusColor("blue");
+    setStatusMessage("Saving concept draft...");
+    try {
+      const result = await fetchJson<{ content?: { acceptedConcept?: { id: string; created_at: string } } }>(
+        "/api/creation/concept/save",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            creationProjectId,
+            concept,
+          }),
+        },
+        "Save concept",
+      );
+      setConceptDirty(false);
+      setConceptSavedAt(result.content?.acceptedConcept?.created_at || new Date().toISOString());
+      setStatusColor("teal");
+      setStatusMessage("Concept saved.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to save concept.";
+      setError(message);
+      setStatusColor("red");
+      setStatusMessage(message);
+    } finally {
+      setConceptSaving(false);
     }
   }
 
@@ -222,9 +335,60 @@ export function CreateBookWizard() {
   const pageCount = Number(targetPages || 0);
   const wordTarget = Math.round(pageCount * 275);
   const expectedChapters = Math.max(6, Math.min(24, Math.round(pageCount / 8)));
+  const missingConceptInputs: string[] = [];
+  if (!workingTitle.trim()) missingConceptInputs.push("working title");
+  if (!idea.trim()) missingConceptInputs.push("core idea");
+  const conceptButtonDisabled = missingConceptInputs.length > 0;
+  const currentStage: CreationStage = architecture
+    ? "ready"
+    : concept
+      ? "architecture"
+      : conceptLoading
+        ? "concept"
+        : "intake";
+  const stageProgress = getCreationStageProgress(currentStage);
 
   return (
     <Stack>
+      <Paper withBorder radius="md" p="xl" bg="#f8fafc">
+        <Stack gap="sm">
+          <Group justify="space-between" align="center">
+            <Title order={3}>Creation Progress</Title>
+            <Badge color={stageProgress >= 100 ? "teal" : "blue"} variant="light">
+              {getCreationStageLabel(currentStage)}
+            </Badge>
+          </Group>
+          <Progress value={stageProgress} color={stageProgress >= 100 ? "teal" : "blue"} />
+          <SimpleGrid cols={{ base: 2, md: 4 }} spacing="xs">
+            {CREATION_STAGES.map((stage) => {
+              const complete = getCreationStageProgress(stage.id) <= stageProgress;
+              const active = stage.id === currentStage;
+              return (
+                <Paper
+                  key={stage.id}
+                  withBorder
+                  radius="sm"
+                  p="xs"
+                  bg={active ? "#eef6ff" : "white"}
+                >
+                  <Group justify="space-between" wrap="nowrap">
+                    <Text size="xs" fw={700} c={active ? "blue" : "dimmed"}>
+                      {stage.label}
+                    </Text>
+                    <Badge color={complete ? "teal" : "gray"} variant="light" size="xs">
+                      {complete ? "done" : "pending"}
+                    </Badge>
+                  </Group>
+                </Paper>
+              );
+            })}
+          </SimpleGrid>
+          <Text size="sm" c="dimmed">
+            BookForge now reports progress in-screen while generation runs, so you are never left guessing.
+          </Text>
+        </Stack>
+      </Paper>
+
       <Paper withBorder radius="md" p="xl" bg="white">
         <Stack>
           <Group justify="space-between" align="flex-start">
@@ -277,13 +441,28 @@ export function CreateBookWizard() {
               onChange={setLanguage}
               data={["English", "Spanish", "Bilingual English/Spanish"]}
             />
-            <TextInput
+            <Select
               label="Tone"
-              placeholder="Tender, literary, pastoral, hopeful"
+              placeholder="Select a tone"
               value={tone}
-              onChange={(event) => setTone(event.currentTarget.value)}
+              onChange={(value) => setTone(value || "")}
+              data={TONE_OPTIONS}
+              clearable
+              searchable
             />
           </SimpleGrid>
+
+          <div>
+            <Text size="sm" fw={500} mb={4}>
+              Dialogue density
+            </Text>
+            <SegmentedControl
+              value={dialogDensity}
+              onChange={(value) => setDialogDensity(value as DialogDensity)}
+              data={DIALOG_DENSITY_LEVELS.map((level) => ({ label: DIALOG_DENSITY_LABELS[level], value: level }))}
+              fullWidth
+            />
+          </div>
 
           <Textarea
             label="Core idea or prompt"
@@ -299,6 +478,12 @@ export function CreateBookWizard() {
             value={boundaries}
             onChange={(event) => setBoundaries(event.currentTarget.value)}
           />
+
+          {!!statusMessage && (
+            <Alert color={statusColor} variant="light">
+              <Text size="sm">{statusMessage}</Text>
+            </Alert>
+          )}
         </Stack>
       </Paper>
 
@@ -313,7 +498,7 @@ export function CreateBookWizard() {
                   : "Default is one loaded model for memory safety. Dual-role mode is sequential, so BookForge does not assume two large models can stay loaded together."}
               </Text>
             </div>
-            <Button color="teal" variant="light" loading={loading} onClick={runModelPreflight}>
+            <Button type="button" color="teal" variant="light" loading={loading} onClick={runModelPreflight}>
               {status?.cloudProvider?.usedForPlanning ? "Refresh Status" : "Check LM Studio Fit"}
             </Button>
           </Group>
@@ -385,8 +570,13 @@ export function CreateBookWizard() {
           <Alert color="blue" variant="light">
             Next implementation step: generate a Concept Pass from this intake, let the author edit/approve it, then build chapter architecture before creating manuscript text.
           </Alert>
+          {conceptButtonDisabled ? (
+            <Text size="sm" c="dimmed">
+              Generate Concept Pass is disabled until you fill: {missingConceptInputs.join(" and ")}.
+            </Text>
+          ) : null}
           <Group>
-            <Button color="grape" disabled={!idea.trim() || !workingTitle.trim()} loading={conceptLoading} onClick={generateConceptPass}>
+            <Button type="button" color="grape" disabled={conceptButtonDisabled} loading={conceptLoading} onClick={generateConceptPass}>
               Generate Concept Pass
             </Button>
             <Button component="a" href="/dashboard" variant="light" color="dark">
@@ -405,9 +595,14 @@ export function CreateBookWizard() {
                 <Text c="dimmed">
                   Review and edit this before BookForge builds chapter architecture. Nothing has been drafted yet.
                 </Text>
+                {conceptSavedAt && (
+                  <Text size="xs" c="dimmed" mt={4}>
+                    Saved at {new Date(conceptSavedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </Text>
+                )}
               </div>
-              <Badge color="teal" variant="light">
-                Saved
+              <Badge color={conceptDirty ? "yellow" : "teal"} variant="light">
+                {conceptDirty ? "Unsaved changes" : "Saved"}
               </Badge>
             </Group>
             <SimpleGrid cols={{ base: 1, md: 2 }}>
@@ -427,13 +622,16 @@ export function CreateBookWizard() {
               <ConceptList title="Questions for author" items={concept.recommendedNextQuestionsForAuthor || []} />
             </SimpleGrid>
             <Alert color="blue" variant="light">
-              Next step: accept or revise this concept, then generate the chapter architecture from the approved concept.
+              Save keeps this concept version without running AI. Accept concept then runs architecture generation, which can take longer.
             </Alert>
             <Group>
-              <Button color="teal" loading={architectureLoading} onClick={acceptConceptAndGenerateArchitecture}>
-                Accept Concept
+              <Button type="button" color="gray" variant="light" loading={conceptSaving} onClick={saveConceptOnly}>
+                Save Concept
               </Button>
-              <Button color="grape" variant="light" loading={conceptLoading} onClick={generateConceptPass}>
+              <Button type="button" color="teal" loading={architectureLoading} onClick={acceptConceptAndGenerateArchitecture}>
+                Accept Concept & Generate Architecture
+              </Button>
+              <Button type="button" color="grape" variant="light" loading={conceptLoading} onClick={generateConceptPass}>
                 Regenerate Concept
               </Button>
             </Group>
@@ -508,11 +706,12 @@ export function CreateBookWizard() {
             <Alert color="blue" variant="light">
               Next implementation step: accept this architecture, then create draft-generation jobs chapter by chapter.
             </Alert>
+            {error && <Alert color="red">{error}</Alert>}
             <Group>
-              <Button color="teal" loading={acceptingArchitecture} onClick={acceptArchitecture}>
+              <Button type="button" color="teal" loading={acceptingArchitecture} onClick={acceptArchitecture}>
                 Accept Architecture
               </Button>
-              <Button color="grape" variant="light" loading={architectureLoading} onClick={acceptConceptAndGenerateArchitecture}>
+              <Button type="button" color="grape" variant="light" loading={architectureLoading} onClick={acceptConceptAndGenerateArchitecture}>
                 Regenerate Architecture
               </Button>
             </Group>
@@ -523,10 +722,48 @@ export function CreateBookWizard() {
   );
 
   function setConceptField(key: keyof ConceptPass, value: string) {
+    setConceptDirty(true);
     setConcept((current) => ({
       ...(current || {}),
       [key]: value,
     }));
+  }
+}
+
+const CREATION_STAGES: Array<{ id: CreationStage; label: string }> = [
+  { id: "intake", label: "Intake" },
+  { id: "concept", label: "Concept" },
+  { id: "architecture", label: "Architecture" },
+  { id: "ready", label: "Ready to Draft" },
+];
+
+function getCreationStageProgress(stage: CreationStage): number {
+  switch (stage) {
+    case "intake":
+      return 25;
+    case "concept":
+      return 50;
+    case "architecture":
+      return 75;
+    case "ready":
+      return 100;
+    default:
+      return 25;
+  }
+}
+
+function getCreationStageLabel(stage: CreationStage): string {
+  switch (stage) {
+    case "intake":
+      return "Intake ready";
+    case "concept":
+      return "Generating concept";
+    case "architecture":
+      return "Concept complete";
+    case "ready":
+      return "Architecture ready";
+    default:
+      return "In progress";
   }
 }
 

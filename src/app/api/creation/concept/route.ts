@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildCreationConceptPrompt } from "@/lib/creation/concept-prompt";
+import { DIALOG_DENSITY_LEVELS } from "@/lib/dialogue-density";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
@@ -20,6 +21,7 @@ const schema = z.object({
   tone: z.string().trim().max(500).optional(),
   boundaries: z.string().trim().max(3000).optional(),
   creationMode: z.enum(["single_safe", "dual_role_sequential"]).default("single_safe"),
+  dialogDensity: z.enum(DIALOG_DENSITY_LEVELS).default("normal"),
 });
 
 function getErrorMessage(error: unknown) {
@@ -53,6 +55,7 @@ export async function POST(request: Request) {
       tone: body.tone || "",
       boundaries: body.boundaries || "",
       creationMode: body.creationMode,
+      dialogDensity: body.dialogDensity,
       estimatedWords,
       expectedChapters,
     });
@@ -63,15 +66,21 @@ export async function POST(request: Request) {
       candidates: getReasoningModelCandidates(settings),
       expectedCalls: 1,
       latencyPreference: "quality",
+      telemetry: { supabase, userId: user.id },
     });
-    const { client, preparedModel, modelSelection } = modelPlan;
-    const completion = await createManagedChatCompletion(client, preparedModel, {
-      temperature: Math.min(settings.temperature, 0.65),
-      top_p: settings.topP,
-      max_tokens: Math.min(settings.maxOutputTokens, 3500),
-      messages: [{ role: "user", content: prompt }],
-      
-    });
+    const { client, preparedModel, modelSelection, telemetryContext } = modelPlan;
+    const completion = await createManagedChatCompletion(
+      client,
+      preparedModel,
+      {
+        temperature: Math.min(settings.temperature, 0.65),
+        top_p: settings.topP,
+        max_tokens: Math.min(settings.maxOutputTokens, 3500),
+        messages: [{ role: "user", content: prompt }],
+      },
+      undefined,
+      telemetryContext,
+    );
 
     const content = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({
       mainTheme: "",
@@ -137,6 +146,7 @@ async function upsertCreationProject(
     tone: body.tone || null,
     boundaries: body.boundaries || null,
     creation_mode: body.creationMode,
+    dialog_density: body.dialogDensity,
     status: "concept",
     updated_at: new Date().toISOString(),
   };

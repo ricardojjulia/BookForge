@@ -63,7 +63,7 @@ export function createRevisionJobHeartbeat(
   let stopped = false;
 
   const touch = async (progressPatch: Partial<AiJobProgress> = {}) => {
-    if (stopped) return latestSettings;
+    if (stopped) return;
     latestProgress = buildJobProgress({
       ...extractJobProgress(latestSettings),
       ...latestProgress,
@@ -73,7 +73,6 @@ export function createRevisionJobHeartbeat(
     latestSettings = mergeJobSettings(latestSettings, latestProgress);
     const { error } = await supabase.from("revision_jobs").update({ settings: latestSettings }).eq("id", jobId);
     if (error) throw error;
-    return latestSettings;
   };
 
   const interval = setInterval(() => {

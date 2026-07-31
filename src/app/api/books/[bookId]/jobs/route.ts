@@ -13,6 +13,11 @@ type RevisionJobRow = {
   completed_at: string | null;
 };
 
+function isTransientJsonParseError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /Unexpected end of JSON input/i.test(message);
+}
+
 export async function GET(_: Request, context: { params: Promise<{ bookId: string }> }) {
   try {
     const { bookId } = await context.params;
@@ -43,6 +48,15 @@ export async function GET(_: Request, context: { params: Promise<{ bookId: strin
       },
     });
   } catch (error) {
+    if (isTransientJsonParseError(error)) {
+      console.warn("Job list transient parse error", error);
+      return NextResponse.json({
+        content: {
+          jobs: [],
+          transient: true,
+        },
+      });
+    }
     console.error("Job list failed", error);
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load jobs." }, { status: 500 });
   }

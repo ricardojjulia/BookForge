@@ -1,5 +1,7 @@
+import { matchLocalModelFamily, type LocalModelTaskKind } from "@/lib/ai/model-catalog";
+
 export type ModelRecommendation = {
-  task: "primary_rewrite_model" | "reasoning_model" | "extraction_model" | "embedding_model" | "reranker_model";
+  task: LocalModelTaskKind;
   label: string;
   selectedModel: string;
   reason: string;
@@ -54,18 +56,22 @@ function scoreModelForTask(model: string, task: ModelRecommendation["task"], pro
   let score = 0;
   const reasons: string[] = [];
   const size = getModelSize(name);
+  // Family identity (Qwen, Llama, DeepSeek-R1, bge-m3, ...) comes from the shared
+  // catalog so this file and rewrite-model-suitability.ts never drift apart.
+  const family = matchLocalModelFamily(name);
 
   if (task === "embedding_model") {
-    if (/\bbge[-_ ]?m3\b/.test(name)) add(120, "bge-m3 is the preferred embedding model");
-    if (/nomic.*embed|embed.*nomic/.test(name)) add(95, "nomic embed model detected");
-    if (/embed|embedding/.test(name)) add(70, "embedding model detected");
+    if (family?.kind === "embedding") {
+      add(family.taskAffinity.embedding_model ?? 40, `${family.label} — ${family.strengths[0]}`);
+    }
     if (isChatOrGenerationModel(name)) add(-60, "generation model is not ideal for embeddings");
     return result();
   }
 
   if (task === "reranker_model") {
-    if (/rerank|reranker|cross[-_ ]?encoder/.test(name)) add(100, "reranker/cross-encoder model detected");
-    if (/\bbge\b/.test(name)) add(20, "BGE model family is commonly used for ranking");
+    if (family?.kind === "reranker") {
+      add(family.taskAffinity.reranker_model ?? 30, `${family.label} — ${family.strengths[0]}`);
+    }
     if (isEmbeddingModel(name)) add(-50, "embedding model is not a reranker");
     return result();
   }
@@ -75,8 +81,10 @@ function scoreModelForTask(model: string, task: ModelRecommendation["task"], pro
   }
 
   if (/instruct|chat|it\b|assistant/.test(name)) add(30, "instruction-tuned model detected");
-  if (/qwen/.test(name)) add(18, "Qwen models are strong local rewrite models");
-  if (/llama|mistral|mixtral|gemma|yi/.test(name)) add(10, "general instruction model detected");
+  if (family && family.kind !== "embedding" && family.kind !== "reranker") {
+    const affinity = family.taskAffinity[task];
+    if (affinity) add(affinity, `${family.label} — ${family.strengths[0]}`);
+  }
   if (/gguf|q[34568][_-]?k|q\d/.test(name)) add(8, "local quantized model detected");
 
   if (task === "primary_rewrite_model") {
@@ -98,12 +106,10 @@ function scoreModelForTask(model: string, task: ModelRecommendation["task"], pro
         [13, 30, 32, "mid-size model is usable when larger models are unavailable"],
       ],
     });
-    if (/reason|r1|deepseek/.test(name)) add(-35, "reasoning models are better reserved for critique/planning");
     return result();
   }
 
   if (task === "reasoning_model") {
-    if (/deepseek|r1|reason|thinking/.test(name)) add(80, "reasoning model detected");
     addSizeFit(profile, size, {
       fast: [
         [7, 15, 54, "7B-14B model keeps Fast Mode reasoning responsive"],
@@ -146,7 +152,6 @@ function scoreModelForTask(model: string, task: ModelRecommendation["task"], pro
       ],
     });
     if (/instruct|chat|it\b/.test(name)) add(22, "instruction model works well for structured extraction");
-    if (/reason|r1|deepseek/.test(name)) add(-20, "reasoning model is usually unnecessary for extraction");
     return result();
   }
 
@@ -190,9 +195,11 @@ function getModelSize(name: string) {
 }
 
 function isEmbeddingModel(name: string) {
-  return /embed|embedding|\bbge[-_ ]?m3\b|nomic/.test(name);
+  return matchLocalModelFamily(name)?.kind === "embedding";
 }
 
 function isChatOrGenerationModel(name: string) {
-  return /instruct|chat|qwen|llama|mistral|gemma|deepseek|r1/.test(name);
+  const family = matchLocalModelFamily(name);
+  if (family) return family.kind !== "embedding" && family.kind !== "reranker";
+  return /instruct|chat/.test(name);
 }

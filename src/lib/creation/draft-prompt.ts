@@ -1,3 +1,5 @@
+import { describeDialogueDensity } from "@/lib/dialogue-density";
+
 export function buildCreationDraftChapterPrompt(input: {
   workingTitle: string;
   genre: string;
@@ -6,17 +8,24 @@ export function buildCreationDraftChapterPrompt(input: {
   targetPages: number;
   tone: string;
   boundaries: string;
+  dialogDensity: string;
   concept: unknown;
   architecture: unknown;
   chapter: { targetWords?: number; targetPages?: number; [key: string]: unknown };
   previousChapterSummary: string;
   nextChapterSummary: string;
+  promptCharBudget?: number;
 }) {
+  const promptBudget = clampNumber(input.promptCharBudget || 0, 5000, 36000);
   const targetWords = input.chapter.targetWords
     || (input.chapter.targetPages ? Math.round(input.chapter.targetPages * 250) : null)
     || Math.round((input.targetPages * 250) / 10);
   const wordFloor = Math.max(600, Math.round(targetWords * 0.8));
   const wordCeiling = Math.round(targetWords * 1.2);
+  const conceptBudget = Math.max(1200, Math.floor(promptBudget * 0.22));
+  const architectureBudget = Math.max(2200, Math.floor(promptBudget * 0.42));
+  const chapterBudget = Math.max(700, Math.floor(promptBudget * 0.16));
+  const neighboringBudget = Math.max(400, Math.floor(promptBudget * 0.08));
 
   return `You are BookForge Creator drafting one chapter of a book.
 
@@ -40,23 +49,26 @@ Write between ${wordFloor.toLocaleString()} and ${wordCeiling.toLocaleString()} 
 TONE:
 ${input.tone || "No special tone supplied."}
 
+DIALOGUE DENSITY:
+${describeDialogueDensity(input.dialogDensity)}
+
 AUTHOR BOUNDARIES:
 ${input.boundaries || "No special boundaries supplied."}
 
 APPROVED CONCEPT:
-${JSON.stringify(input.concept, null, 2)}
+${compactJson(input.concept, conceptBudget)}
 
 APPROVED ARCHITECTURE:
-${JSON.stringify(input.architecture, null, 2)}
+${compactJson(input.architecture, architectureBudget)}
 
 ASSIGNED CHAPTER:
-${JSON.stringify(input.chapter, null, 2)}
+${compactJson(input.chapter, chapterBudget)}
 
 PREVIOUS CHAPTER CONTEXT:
-${input.previousChapterSummary || "This is the first generated chapter or no previous context was supplied."}
+${truncateText(input.previousChapterSummary || "This is the first generated chapter or no previous context was supplied.", neighboringBudget)}
 
 NEXT CHAPTER CONTEXT:
-${input.nextChapterSummary || "No next chapter context was supplied."}
+${truncateText(input.nextChapterSummary || "No next chapter context was supplied.", neighboringBudget)}
 
 Rules:
 - Draft only the assigned chapter.
@@ -73,4 +85,21 @@ Rules:
 Return ONLY valid JSON with this exact structure. The "chapterText" value must be the complete prose — not a description of what you would write, not a placeholder:
 
 {"chapterText":"<write the full chapter prose here — ${wordFloor.toLocaleString()} words minimum>","chapterSummary":"<one sentence>","continuityNotes":[],"generationNotes":[]}`;
+}
+
+function compactJson(value: unknown, maxChars: number) {
+  const json = JSON.stringify(value, null, 2) || "{}";
+  if (json.length <= maxChars) return json;
+  return `${json.slice(0, Math.max(0, maxChars - 120))}\n...\n[truncated by BookForge to fit model context budget]`;
+}
+
+function truncateText(text: string, maxChars: number) {
+  if (!text) return "";
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 60))} ...[truncated]`;
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.floor(value)));
 }

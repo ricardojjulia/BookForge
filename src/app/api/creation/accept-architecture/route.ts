@@ -75,7 +75,19 @@ export async function POST(request: Request) {
       .single();
     if (projectError) throw projectError;
 
-    const chapters = flattenArchitectureChapters(body.architecture);
+    const { data: acceptedConceptVersion } = await supabase
+      .from("creation_plan_versions")
+      .select("id,content,created_at")
+      .eq("creation_project_id", project.id)
+      .eq("version_type", "concept")
+      .eq("accepted", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const requestedTargetPages = Math.max(20, Math.min(200, Math.round(Number(project.target_pages || 120))));
+    const normalizedArchitecture = normalizeArchitectureToTargetPages(body.architecture, requestedTargetPages);
+    const chapters = flattenArchitectureChapters(normalizedArchitecture);
     if (!chapters.length) {
       return NextResponse.json({ error: "Architecture must include at least one chapter." }, { status: 400 });
     }
@@ -89,7 +101,7 @@ export async function POST(request: Request) {
     const { error: architectureError } = await supabase.from("creation_plan_versions").insert({
       creation_project_id: project.id,
       version_type: "architecture",
-      content: body.architecture,
+      content: normalizedArchitecture,
       accepted: true,
     });
     if (architectureError) throw architectureError;
@@ -105,20 +117,57 @@ export async function POST(request: Request) {
       .single();
     if (createProjectError) throw createProjectError;
 
-    const { data: book, error: bookError } = await supabase
+    const bookInsertBase = {
+      project_id: projectRow.id,
+      owner_id: user.id,
+      title: project.working_title,
+      author_name: "",
+      genre: project.genre,
+      target_audience: project.target_audience,
+      dialog_density: project.dialog_density || "normal",
+      status: "planned",
+    };
+
+    const metadataPayload = {
+      creationSeed: {
+        source: "bookforge_creator",
+        creationProjectId: project.id,
+        acceptedAt: new Date().toISOString(),
+        tone: project.tone || null,
+        language: project.language || null,
+        targetPages: project.target_pages || null,
+        acceptedConceptVersionId: acceptedConceptVersion?.id || null,
+        acceptedConceptCreatedAt: acceptedConceptVersion?.created_at || null,
+        acceptedConcept: acceptedConceptVersion?.content || null,
+        acceptedArchitecture: normalizedArchitecture,
+      },
+    };
+
+    let { data: book, error: bookError } = await supabase
       .from("books")
       .insert({
-        project_id: projectRow.id,
-        owner_id: user.id,
-        title: project.working_title,
-        author_name: "",
-        genre: project.genre,
-        target_audience: project.target_audience,
-        status: "planned",
+        ...bookInsertBase,
+        metadata: metadataPayload,
       })
       .select("id")
       .single();
+
+    if (bookError) {
+      const message = String(bookError.message || "").toLowerCase();
+      const metadataMissing = message.includes("metadata") && message.includes("column");
+      if (metadataMissing) {
+        const retry = await supabase
+          .from("books")
+          .insert(bookInsertBase)
+          .select("id")
+          .single();
+        book = retry.data;
+        bookError = retry.error;
+      }
+    }
+
     if (bookError) throw bookError;
+    if (!book?.id) throw new Error("Unable to create book record.");
 
     for (const chapter of chapters) {
       const originalText = buildPlaceholderChapterText(chapter);
@@ -142,6 +191,7 @@ export async function POST(request: Request) {
         metadata: {
           acceptedArchitectureAt: new Date().toISOString(),
           chapterCount: chapters.length,
+          targetPages: requestedTargetPages,
           provenance: "ai_created_first_draft_planned",
         },
         updated_at: new Date().toISOString(),
@@ -153,6 +203,7 @@ export async function POST(request: Request) {
       content: {
         bookId: book.id,
         chapterCount: chapters.length,
+        targetPages: requestedTargetPages,
       },
     });
   } catch (error) {
@@ -190,4 +241,76 @@ function buildPlaceholderChapterText(chapter: ReturnType<typeof flattenArchitect
     "Draft text has not been generated yet. This planned chapter shell was created from BookForge Creator architecture.",
   ].filter(Boolean);
   return lines.join("\n");
+}
+
+function normalizeArchitectureToTargetPages(
+  architecture: z.infer<typeof architectureSchema>,
+  requestedTargetPages: number,
+) {
+  const flat = flattenArchitectureChapters(architecture);
+  if (!flat.length) return architecture;
+
+  const totalTargetWords = Math.max(4000, Math.round(requestedTargetPages * 275));
+  const rawWeights = flat.map((chapter) => {
+    if (typeof chapter.targetWords === "number" && chapter.targetWords > 0) return chapter.targetWords;
+    if (typeof chapter.targetPages === "number" && chapter.targetPages > 0) return chapter.targetPages * 275;
+    return 1;
+  });
+  const weightSum = rawWeights.reduce((sum, weight) => sum + weight, 0) || flat.length;
+
+  const rawPages = rawWeights.map((weight) => (weight / weightSum) * requestedTargetPages);
+  const distributedPages = rawPages.map((pageCount) => Math.max(1, Math.round(pageCount)));
+  let pageDiff = requestedTargetPages - distributedPages.reduce((sum, pageCount) => sum + pageCount, 0);
+
+  while (pageDiff !== 0) {
+    if (pageDiff > 0) {
+      for (let index = 0; index < distributedPages.length && pageDiff > 0; index += 1) {
+        distributedPages[index] += 1;
+        pageDiff -= 1;
+      }
+    } else {
+      for (let index = distributedPages.length - 1; index >= 0 && pageDiff < 0; index -= 1) {
+        if (distributedPages[index] > 1) {
+          distributedPages[index] -= 1;
+          pageDiff += 1;
+        }
+      }
+      if (!distributedPages.some((pageCount) => pageCount > 1)) {
+        break;
+      }
+    }
+  }
+
+  const normalizedChapters = flat.map((chapter, index) => {
+    const targetPages = distributedPages[index] || 1;
+    const proportionalWords = (rawWeights[index] / weightSum) * totalTargetWords;
+    const targetWords = Math.max(250, Math.round((proportionalWords || targetPages * 275) / 25) * 25);
+    return {
+      ...chapter,
+      targetPages,
+      targetWords,
+    };
+  });
+
+  let chapterIndex = 0;
+  const nextParts = (architecture.parts || []).map((part) => ({
+    ...part,
+    chapters: (part.chapters || []).map((chapter) => {
+      const normalized = normalizedChapters[chapterIndex];
+      chapterIndex += 1;
+      if (!normalized) return chapter;
+      return {
+        ...chapter,
+        chapterNumber: normalized.chapterNumber,
+        title: normalized.title,
+        targetPages: normalized.targetPages,
+        targetWords: normalized.targetWords,
+      };
+    }),
+  }));
+
+  return {
+    ...architecture,
+    parts: nextParts,
+  };
 }

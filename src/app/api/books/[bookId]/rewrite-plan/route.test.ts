@@ -30,7 +30,7 @@ describe("POST /api/books/[bookId]/rewrite-plan", () => {
       },
       error: null,
     }));
-    const snapshotEqId = vi.fn(() => ({ single: snapshotSingle }));
+    const snapshotEqId = vi.fn(() => ({ maybeSingle: snapshotSingle }));
     const snapshotEqBook = vi.fn(() => ({ eq: snapshotEqId }));
     const snapshotSelect = vi.fn(() => ({ eq: snapshotEqBook }));
 

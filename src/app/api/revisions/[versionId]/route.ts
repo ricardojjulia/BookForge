@@ -36,7 +36,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ versi
       if (version.paragraph_id) {
         const { error: clearError } = await supabase
           .from("revision_versions")
-          .update({ accepted: false })
+          .update({ accepted: false, rejected: true })
           .eq("paragraph_id", version.paragraph_id)
           .eq("book_id", version.book_id);
         if (clearError) throw clearError;

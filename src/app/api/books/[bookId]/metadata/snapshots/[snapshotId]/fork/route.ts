@@ -10,6 +10,7 @@ import {
   snapshotSelectColumns,
   toBranchResponse,
   toSnapshotResponse,
+  type MetadataBranchRecord,
   type MetadataSnapshotRecord,
 } from "@/lib/book-metadata/timeline";
 
@@ -49,6 +50,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       throw sourceError;
     }
 
+    const sourceSnapshotRecord = sourceSnapshot as unknown as MetadataSnapshotRecord;
+
     const targetBranchName = body.branchName?.trim() || makeBranchName(book.title, `fork-${Date.now().toString(36)}`);
     const now = new Date().toISOString();
 
@@ -65,11 +68,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       .insert({
         book_id: bookId,
         branch_name: targetBranchName,
-        parent_snapshot_id: sourceSnapshot.id,
+        parent_snapshot_id: sourceSnapshotRecord.id,
         status: "active",
-        title: body.title?.trim() || `${sourceSnapshot.title} fork`,
-        summary: body.summary?.trim() || sourceSnapshot.summary || "Forked metadata snapshot.",
-        metadata_json: body.metadataJson || sourceSnapshot.metadata_json || buildMetadataJson(book, {
+        title: body.title?.trim() || `${sourceSnapshotRecord.title} fork`,
+        summary: body.summary?.trim() || sourceSnapshotRecord.summary || "Forked metadata snapshot.",
+        metadata_json: body.metadataJson || sourceSnapshotRecord.metadata_json || buildMetadataJson(book, {
           title: body.title,
           summary: body.summary,
           metadataJson: body.metadataJson,
@@ -87,13 +90,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
 
     if (snapshotError) throw snapshotError;
 
+    const snapshotRecord = snapshot as unknown as MetadataSnapshotRecord;
+
     const { data: branch, error: branchError } = await supabase
       .from("book_metadata_branches")
       .upsert(
         {
           book_id: bookId,
           name: targetBranchName,
-          head_snapshot_id: snapshot.id,
+          head_snapshot_id: snapshotRecord.id,
           is_default: false,
           created_by: user.id,
           updated_at: now,
@@ -105,7 +110,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
 
     if (branchError) throw branchError;
 
-    return NextResponse.json({ snapshot: toSnapshotResponse(snapshot as MetadataSnapshotRecord), branch: toBranchResponse(branch), forked: true });
+    return NextResponse.json({
+      snapshot: toSnapshotResponse(snapshotRecord),
+      branch: toBranchResponse(branch as unknown as MetadataBranchRecord),
+      forked: true,
+    });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to fork metadata snapshot." }, { status: 500 });
   }
