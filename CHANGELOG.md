@@ -27,7 +27,39 @@
 - Added detailed phased execution log at `docs/SOFTWARE_FACTORY.md`.
 - Added live engineering backlog at `docs/TODO.md`.
 
-## 0.3.0 - (planned)
+## 0.3.0 - 2026-07-30
+
+### Dialog Density
+
+- New author-selected setting (Low / Normal / Above Normal / High) captured at creation time (idea wizard) and at import time, stored on `books` and `creation_projects`.
+- Enforced in every generation/rewrite prompt that produces prose: concept, architecture, chapter drafting, the Rewrite Architect plan, and the per-unit rewrite context packet.
+- New eighth **BookForge Critic** lens, **Dialogue Density**: computes real per-chapter dialogue ratios from paragraph text (not just summaries) and scores both target-band alignment and chapter-to-chapter consistency.
+
+### Empirical model-selection feedback loop
+
+- New `model_call_events` table records the outcome of every local LM Studio call: model, task, context length used, outcome (success / empty completion / underlength / context error / generic error), word count, and duration.
+- Model scoring (`orchestrator.ts`) now applies a bounded empirical adjustment on top of the existing static name/size/quantization heuristics — a model with a recent recorded incident on a given task is deprioritized; a model with a strong recent success rate is favored.
+- Load-time context requests are capped using recorded history: a model that has previously crashed or returned empty output at a given context size gets a smaller, known-safer context on its next load — including when an oversized instance is already loaded (previously reused as-is with no safety check).
+- Fixed a model-identity bug where the same physical loaded model could appear as multiple unrelated-looking candidates (e.g. `qwen/qwen3.6-35b-a3b` vs `qwen/qwen3.6-35b-a3b@6bit`), fragmenting both scoring and history tracking. Candidates are now deduplicated to one canonical identity per loaded model.
+- Model Status panel gained a "Recent issues" section surfacing any model+task with recorded incidents in the last 14 days.
+
+### Durable jobs and resumability
+
+- Heartbeat-backed durable job handoff added across every long-running AI route: planned draft generation, chapter summaries, manuscript blueprint generation, critic batch runs, rewrite execution, rewrite planning, drift checks, voice capture, and auto-revision.
+- Auto-Review Wizard: queued start with a launch handshake, improved error messaging, and a **Resume** flow that detects an interrupted run and continues from the first incomplete stage instead of restarting.
+- Persistent AI Jobs panel and job history visibility improvements.
+
+### Fixes
+
+- `pdf-parse` (manuscript PDF import) was crashing at module-load time under Next.js 16's server-component bundling for every import, regardless of file type — added to `serverExternalPackages` alongside the existing `pdfkit` entry.
+- Restored missing baseline Postgres grants (`SELECT`/`INSERT`/`UPDATE`/`DELETE` for `anon`/`authenticated`/`service_role`) that a local database reset had dropped, silently breaking every table write.
+- Fixed two stale test fixtures: a mock using `.single()` where the real code calls `.maybeSingle()`, and an Auto-Review Wizard test asserting UI copy that had since been renamed.
+
+### Removed
+
+- Course catalog/detail domain and its planning docs (shipped, then withdrawn before this release).
+
+## Unreleased / planned
 
 - Manuscript search — full-text search across all chapters and scenes.
 - Author Voice Capture — AI voice fingerprint extraction injected into rewrite prompts.
