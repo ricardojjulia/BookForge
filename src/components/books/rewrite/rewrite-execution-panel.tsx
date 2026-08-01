@@ -70,6 +70,7 @@ export function RewriteExecutionPanel({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [campaignLoading, setCampaignLoading] = useState<string | null>(null);
+  const [chapterLoading, setChapterLoading] = useState<string | null>(null);
   const [workflowMode, setWorkflowMode] = useState<RewriteWorkflowMode>(workflow.mode);
   const [workflowState, setWorkflowState] = useState<RewriteWorkflowRow>(workflow);
   const [queue, setQueue] = useState<AiJobQueueState>({
@@ -149,18 +150,26 @@ export function RewriteExecutionPanel({
     rewriteAccepted?: boolean;
   }) {
     if (!hasPlan) return;
-    const confirmed = window.confirm(
-      "Execute draft rewrite versions now? Original manuscript text will not be overwritten.",
-    );
-    if (!confirmed) return;
-
     const targetChapter = overrides.chapterId ? rewriteCoverage.find((c) => c.chapterId === overrides.chapterId) : undefined;
+    // Skip the confirm() prompt for a single targeted chapter — the button
+    // itself ("Rewrite this chapter") already makes the scope and intent
+    // unambiguous, and window.confirm is unreliable here: browsers silently
+    // auto-dismiss repeated confirm()/alert() calls on a page after a few of
+    // them fire, with no visible dialog and no error — it just looks like
+    // the button does nothing.
+    if (!overrides.chapterId) {
+      const confirmed = window.confirm(
+        "Execute draft rewrite versions now? Original manuscript text will not be overwritten.",
+      );
+      if (!confirmed) return;
+    }
     const chapterRemaining = targetChapter ? Math.max(0, targetChapter.totalParagraphs - targetChapter.rewrittenParagraphs) : undefined;
     const requestedMaxUnits = overrides.maxUnits ?? chapterRemaining ?? Number(maxUnits || eligibleParagraphCount);
     const totalUnits = chapterRemaining ?? Math.min(requestedMaxUnits, eligibleParagraphCount || requestedMaxUnits || 1);
     const estimatedSecondsPerCall = 24;
     const startedAt = Date.now();
     setLoading(true);
+    if (overrides.chapterId) setChapterLoading(overrides.chapterId);
     setMessage("");
     setError("");
     setQueue({
@@ -291,6 +300,7 @@ export function RewriteExecutionPanel({
         })
         .finally(() => {
           setLoading(false);
+          setChapterLoading(null);
         });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Rewrite execution failed.");
@@ -304,6 +314,7 @@ export function RewriteExecutionPanel({
         status: "cancelled",
       }));
       setLoading(false);
+      setChapterLoading(null);
     }
   }
 
@@ -499,6 +510,7 @@ export function RewriteExecutionPanel({
         <RewriteCoverageSummary
           coverage={rewriteCoverage}
           disabled={!hasPlan || loading}
+          loadingChapterId={chapterLoading}
           onRewriteChapter={(chapterId) => executeRewriteWith({ chapterId })}
         />
         <RewriteReadinessGate readiness={readiness} />
@@ -1834,6 +1846,7 @@ function StrategyNumber({
 function RewriteCoverageSummary({
   coverage,
   disabled,
+  loadingChapterId,
   onRewriteChapter,
 }: {
   coverage: Array<{
@@ -1844,6 +1857,7 @@ function RewriteCoverageSummary({
     rewrittenParagraphs: number;
   }>;
   disabled?: boolean;
+  loadingChapterId?: string | null;
   onRewriteChapter?: (chapterId: string) => void;
 }) {
   const touchedChapters = coverage.filter((chapter) => chapter.rewrittenParagraphs > 0).length;
@@ -1885,9 +1899,10 @@ function RewriteCoverageSummary({
                   color="grape"
                   fullWidth
                   disabled={disabled}
+                  loading={loadingChapterId === chapter.chapterId}
                   onClick={() => onRewriteChapter(chapter.chapterId)}
                 >
-                  Rewrite this chapter
+                  {loadingChapterId === chapter.chapterId ? "Rewriting…" : "Rewrite this chapter"}
                 </Button>
               )}
             </Paper>
