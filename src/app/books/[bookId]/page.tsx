@@ -403,6 +403,9 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
             <Link href={`/books/${bookId}/publishing-lab`} style={{ textDecoration: "none" }}>
               <Button size="xs" color="orange" variant="light">Publishing Lab</Button>
             </Link>
+            <Link href={`/books/${bookId}/jobs`} style={{ textDecoration: "none" }}>
+              <Button size="xs" color="grape" variant="light">Jobs History</Button>
+            </Link>
           </Group>
           <BookActions
             bookId={bookId}

@@ -113,15 +113,15 @@ export function RevisionStatsPanel({ bookId }: Props) {
                       {c.wordDelta >= 0 ? "+" : ""}{c.wordDelta}
                     </Text>
                   </td>
-                  <td>
+                  <td style={{ minWidth: 220, maxWidth: 320 }}>
                     {c.pendingParagraphs > 0 ? (
-                      <Badge color="yellow" variant="light" size="sm">
+                      <Text size="sm" c="yellow.9" style={{ whiteSpace: "normal" }}>
                         {c.pendingParagraphs} paragraph(s) need review ({c.pendingVersions} draft version(s))
-                      </Badge>
+                      </Text>
                     ) : c.uncoveredParagraphs > 0 ? (
-                      <Badge color="blue" variant="light" size="sm">
+                      <Text size="sm" c="blue.9" style={{ whiteSpace: "normal" }}>
                         No pending decisions. {c.uncoveredParagraphs} paragraph(s) still on original text.
-                      </Badge>
+                      </Text>
                     ) : (
                       <Badge color="green" variant="light" size="sm">
                         Fully accepted
