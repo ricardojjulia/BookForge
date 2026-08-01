@@ -32,6 +32,7 @@ const sceneBreakPattern = /^\s{0,3}(\*\s*\*\s*\*|#{3,}|-{3,}|_{3,})\s*$/m;
 const schema = z.object({
   jobId: z.string().uuid().optional(),
   limit: z.number().int().min(1).max(200).optional(),
+  chapterId: z.string().uuid().optional(),
   serverManaged: z.boolean().optional(),
 });
 
@@ -107,6 +108,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
 
     const plannedChapters = (chapters || [])
       .filter((chapter) => chapter.status === "planned" || isPlaceholderText(chapter.original_text || ""))
+      .filter((chapter) => !body.chapterId || chapter.id === body.chapterId)
       .slice(0, limit);
 
     if (!plannedChapters.length) {

@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Badge, Box, Button, Collapse, Divider, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { useRouter } from "next/navigation";
+import { Alert, Badge, Box, Button, Collapse, Divider, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { fetchJson } from "@/lib/http/fetch-json";
 import classes from "./architecture-roadmap-panel.module.css";
 
 type ArchChapter = {
@@ -24,6 +26,7 @@ type ArchPart = {
 };
 
 type DbChapter = {
+  id: string;
   chapter_number: number;
   title: string | null;
   status: string | null;
@@ -57,10 +60,45 @@ function toStr(v: unknown): string {
   return "";
 }
 
-function ChapterRow({ chapter, status }: { chapter: ArchChapter; status: string }) {
+function ChapterRow({
+  chapter,
+  status,
+  bookId,
+  dbChapterId,
+}: {
+  chapter: ArchChapter;
+  status: string;
+  bookId: string;
+  dbChapterId: string | null;
+}) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState("");
   const keyBeats = Array.isArray(chapter.keyBeats) ? chapter.keyBeats.map(toStr).filter(Boolean) : [];
   const targetWords = chapter.targetWords ?? (chapter.targetPages ? chapter.targetPages * 250 : null);
+
+  async function generateThisChapter() {
+    if (!dbChapterId) return;
+    setGenerating(true);
+    setError("");
+    try {
+      await fetchJson(
+        `/api/books/${bookId}/generate-draft`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ chapterId: dbChapterId }),
+        },
+        "Generate this chapter",
+      );
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to generate this chapter.");
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   return (
     <Box>
@@ -118,6 +156,18 @@ function ChapterRow({ chapter, status }: { chapter: ArchChapter; status: string 
               </Stack>
             </Box>
           )}
+          {(status === "planned" || status === "missing") && dbChapterId && (
+            <Box mt={6}>
+              <Button size="compact-xs" variant="light" color="orange" loading={generating} onClick={generateThisChapter}>
+                Generate this chapter
+              </Button>
+              {error && (
+                <Alert color="red" p="xs" mt={4}>
+                  <Text size="xs">{error}</Text>
+                </Alert>
+              )}
+            </Box>
+          )}
         </Box>
       </Collapse>
       <Divider opacity={0.3} />
@@ -129,10 +179,12 @@ function PartSection({
   part,
   partIndex,
   dbChapters,
+  bookId,
 }: {
   part: ArchPart;
   partIndex: number;
   dbChapters: DbChapter[];
+  bookId: string;
 }) {
   const archChapters: ArchChapter[] = Array.isArray(part.chapters) ? part.chapters : [];
   const drafted = archChapters.filter((c) => chapterStatus(dbChapters, c.chapterNumber ?? 0) === "draft").length;
@@ -161,6 +213,8 @@ function PartSection({
             key={chapter.chapterNumber ?? i}
             chapter={chapter}
             status={chapterStatus(dbChapters, chapter.chapterNumber ?? 0)}
+            bookId={bookId}
+            dbChapterId={dbChapters.find((c) => c.chapter_number === chapter.chapterNumber)?.id ?? null}
           />
         ))}
       </Box>
@@ -169,10 +223,12 @@ function PartSection({
 }
 
 export function ArchitectureRoadmapPanel({
+  bookId,
   architecture,
   chapters,
   plannedChapterCount,
 }: {
+  bookId: string;
   architecture: Record<string, unknown>;
   chapters: DbChapter[];
   plannedChapterCount: number;
@@ -245,7 +301,7 @@ export function ArchitectureRoadmapPanel({
 
       <Stack gap="lg">
         {parts.map((part, i) => (
-          <PartSection key={i} part={part} partIndex={i} dbChapters={chapters} />
+          <PartSection key={i} part={part} partIndex={i} dbChapters={chapters} bookId={bookId} />
         ))}
       </Stack>
     </Paper>

@@ -314,6 +314,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
 
         {architectureToDisplay && (
           <ArchitectureRoadmapPanel
+            bookId={bookId}
             architecture={architectureToDisplay}
             chapters={chapters || []}
             plannedChapterCount={plannedChapterCount}
