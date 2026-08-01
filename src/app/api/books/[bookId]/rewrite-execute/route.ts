@@ -23,6 +23,11 @@ const schema = z.object({
   chapterId: z.string().uuid().optional(),
   rewriteExistingDrafts: z.boolean().default(false),
   rewriteAccepted: z.boolean().default(false),
+  // shouldSkipParagraph's <8-word threshold exists to avoid wasting calls on
+  // title-echo fragments during a normal full-book pass — but that's exactly
+  // the paragraph an "expand this near-empty chapter" repair is targeting.
+  // Set true to bypass it for a deliberate, narrowly-targeted repair call.
+  forceTinyParagraphs: z.boolean().default(false),
   retryJobId: z.string().uuid().optional(),
   distributeAcrossChapters: z.boolean().default(false),
   coverageMode: z.enum(["normal", "uncovered_chapter_sample"]).default("normal"),
@@ -389,7 +394,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         if (retryParagraphIds && !retryParagraphIds.has(paragraph.id)) {
           continue;
         }
-        if (paragraph.is_locked || shouldSkipParagraph(paragraph.original_text, chapter.title)) {
+        if (paragraph.is_locked || (!body.forceTinyParagraphs && shouldSkipParagraph(paragraph.original_text, chapter.title))) {
           skipped += 1;
           continue;
         }

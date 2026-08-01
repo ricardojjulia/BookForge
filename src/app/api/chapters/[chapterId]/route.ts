@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { criticLenses } from "@/lib/critic/prompts";
 import { createClient } from "@/lib/supabase/server";
 
 const schema = z.object({
@@ -9,7 +10,26 @@ const schema = z.object({
   excludeFromExport: z.boolean().optional(),
   structureNotes: z.string().max(2000).nullable().optional(),
   clearSummary: z.boolean().default(true),
+  // Set when this save follows a content-changing structure repair (merge,
+  // expand, shorten, regenerate) in the same modal session — every one of
+  // these book-wide evaluations was built from the manuscript as it existed
+  // before the repair, so they're stale the moment chapter content changes.
+  invalidateBookEvaluations: z.boolean().optional().default(false),
 });
+
+// Book-wide evaluations invalidated by a structural chapter repair. Does NOT
+// include per-paragraph revision history (revision_versions) or the
+// Manuscript Blueprint (book_bibles) — those aren't nuked by fixing one
+// chapter's length/boundaries.
+const STALE_REPORT_TYPES = [
+  ...Object.keys(criticLenses).map((lens) => `critic:${lens}`),
+  ...Object.keys(criticLenses).map((lens) => `critic_post:${lens}`),
+  "critic_batch",
+  "critic_post_batch",
+  "rewrite_plan",
+  "rewrite_drift_check",
+  "continuity_ledger",
+];
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
@@ -91,7 +111,20 @@ export async function PATCH(request: Request, context: { params: Promise<{ chapt
 
     const { data, error } = await supabase.from("chapters").update(update).eq("id", chapterId).select("*").single();
     if (error) throw error;
-    return NextResponse.json({ content: { chapter: data } });
+
+    let invalidatedCount = 0;
+    if (body.invalidateBookEvaluations) {
+      const { data: deleted, error: invalidateError } = await supabase
+        .from("coherence_reports")
+        .delete()
+        .eq("book_id", data.book_id)
+        .in("report_type", STALE_REPORT_TYPES)
+        .select("id");
+      if (invalidateError) throw invalidateError;
+      invalidatedCount = deleted?.length || 0;
+    }
+
+    return NextResponse.json({ content: { chapter: data, invalidatedCount } });
   } catch (error) {
     console.error("Update chapter failed", error);
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });

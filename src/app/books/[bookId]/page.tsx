@@ -451,7 +451,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
 
         <GuidanceWorkflowPanel bookId={bookId} reports={reports || []} />
 
-        <ChapterMetadataPanel chapters={chapters || []} paragraphs={paragraphRows || []} />
+        <ChapterMetadataPanel bookId={bookId} chapters={chapters || []} paragraphs={paragraphRows || []} />
 
         <StructureAuditPanel chapters={chapters || []} paragraphs={paragraphRows || []} />
 
