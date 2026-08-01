@@ -44,7 +44,7 @@ export default async function DashboardPage() {
       .limit(6),
     supabase
       .from("user_settings")
-      .select("onboarding_completed_steps, primary_rewrite_model, llm_api_key, llm_provider")
+      .select("onboarding_completed_steps, primary_rewrite_model, llm_api_key_secret_id, llm_provider")
       .eq("user_id", user.id)
       .maybeSingle(),
   ]);
@@ -76,10 +76,10 @@ export default async function DashboardPage() {
           </div>
           <Group>
             {(() => {
-              const s = userSettings as { onboarding_completed_steps?: string[]; primary_rewrite_model?: string; llm_api_key?: string } | null;
+              const s = userSettings as { onboarding_completed_steps?: string[]; primary_rewrite_model?: string; llm_api_key_secret_id?: string } | null;
               const completedSteps = s?.onboarding_completed_steps ?? [];
               const hasLmStudio = Boolean(s?.primary_rewrite_model);
-              const hasCloud = Boolean(s?.llm_api_key);
+              const hasCloud = Boolean(s?.llm_api_key_secret_id);
               const needsSetup = !hasLmStudio && !hasCloud;
               return (
                 <SetupWizard
@@ -104,8 +104,8 @@ export default async function DashboardPage() {
           <Metric label="Books" value={books?.length || 0} />
           <Metric label="Critic reports" value={reports?.length || 0} />
           {(() => {
-            const s = userSettings as { llm_provider?: string; llm_api_key?: string } | null;
-            const provider = s?.llm_api_key ? (s.llm_provider ?? "cloud") : "lmstudio";
+            const s = userSettings as { llm_provider?: string; llm_api_key_secret_id?: string } | null;
+            const provider = s?.llm_api_key_secret_id ? (s.llm_provider ?? "cloud") : "lmstudio";
             const labels: Record<string, string> = { lmstudio: "LM Studio", openai: "OpenAI", anthropic: "Anthropic", google: "Google Gemini" };
             return <Metric label="AI engine" value={labels[provider] ?? "LM Studio"} />;
           })()}

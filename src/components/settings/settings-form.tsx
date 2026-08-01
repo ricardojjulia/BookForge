@@ -90,7 +90,17 @@ function profileLabel(profile: QualityProfile) {
   return "Balanced Mode";
 }
 
-export function SettingsForm({ userId, initial, onSaved }: { userId: string; initial?: Partial<Settings>; onSaved?: () => void }) {
+export function SettingsForm({
+  userId,
+  initial,
+  hasApiKey,
+  onSaved,
+}: {
+  userId: string;
+  initial?: Partial<Settings>;
+  hasApiKey?: boolean;
+  onSaved?: () => void;
+}) {
   const [settings, setSettings] = useState<Settings>({
     lmstudio_base_url: initial?.lmstudio_base_url || "http://localhost:1234/v1",
     primary_rewrite_model: initial?.primary_rewrite_model || "",
@@ -120,6 +130,13 @@ export function SettingsForm({ userId, initial, onSaved }: { userId: string; ini
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [recommendations, setRecommendations] = useState<ModelRecommendation[]>([]);
+  // The API key is never sent back from the server (it's vault-encrypted,
+  // write-only from the client's perspective — see settings/page.tsx), so
+  // this field always starts blank even when a key is already saved. Only
+  // include it in the save payload if the user actually types in it or
+  // explicitly clears it — otherwise every unrelated settings save would
+  // send an empty string and wipe out the saved key.
+  const [apiKeyTouched, setApiKeyTouched] = useState(false);
   const [perFeature, setPerFeature] = useState(
     Boolean(initial?.llm_critic_model || initial?.llm_rewrite_model || initial?.llm_planning_model || initial?.llm_extraction_model),
   );
@@ -178,18 +195,20 @@ export function SettingsForm({ userId, initial, onSaved }: { userId: string; ini
     setStatus(null);
     try {
       const supabase = createClient();
-      const { error: saveError } = await supabase
-        .from("user_settings")
-        .upsert(
-          {
-            user_id: userId,
-            ...settings,
-            llm_api_key: settings.llm_api_key.trim(),
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "user_id" },
-        );
+      const payload: Record<string, unknown> = {
+        user_id: userId,
+        ...settings,
+        updated_at: new Date().toISOString(),
+      };
+      delete payload.llm_api_key;
+      // Only touch the vaulted API key if the user actually edited or
+      // cleared this field this session — see apiKeyTouched above.
+      if (apiKeyTouched) {
+        payload.llm_api_key = settings.llm_api_key.trim();
+      }
+      const { error: saveError } = await supabase.from("user_settings").upsert(payload, { onConflict: "user_id" });
       if (saveError) throw saveError;
+      if (apiKeyTouched) setApiKeyTouched(false);
       setStatus("Settings saved.");
       onSaved?.();
     } catch (err) {
@@ -482,9 +501,36 @@ export function SettingsForm({ userId, initial, onSaved }: { userId: string; ini
                 {selectedProviderMeta?.requiresApiKey && (
                   <PasswordInput
                     label="API key"
-                    placeholder="sk-..."
+                    placeholder={hasApiKey && !apiKeyTouched ? "Saved — enter a new key to replace it" : "sk-..."}
+                    description={
+                      hasApiKey
+                        ? apiKeyTouched
+                          ? settings.llm_api_key.trim()
+                            ? "This will replace the saved key."
+                            : "This will clear the saved key."
+                          : "A key is already saved (encrypted). Leave blank to keep it."
+                        : "Stored encrypted, never in plaintext."
+                    }
                     value={settings.llm_api_key}
-                    onChange={(event) => update("llm_api_key", event.currentTarget.value)}
+                    onChange={(event) => {
+                      setApiKeyTouched(true);
+                      update("llm_api_key", event.currentTarget.value);
+                    }}
+                    rightSection={
+                      hasApiKey ? (
+                        <Button
+                          variant="subtle"
+                          color="red"
+                          size="compact-xs"
+                          onClick={() => {
+                            setApiKeyTouched(true);
+                            update("llm_api_key", "");
+                          }}
+                        >
+                          Clear
+                        </Button>
+                      ) : undefined
+                    }
                   />
                 )}
                 <TextInput
