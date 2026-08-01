@@ -8,6 +8,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Auth%20%2B%20Storage-3ECF8E)](https://supabase.com/)
 [![LM Studio](https://img.shields.io/badge/AI%20Engine-LM%20Studio%20%7C%20Cloud-8A2BE2)](https://lmstudio.ai/)
+[![OpenRouter](https://img.shields.io/badge/Cloud%20Routing-OpenRouter-0F172A)](https://openrouter.ai/)
 
 [Quick Start](#quick-start) · [How-To Guide](docs/HOWTO.md) · [Changelog](CHANGELOG.md) · [Architecture](docs/ARCHITECTURE.md)
 
@@ -28,15 +29,19 @@ And it runs on your own machine if you want it to. BookForge talks to [LM Studio
 ## What it actually does
 
 ```mermaid
-flowchart LR
-    A[Import manuscript<br/>or start from an idea] --> B[Manuscript Blueprint<br/>book bible: voice, characters, themes]
-    B --> C[BookForge Critic<br/>8 scored evaluation lenses]
-    C --> D[Rewrite Architect<br/>coherence contract + plan]
-    D --> E[Guided rewrite batches<br/>paragraph-level, context-aware]
-    E --> F[Accept / reject / rerun<br/>author stays in control]
-    F --> G[Drift check +<br/>post-rewrite critic]
-    G --> H[Export & finish<br/>DOCX / EPUB / PDF / Markdown]
-    C -.loops up to 3x until every lens ≥ 70.-> D
+flowchart TB
+    A[Import manuscript<br/>or start from an idea] --> B[Manuscript Blueprint<br/>voice, characters, themes]
+    B --> C
+
+    subgraph Loop["Critique to rewrite to re-critique — repeats up to 3x, until every lens scores 70+"]
+        C[BookForge Critic<br/>8 scored lenses] --> D[Rewrite Architect<br/>coherence contract + plan]
+        D --> E[Guided rewrite batches<br/>paragraph-level, context-aware]
+        E --> F[Accept / reject / rerun<br/>author stays in control]
+        F --> G[Drift check +<br/>post-rewrite critic]
+        G -. any lens still below 70 .-> C
+    end
+
+    G --> H[Export & finish<br/>DOCX, EPUB, PDF, Markdown]
 ```
 
 Every arrow above can be driven by hand, one step at a time — or handed to the **Auto-Review Wizard**, which runs the entire loop autonomously (summarize → blueprint → critique → rewrite → drift-check → re-critique → export), resuming cleanly from the last completed stage if it's interrupted by sleep, a network drop, or a closed laptop lid.
@@ -87,7 +92,7 @@ flowchart TB
     end
     subgraph AI["AI Engine"]
         LMS[LM Studio<br/>local OpenAI-compatible server]
-        Cloud[Cloud providers<br/>OpenAI · Anthropic · Google]
+        Cloud[Cloud providers<br/>OpenAI · Anthropic · Google · OpenRouter]
     end
 
     UI <--> API
@@ -101,6 +106,21 @@ flowchart TB
 ```
 
 Nothing about the AI layer is hardcoded to one provider. `selectAndPrepareActiveModel` decides — per call — whether a task goes to a locally loaded LM Studio model or a configured cloud provider, scores every candidate model by name/size/quantization heuristics *and* by this project's own recorded history for that exact model on that exact task, and hands back a prepared client plus the safe context/token budget to use.
+
+### Per-task model routing
+
+With a cloud provider configured, every AI call still gets routed by *task*, not just by provider — a high-volume, latency-sensitive call (critic lenses, extraction) doesn't need the same model as a low-volume call that benefits from stronger reasoning (planning), and the actual cost driver (full-manuscript rewrite passes) is worth tuning independently of both:
+
+```mermaid
+flowchart LR
+    Task{What kind<br/>of call?}
+    Task -->|Critic lens ×8,<br/>extraction| Cheap[Cheap, fast model<br/>e.g. Gemini 2.5 Flash Lite]
+    Task -->|Architecture and<br/>rewrite planning| Mid[Stronger reasoning model<br/>e.g. Claude Haiku 4.5]
+    Task -->|Full-book<br/>rewrite pass| Rewrite[Cost/quality balance<br/>e.g. DeepSeek V4 Pro]
+    Cheap & Mid & Rewrite --> Fallback[[Falls back to one<br/>configured model if unset]]
+```
+
+This is opt-in per user (**Settings → AI Settings → Optimize per feature**) — leave it off and one model handles everything, same as before.
 
 ## Tech stack
 

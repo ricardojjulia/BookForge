@@ -1,17 +1,3 @@
-export type RevisionMode =
-  | "humanize"
-  | "context_enhancement"
-  | "readability"
-  | "character_interaction"
-  | "good_writer_motif"
-  | "continuity_review"
-  | "voice_preservation"
-  | "pacing"
-  | "dialogue_polish"
-  | "show_dont_tell"
-  | "chapter_ending"
-  | "theological_alignment";
-
 export type ParsedParagraph = {
   paragraphNumber: number;
   text: string;
@@ -47,13 +33,29 @@ export type CriticLens =
   | "revision_priorities"
   | "dialogue_density";
 
-export type LlmProvider = "lmstudio" | "openai" | "anthropic" | "google";
+export type LlmProvider = "lmstudio" | "openai" | "anthropic" | "google" | "openrouter";
+
+/**
+ * Which pipeline stage a model call is for. Shared by both the LM Studio
+ * (local) task-model fields below and StandardLlmSettings.taskModels for
+ * cloud providers — see selectAndPrepareActiveModel in
+ * src/lib/lmstudio/orchestrator.ts, the single place that resolves a task
+ * to an actual model for whichever provider is active.
+ */
+export type LmStudioTaskKind = "planning" | "rewrite" | "critic" | "extraction";
 
 export type StandardLlmSettings = {
   provider: LlmProvider;
   apiKey?: string;
-  /** OpenAI / Anthropic / Google model name, e.g. "gpt-5", "claude-sonnet-5", "gemini-2.5-flash" */
+  /** Default/fallback model, used for any task without a specific override in taskModels. */
   model?: string;
+  /**
+   * Optional per-task overrides — e.g. a cheap fast model for high-volume
+   * critic calls and a stronger one for full-manuscript rewrites. Most
+   * useful with OpenRouter, where cost/speed varies widely by model; falls
+   * back to `model` for any task not set here.
+   */
+  taskModels?: Partial<Record<LmStudioTaskKind, string>>;
   /** Only used for OpenAI-compatible custom endpoints */
   baseUrl?: string;
   temperature?: number;

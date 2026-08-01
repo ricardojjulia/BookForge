@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.0 - 2026-08-01
+
+### OpenRouter provider
+
+- New cloud provider option: **OpenRouter** — one API key routes to hundreds of backend models (DeepSeek, Gemini, Claude, GPT, and more) via a single OpenAI-compatible endpoint. Added alongside the existing OpenAI/Anthropic/Google options in Settings and the onboarding wizard's Cloud step.
+- New **per-task model overrides**: an "Optimize per feature" switch lets a user assign a different model to critic lenses, full-book rewrite passes, planning/architecture calls, and extraction/summaries — instead of one model for everything. Falls back to the single configured model for any task left blank. `selectAndPrepareActiveModel` resolves the right one per call.
+- Curated default OpenRouter model catalog with cost-tier guidance (`docs/openrouter-integration-plan.md`): `google/gemini-2.5-flash-lite` for high-volume critic/extraction calls, `deepseek/deepseek-v4-pro` for full-manuscript rewrite passes (the actual cost driver), `anthropic/claude-haiku-4.5` for planning, plus opt-in premium options (`gpt-5-mini`, `gemini-2.5-pro`).
+- New `llm_critic_model` / `llm_rewrite_model` / `llm_planning_model` / `llm_extraction_model` columns on `user_settings`, each falling back to `llm_model` when unset.
+- Cloud provider connection test now sends a real minimal chat completion for OpenAI/Anthropic/Google/OpenRouter, rather than only supporting the LM Studio `/models` check.
+
+### Rewrite reliability and speed
+
+- **Empty-completion detection and retry**: found via load-testing that a Tier-B rewrite model (`deepseek/deepseek-v4-pro`) returned an empty completion on ~17% of full-manuscript rewrite calls. `rewrite-execute` now retries a paragraph up to 3 times before giving up, and a paragraph that still comes back empty is recorded as a real failure instead of silently keeping the original text under a generic "rewritten" label.
+- Fixed a bug where a rewrite job's `failedUnits` list only ever kept the most recent failure — every subsequent successful paragraph overwrote it. Failures now accumulate for the whole run, so `retryJobId` can actually find and re-process everything that failed, not just the last one.
+- **Bounded concurrency**: full-book rewrite execution now processes up to 5 paragraphs at once instead of strictly one at a time — about 2x faster on measurement, with zero regressions in a validated run. Chunks never span two chapters (chapter *N* always finishes completely before chapter *N+1* starts), preserving paragraph-to-paragraph and chapter-to-chapter drift/consistency.
+
+### Auth UX
+
+- App header now shows the signed-in user's email and a **Sign out** button instead of always showing "Sign In," and updates live on auth state changes.
+
+### Removed
+
+- Dead code: the 12-mode `RevisionMode` type and `src/lib/prompts/revision-modes.ts` had no callers anywhere in the codebase — the live rewrite path has been `src/lib/rewrite/strategies.ts`'s 8 strategies for some time. Removed along with the now-unused `buildRevisionPrompt`.
+
 ## 0.2.3 - 2026-06-01
 
 ### Reliability and Freshness
