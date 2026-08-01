@@ -330,6 +330,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     let attempted = 0;
     let rewritten = 0;
+    let failed = 0;
     let skipped = 0;
     let skippedExistingDrafts = 0;
     let skippedAccepted = 0;
@@ -423,72 +424,57 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           : null,
     });
 
-    for (const [unitIndex, unit] of eligibleUnits.entries()) {
-      const pauseStatus = await waitWhileRevisionJobPaused(supabase, jobId);
-      if (pauseStatus === "cancelled") {
-        break;
-      }
-      const currentStatus = await getRevisionJobStatus(supabase, jobId);
-      if (currentStatus === "cancelled") {
-        break;
-      }
+    // Model calls (the network-bound, slow part) run CONCURRENCY-at-a-time within
+    // each chunk via Promise.allSettled. Everything that touches shared state —
+    // counters, the revision_versions insert, and the job's progress row — happens
+    // afterward in a plain sequential loop over that chunk's settled results, so
+    // there's never more than one writer touching jobSettings/failedUnitsLog at once.
+    const CONCURRENCY = 5;
+    const failedUnitsLog: Array<{ id: string; type: "paragraph"; label: string; error: string }> = [];
+    let hardError: unknown = null;
 
+    async function runUnit(unit: RewriteUnit) {
       const { chapter, chapterIndex, paragraph, paragraphIndex, rows } = unit;
-      attempted += 1;
-      jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
-        currentUnit: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number} (${unitIndex + 1}/${eligibleUnits.length})`,
-        totalUnits: eligibleUnits.length,
-        attempted,
-        successful: rewritten,
-        failed: 0,
-        skipped,
+      const contextPacket = buildRewriteContextPacket({
+        manuscriptBlueprint: bible?.content,
+        rewritePlan: normalizedRewritePlan,
+        dialogDensity: book?.dialog_density,
+        chapter,
+        previousChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex - 1]?.summary,
+        nextChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex + 1]?.summary,
+        paragraph,
+        rows,
+        paragraphIndex,
+        criticReports: (criticReports || []) as Array<{
+          report_type: string;
+          content: Record<string, unknown> | null;
+          created_at?: string | null;
+        }>,
+        lockedPassages: (lockedPassageRows || []) as LockedPassageContextRow[],
+        acceptedRevisions: (acceptedRevisionRows || []) as AcceptedRevisionContextRow[],
+        continuityLedger: (continuityLedger?.content as Record<string, unknown> | null) || null,
       });
-      const heartbeat = createRevisionJobHeartbeat(supabase, jobId, jobSettings, {
-        currentUnit: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number} (${unitIndex + 1}/${eligibleUnits.length})`,
-        totalUnits: eligibleUnits.length,
-        attempted,
-        successful: rewritten,
-        failed: 0,
-        skipped,
+      const prompt = buildFullBookRewriteUnitPrompt({
+        manuscriptBlueprint: bible?.content,
+        rewritePlan: normalizedRewritePlan,
+        contextPacket,
+        chapterTitle: chapter.title || `Chapter ${chapter.chapter_number}`,
+        chapterSummary: chapter.summary,
+        previousChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex - 1]?.summary,
+        nextChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex + 1]?.summary,
+        previousParagraph: rows[paragraphIndex - 1]?.original_text,
+        nextParagraph: rows[paragraphIndex + 1]?.original_text,
+        rewriteStrategy,
+        authorInstructions: body.authorInstructions,
+        voiceProfile: (bible as { voice_profile?: unknown } | null)?.voice_profile,
+        paragraphNumber: paragraph.paragraph_number,
+        text: paragraph.original_text,
       });
 
-      try {
-        const contextPacket = buildRewriteContextPacket({
-          manuscriptBlueprint: bible?.content,
-          rewritePlan: normalizedRewritePlan,
-          dialogDensity: book?.dialog_density,
-          chapter,
-          previousChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex - 1]?.summary,
-          nextChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex + 1]?.summary,
-          paragraph,
-          rows,
-          paragraphIndex,
-          criticReports: (criticReports || []) as Array<{
-            report_type: string;
-            content: Record<string, unknown> | null;
-            created_at?: string | null;
-          }>,
-          lockedPassages: (lockedPassageRows || []) as LockedPassageContextRow[],
-          acceptedRevisions: (acceptedRevisionRows || []) as AcceptedRevisionContextRow[],
-          continuityLedger: (continuityLedger?.content as Record<string, unknown> | null) || null,
-        });
-        const prompt = buildFullBookRewriteUnitPrompt({
-          manuscriptBlueprint: bible?.content,
-          rewritePlan: normalizedRewritePlan,
-          contextPacket,
-          chapterTitle: chapter.title || `Chapter ${chapter.chapter_number}`,
-          chapterSummary: chapter.summary,
-          previousChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex - 1]?.summary,
-          nextChapterSummary: ((chapters || []) as ChapterRow[])[chapterIndex + 1]?.summary,
-          previousParagraph: rows[paragraphIndex - 1]?.original_text,
-          nextParagraph: rows[paragraphIndex + 1]?.original_text,
-          rewriteStrategy,
-          authorInstructions: body.authorInstructions,
-          voiceProfile: (bible as { voice_profile?: unknown } | null)?.voice_profile,
-          paragraphNumber: paragraph.paragraph_number,
-          text: paragraph.original_text,
-        });
-
+      const maxCompletionAttempts = 3;
+      let parsed: unknown = null;
+      let revisedText = "";
+      for (let completionAttempt = 1; completionAttempt <= maxCompletionAttempts; completionAttempt += 1) {
         const completion = await createManagedChatCompletion(
           client,
           preparedModel,
@@ -501,11 +487,89 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           undefined,
           telemetryContext,
         );
+        parsed = parseRewriteResponse(completion.choices[0]?.message.content || "{}");
+        revisedText = extractRevisedText(parsed);
+        if (revisedText) break;
+      }
 
-        const parsed = parseRewriteResponse(completion.choices[0]?.message.content || "{}");
-        const revisedText = extractRevisedText(parsed) || paragraph.original_text;
+      return { unit, parsed, revisedText, emptyCompletionAttempts: maxCompletionAttempts };
+    }
+
+    for (let chunkStart = 0; chunkStart < eligibleUnits.length; ) {
+      if (hardError) break;
+      const pauseStatus = await waitWhileRevisionJobPaused(supabase, jobId);
+      if (pauseStatus === "cancelled") break;
+      const currentStatus = await getRevisionJobStatus(supabase, jobId);
+      if (currentStatus === "cancelled") break;
+
+      // Never let a chunk span two chapters: chapters are rewritten strictly one
+      // after another (chapter N fully finishes before N+1 starts) to preserve
+      // paragraph-to-paragraph and chapter-to-chapter drift/consistency. Only
+      // paragraphs within the same chapter are ever run concurrently.
+      const chunkStartIndex = chunkStart;
+      const chunk = [eligibleUnits[chunkStartIndex]];
+      while (
+        chunk.length < CONCURRENCY &&
+        chunkStartIndex + chunk.length < eligibleUnits.length &&
+        eligibleUnits[chunkStartIndex + chunk.length].chapter.id === chunk[0].chapter.id
+      ) {
+        chunk.push(eligibleUnits[chunkStartIndex + chunk.length]);
+      }
+      chunkStart += chunk.length;
+      const heartbeat = createRevisionJobHeartbeat(supabase, jobId, jobSettings, {
+        currentUnit: `Rewrite units ${chunkStartIndex + 1}-${chunkStartIndex + chunk.length} of ${eligibleUnits.length}`,
+        totalUnits: eligibleUnits.length,
+        attempted,
+        successful: rewritten,
+        failed,
+        skipped,
+      });
+      const settled = await Promise.allSettled(chunk.map((unit) => runUnit(unit)));
+      heartbeat.stop();
+
+      for (const [chunkIndex, result] of settled.entries()) {
+        const unit = chunk[chunkIndex];
+        const { chapter, paragraph } = unit;
+        const unitLabel = `chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`;
+        attempted += 1;
+
+        if (result.status === "rejected") {
+          failed += 1;
+          const message = getErrorMessage(result.reason);
+          failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
+          hardError = hardError || result.reason;
+          jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+            currentUnit: `Failed at ${unitLabel}`,
+            totalUnits: eligibleUnits.length,
+            attempted,
+            successful: rewritten,
+            failed,
+            skipped,
+            message,
+            failedUnits: failedUnitsLog,
+          });
+          break;
+        }
+
+        const { parsed, revisedText, emptyCompletionAttempts } = result.value;
+        if (!revisedText) {
+          failed += 1;
+          const message = `Model returned an empty completion after ${emptyCompletionAttempts} attempt(s); paragraph left untouched.`;
+          failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
+          jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+            currentUnit: `Empty completion at ${unitLabel}`,
+            totalUnits: eligibleUnits.length,
+            attempted,
+            successful: rewritten,
+            failed,
+            skipped,
+            message,
+            failedUnits: failedUnitsLog,
+          });
+          continue;
+        }
+
         const continuityWarnings = extractArray(parsed, "continuityWarnings");
-
         const { error: versionError } = await supabase.from("revision_versions").insert({
           revision_job_id: jobId,
           book_id: bookId,
@@ -517,46 +581,42 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           revision_notes: extractString(parsed, "revisionNotes") || "Full-book rewrite draft.",
           continuity_warnings: continuityWarnings,
         });
-        if (versionError) throw versionError;
+        if (versionError) {
+          failed += 1;
+          const message = getErrorMessage(versionError);
+          failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
+          hardError = hardError || versionError;
+          jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+            currentUnit: `Failed to save ${unitLabel}`,
+            totalUnits: eligibleUnits.length,
+            attempted,
+            successful: rewritten,
+            failed,
+            skipped,
+            message,
+            failedUnits: failedUnitsLog,
+          });
+          break;
+        }
 
         rewritten += 1;
         warnings.push(...continuityWarnings);
         jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
           currentUnit:
-            unitIndex + 1 >= eligibleUnits.length
+            attempted >= eligibleUnits.length
               ? "Finalizing rewrite job"
-              : `Rewrite unit ${unitIndex + 2} of ${eligibleUnits.length}`,
+              : `Rewrite unit ${attempted + 1} of ${eligibleUnits.length}`,
           totalUnits: eligibleUnits.length,
           attempted,
           successful: rewritten,
-          failed: 0,
+          failed,
           skipped,
-          failedUnits: [],
+          failedUnits: failedUnitsLog,
         });
-      } catch (unitError) {
-        const message = getErrorMessage(unitError);
-        jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
-          currentUnit: `Failed at chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`,
-          totalUnits: eligibleUnits.length,
-          attempted,
-          successful: rewritten,
-          failed: 1,
-          skipped,
-          message,
-          failedUnits: [
-            {
-              id: paragraph.id,
-              type: "paragraph",
-              label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`,
-              error: message,
-            },
-          ],
-        });
-        throw unitError;
-      } finally {
-        heartbeat.stop();
       }
     }
+
+    if (hardError) throw hardError;
 
     const completedAt = new Date().toISOString();
     const finalStatus = await getRevisionJobStatus(supabase, jobId);
@@ -582,6 +642,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           unit: "paragraph",
           attempted,
           rewritten,
+          failed,
           skipped,
           skippedExistingDrafts,
           skippedAccepted,
@@ -593,9 +654,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             totalUnits: eligibleUnits.length,
             attempted,
             successful: rewritten,
-            failed: 0,
+            failed,
             skipped,
-            failedUnits: [],
+            failedUnits: failedUnitsLog,
             startedAt,
             completedAt,
             estimatedSecondsPerUnit: estimateSecondsPerRewriteUnit(model),
@@ -649,6 +710,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         model,
         attempted,
         rewritten,
+        failed,
         skipped,
         skippedExistingDrafts,
         skippedAccepted,
@@ -665,6 +727,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         model,
         attempted,
         rewritten,
+        failed,
         skipped,
         skippedExistingDrafts,
         skippedAccepted,

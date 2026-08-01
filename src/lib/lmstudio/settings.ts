@@ -2,6 +2,21 @@ import { DEFAULT_LMSTUDIO_BASE_URL } from "@/lib/lmstudio/client";
 import { createClient } from "@/lib/supabase/server";
 import type { LlmProvider, LmStudioSettings, StandardLlmSettings } from "@/lib/types";
 
+function buildTaskModels(data: {
+  llm_critic_model?: string | null;
+  llm_rewrite_model?: string | null;
+  llm_planning_model?: string | null;
+  llm_extraction_model?: string | null;
+} | null | undefined): StandardLlmSettings["taskModels"] {
+  const taskModels: StandardLlmSettings["taskModels"] = {
+    critic: data?.llm_critic_model || undefined,
+    rewrite: data?.llm_rewrite_model || undefined,
+    planning: data?.llm_planning_model || undefined,
+    extraction: data?.llm_extraction_model || undefined,
+  };
+  return Object.values(taskModels).some(Boolean) ? taskModels : undefined;
+}
+
 type ExecutionMode = LmStudioSettings["executionMode"];
 
 function toExecutionMode(value: unknown): ExecutionMode {
@@ -14,7 +29,7 @@ export async function getUserLmStudioSettings(userId: string): Promise<LmStudioS
   const { data } = await supabase
     .from("user_settings")
     .select(
-      "lmstudio_base_url,primary_rewrite_model,reasoning_model,extraction_model,embedding_model,reranker_model,quality_profile,context_window_tokens,temperature,top_p,repeat_penalty,max_output_tokens,llm_provider,llm_api_key,llm_model,llm_base_url,llm_temperature,llm_max_output_tokens,execution_mode",
+      "lmstudio_base_url,primary_rewrite_model,reasoning_model,extraction_model,embedding_model,reranker_model,quality_profile,context_window_tokens,temperature,top_p,repeat_penalty,max_output_tokens,llm_provider,llm_api_key,llm_model,llm_base_url,llm_temperature,llm_max_output_tokens,llm_critic_model,llm_rewrite_model,llm_planning_model,llm_extraction_model,execution_mode",
     )
     .eq("user_id", userId)
     .maybeSingle();
@@ -26,6 +41,7 @@ export async function getUserLmStudioSettings(userId: string): Promise<LmStudioS
           provider,
           apiKey: data?.llm_api_key || undefined,
           model: data?.llm_model || undefined,
+          taskModels: buildTaskModels(data),
           baseUrl: data?.llm_base_url || undefined,
           temperature: data?.llm_temperature != null ? Number(data.llm_temperature) : undefined,
           maxOutputTokens: data?.llm_max_output_tokens != null ? Number(data.llm_max_output_tokens) : undefined,

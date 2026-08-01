@@ -357,7 +357,8 @@ export async function selectAndPrepareActiveModel(
   if (shouldUseCloud(settings, profile.task) && settings.standardSettings) {
     const std = settings.standardSettings;
     const meta = PROVIDER_META.find((p) => p.id === std.provider);
-    const model = std.model || meta?.defaultModels[0] || "gpt-4o";
+    const taskModel = std.taskModels?.[profile.task];
+    const model = taskModel || std.model || meta?.defaultModels[0] || "gpt-4o";
     const maxOutputTokens = std.maxOutputTokens || 4096;
     const cloudPrepared: PreparedLmStudioModel = {
       model,
@@ -381,9 +382,14 @@ export async function selectAndPrepareActiveModel(
       availableModels: [],
       usedLoadedFallback: false,
       selectedScore: 100,
-      selectionReason: `Using ${meta?.label || std.provider} cloud provider`,
+      selectionReason: taskModel
+        ? `Using ${meta?.label || std.provider} cloud provider (${profile.task} model)`
+        : `Using ${meta?.label || std.provider} cloud provider`,
       unloadedInstances: [],
     };
+    const telemetryContext: ModelCallTelemetryContext | undefined = profile.telemetry
+      ? { ...profile.telemetry, task: profile.task, model }
+      : undefined;
     return {
       client: createProviderClient(std),
       model,
@@ -391,6 +397,7 @@ export async function selectAndPrepareActiveModel(
       modelSelection: cloudModelSelection,
       availableModels: [],
       nativeModelsAvailable: false,
+      telemetryContext,
     };
   }
 

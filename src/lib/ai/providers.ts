@@ -2,10 +2,11 @@
  * Unified LLM provider client factory.
  *
  * Supports:
- *   - LM Studio  (OpenAI-compatible local server)
- *   - OpenAI     (gpt-5, gpt-5-mini, gpt-4.1, o4-mini, …)
- *   - Anthropic  (claude-opus-5, claude-sonnet-5, claude-haiku-4-5, …)
- *   - Google     (gemini-2.5-pro, gemini-2.5-flash, …)  via OpenAI-compatible endpoint
+ *   - LM Studio   (OpenAI-compatible local server)
+ *   - OpenAI      (gpt-5, gpt-5-mini, gpt-4.1, o4-mini, …)
+ *   - Anthropic   (claude-opus-5, claude-sonnet-5, claude-haiku-4-5, …)
+ *   - Google      (gemini-2.5-pro, gemini-2.5-flash, …)  via OpenAI-compatible endpoint
+ *   - OpenRouter  (one API key, hundreds of backends)     via OpenAI-compatible endpoint
  *
  * All providers are normalised to a single `chatCompletion()` call that returns
  * an OpenAI-style `ChatCompletion` response so the rest of the codebase needs
@@ -59,6 +60,13 @@ export const PROVIDER_META: ProviderMeta[] = [
     // Google exposes an OpenAI-compatible REST endpoint
     defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
   },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    defaultModels: getCloudModelsForProvider("openrouter").map((entry) => entry.id),
+    requiresApiKey: true,
+    defaultBaseUrl: "https://openrouter.ai/api/v1",
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -96,6 +104,16 @@ export function createProviderClient(settings: StandardLlmSettings): OpenAI {
         baseURL:
           settings.baseUrl ||
           "https://generativelanguage.googleapis.com/v1beta/openai",
+      });
+
+    case "openrouter":
+      return new OpenAI({
+        apiKey: settings.apiKey || process.env.OPENROUTER_API_KEY || "",
+        baseURL: settings.baseUrl || "https://openrouter.ai/api/v1",
+        defaultHeaders: {
+          "HTTP-Referer": process.env.OPENROUTER_APP_URL || "https://bookforge.app",
+          "X-Title": "BookForge",
+        },
       });
 
     case "lmstudio":
@@ -165,6 +183,7 @@ export function getStandardLlmSettingsFromEnv(): StandardLlmSettings | null {
       process.env.OPENAI_API_KEY ||
       process.env.ANTHROPIC_API_KEY ||
       process.env.GOOGLE_API_KEY ||
+      process.env.OPENROUTER_API_KEY ||
       "",
     model: process.env.LLM_MODEL || undefined,
     baseUrl: process.env.LLM_BASE_URL || undefined,

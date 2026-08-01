@@ -12,6 +12,7 @@ import {
   Select,
   Stack,
   Stepper,
+  Switch,
   Text,
   TextInput,
   Title,
@@ -26,16 +27,27 @@ import {
 } from "@tabler/icons-react";
 import { createClient } from "@/lib/supabase/client";
 import { PROVIDER_META } from "@/lib/ai/providers";
+import { OPENROUTER_TASK_MODEL_DEFAULTS } from "@/lib/ai/model-catalog";
+import type { LmStudioTaskKind } from "@/lib/types";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 type Engine = "lmstudio" | "cloud";
-type CloudProvider = "openai" | "anthropic" | "google";
+type CloudProvider = "openai" | "anthropic" | "google" | "openrouter";
+type TaskModels = Partial<Record<LmStudioTaskKind, string>>;
+
+const TASK_INFO: { task: LmStudioTaskKind; label: string; hint: string }[] = [
+  { task: "critic", label: "Critic lenses", hint: "8 lenses, up to 5 passes per book — high volume, keep it cheap" },
+  { task: "rewrite", label: "Full-book rewrite passes", hint: "Reads and rewrites every paragraph — the main cost driver" },
+  { task: "planning", label: "Architecture & planning", hint: "Book bible, rewrite plans — lower volume, benefits from stronger reasoning" },
+  { task: "extraction", label: "Extraction & summaries", hint: "Chapter summaries and structured extraction — high volume, keep it cheap" },
+];
 
 const CLOUD_PROVIDERS: { value: CloudProvider; label: string }[] = [
   { value: "openai",     label: "OpenAI" },
   { value: "anthropic",  label: "Anthropic (Claude)" },
   { value: "google",     label: "Google Gemini" },
+  { value: "openrouter", label: "OpenRouter" },
 ];
 
 // Sourced from the shared provider catalog (@/lib/ai/providers) so the model
@@ -44,12 +56,14 @@ const CLOUD_MODELS: Record<CloudProvider, string[]> = {
   openai: PROVIDER_META.find((p) => p.id === "openai")?.defaultModels ?? [],
   anthropic: PROVIDER_META.find((p) => p.id === "anthropic")?.defaultModels ?? [],
   google: PROVIDER_META.find((p) => p.id === "google")?.defaultModels ?? [],
+  openrouter: PROVIDER_META.find((p) => p.id === "openrouter")?.defaultModels ?? [],
 };
 
 const CLOUD_API_LINKS: Record<CloudProvider, string> = {
   openai:    "https://platform.openai.com/api-keys",
   anthropic: "https://console.anthropic.com/settings/keys",
   google:    "https://aistudio.google.com/app/apikey",
+  openrouter: "https://openrouter.ai/keys",
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -225,17 +239,21 @@ function LmStudioStep({
 function CloudStep({
   onConnected,
 }: {
-  onConnected: (provider: CloudProvider, apiKey: string, model: string) => void;
+  onConnected: (provider: CloudProvider, apiKey: string, model: string, taskModels?: TaskModels) => void;
 }) {
   const [provider, setProvider] = useState<CloudProvider>("openai");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(CLOUD_MODELS.openai[0]);
+  const [perFeature, setPerFeature] = useState(false);
+  const [taskModels, setTaskModels] = useState<TaskModels>({});
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; error?: string } | null>(null);
 
   function handleProviderChange(p: CloudProvider) {
     setProvider(p);
     setModel(CLOUD_MODELS[p][0]);
+    setPerFeature(p === "openrouter");
+    setTaskModels(p === "openrouter" ? OPENROUTER_TASK_MODEL_DEFAULTS : {});
     setResult(null);
   }
 
@@ -245,7 +263,7 @@ function CloudStep({
     const r = await testCloudProvider(provider, apiKey, model);
     setResult(r);
     setTesting(false);
-    if (r.ok) onConnected(provider, apiKey, model);
+    if (r.ok) onConnected(provider, apiKey, model, perFeature ? taskModels : undefined);
   }
 
   return (
@@ -278,11 +296,44 @@ function CloudStep({
         rightSectionWidth={64}
       />
       <Select
-        label="Model"
+        label={perFeature ? "Default model" : "Model"}
+        description={perFeature ? "Fallback for anything not covered below" : undefined}
         data={CLOUD_MODELS[provider]}
         value={model}
         onChange={(v) => { if (v) { setModel(v); setResult(null); } }}
+        searchable
       />
+
+      <Switch
+        label="Optimize per feature"
+        description="Use a cheap fast model for high-volume calls (critics, extraction) and a stronger one for full-book rewrites, instead of one model for everything."
+        checked={perFeature}
+        onChange={(e) => {
+          const checked = e.currentTarget.checked;
+          setPerFeature(checked);
+          if (checked && Object.keys(taskModels).length === 0) {
+            setTaskModels(provider === "openrouter" ? OPENROUTER_TASK_MODEL_DEFAULTS : Object.fromEntries(TASK_INFO.map((t) => [t.task, model])));
+          }
+        }}
+      />
+
+      {perFeature && (
+        <Paper withBorder radius="sm" p="md" bg="#fbfaf8">
+          <Stack gap="sm">
+            {TASK_INFO.map(({ task, label, hint }) => (
+              <Select
+                key={task}
+                label={label}
+                description={hint}
+                data={CLOUD_MODELS[provider]}
+                value={taskModels[task] || model}
+                onChange={(v) => v && setTaskModels((current) => ({ ...current, [task]: v }))}
+                searchable
+              />
+            ))}
+          </Stack>
+        </Paper>
+      )}
 
       {result && !result.ok && (
         <Alert color="yellow" title="Could not verify">
@@ -300,7 +351,7 @@ function CloudStep({
           Test connection
         </Button>
         {result && !result.ok && (
-          <Button variant="subtle" color="gray" onClick={() => onConnected(provider, apiKey, model)}>
+          <Button variant="subtle" color="gray" onClick={() => onConnected(provider, apiKey, model, perFeature ? taskModels : undefined)}>
             Skip test and save
           </Button>
         )}
@@ -331,6 +382,7 @@ export function SetupWizard({
   const [cloudProvider, setCloudProvider] = useState<CloudProvider>("openai");
   const [cloudApiKey, setCloudApiKey] = useState("");
   const [cloudModel, setCloudModel] = useState("");
+  const [cloudTaskModels, setCloudTaskModels] = useState<TaskModels | undefined>(undefined);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
@@ -353,6 +405,10 @@ export function SetupWizard({
           llm_provider: cloudProvider,
           llm_api_key: cloudApiKey,
           llm_model: cloudModel,
+          llm_critic_model: cloudTaskModels?.critic || null,
+          llm_rewrite_model: cloudTaskModels?.rewrite || null,
+          llm_planning_model: cloudTaskModels?.planning || null,
+          llm_extraction_model: cloudTaskModels?.extraction || null,
           execution_mode: "cloud",
         });
       }
@@ -436,10 +492,11 @@ export function SetupWizard({
               />
             ) : (
               <CloudStep
-                onConnected={(p, key, m) => {
+                onConnected={(p, key, m, taskModels) => {
                   setCloudProvider(p);
                   setCloudApiKey(key);
                   setCloudModel(m);
+                  setCloudTaskModels(taskModels);
                   setConnected(true);
                 }}
               />
@@ -470,7 +527,9 @@ export function SetupWizard({
             <Text c="dimmed" ta="center" maw={380}>
               {engine === "lmstudio"
                 ? "LM Studio is configured. Import a manuscript or create a new book to get started."
-                : `${CLOUD_PROVIDERS.find((p) => p.value === cloudProvider)?.label} is configured. Import a manuscript or create a new book to get started.`}
+                : `${CLOUD_PROVIDERS.find((p) => p.value === cloudProvider)?.label} is configured${
+                    cloudTaskModels ? " with per-feature models" : ""
+                  }. Import a manuscript or create a new book to get started.`}
             </Text>
             <Button color="grape" onClick={close}>
               Go to dashboard

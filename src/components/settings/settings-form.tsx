@@ -12,6 +12,7 @@ import {
   Select,
   SimpleGrid,
   Stack,
+  Switch,
   Table,
   Tabs,
   Text,
@@ -24,10 +25,18 @@ import {
   type QualityProfile,
 } from "@/lib/ai/model-recommendations";
 import { PROVIDER_META } from "@/lib/ai/providers";
-import type { LlmProvider } from "@/lib/types";
+import { OPENROUTER_TASK_MODEL_DEFAULTS } from "@/lib/ai/model-catalog";
+import type { LlmProvider, LmStudioTaskKind } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
 
 type ExecutionMode = "auto" | "local" | "cloud";
+
+const TASK_INFO: { task: LmStudioTaskKind; field: keyof Settings; label: string; hint: string }[] = [
+  { task: "critic", field: "llm_critic_model", label: "Critic lenses", hint: "8 lenses, up to 5 passes per book — high volume, keep it cheap" },
+  { task: "rewrite", field: "llm_rewrite_model", label: "Full-book rewrite passes", hint: "Reads and rewrites every paragraph — the main cost driver" },
+  { task: "planning", field: "llm_planning_model", label: "Architecture & planning", hint: "Book bible, rewrite plans — lower volume, benefits from stronger reasoning" },
+  { task: "extraction", field: "llm_extraction_model", label: "Extraction & summaries", hint: "Chapter summaries and structured extraction — high volume, keep it cheap" },
+];
 
 export type Settings = {
   // LM Studio
@@ -50,6 +59,11 @@ export type Settings = {
   llm_base_url: string;
   llm_temperature: number;
   llm_max_output_tokens: number;
+  // Per-task cloud model overrides — falls back to llm_model when blank
+  llm_critic_model: string;
+  llm_rewrite_model: string;
+  llm_planning_model: string;
+  llm_extraction_model: string;
   // Execution routing
   execution_mode: ExecutionMode;
 };
@@ -96,12 +110,19 @@ export function SettingsForm({ userId, initial, onSaved }: { userId: string; ini
     llm_base_url: initial?.llm_base_url || "",
     llm_temperature: Number(initial?.llm_temperature ?? 0.7),
     llm_max_output_tokens: Number(initial?.llm_max_output_tokens ?? 4096),
+    llm_critic_model: initial?.llm_critic_model || "",
+    llm_rewrite_model: initial?.llm_rewrite_model || "",
+    llm_planning_model: initial?.llm_planning_model || "",
+    llm_extraction_model: initial?.llm_extraction_model || "",
     execution_mode: (initial?.execution_mode as ExecutionMode) || "auto",
   });
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [recommendations, setRecommendations] = useState<ModelRecommendation[]>([]);
+  const [perFeature, setPerFeature] = useState(
+    Boolean(initial?.llm_critic_model || initial?.llm_rewrite_model || initial?.llm_planning_model || initial?.llm_extraction_model),
+  );
 
   function update<K extends keyof Settings>(key: K, value: Settings[K]) {
     setSettings((current) => ({ ...current, [key]: value }));
@@ -487,6 +508,54 @@ export function SettingsForm({ userId, initial, onSaved }: { userId: string; ini
                   onChange={(value) => update("llm_max_output_tokens", Number(value || 4096))}
                 />
               </SimpleGrid>
+
+              <Switch
+                label="Optimize per feature"
+                description="Use a cheap fast model for high-volume calls (critics, extraction) and a stronger one for full-book rewrites, instead of one model for everything. Falls back to the model above for anything left blank."
+                checked={perFeature}
+                onChange={(event) => {
+                  const checked = event.currentTarget.checked;
+                  setPerFeature(checked);
+                  if (checked && !settings.llm_critic_model && !settings.llm_rewrite_model && settings.llm_provider === "openrouter") {
+                    setSettings((current) => ({
+                      ...current,
+                      llm_critic_model: OPENROUTER_TASK_MODEL_DEFAULTS.critic,
+                      llm_rewrite_model: OPENROUTER_TASK_MODEL_DEFAULTS.rewrite,
+                      llm_planning_model: OPENROUTER_TASK_MODEL_DEFAULTS.planning,
+                      llm_extraction_model: OPENROUTER_TASK_MODEL_DEFAULTS.extraction,
+                    }));
+                  }
+                }}
+              />
+              {perFeature && (
+                <Paper withBorder radius="sm" p="md" bg="#fbfaf8">
+                  <SimpleGrid cols={{ base: 1, md: 2 }}>
+                    {TASK_INFO.map(({ field, label, hint }) =>
+                      providerModelOptions ? (
+                        <Select
+                          key={field}
+                          label={label}
+                          description={hint}
+                          data={providerModelOptions}
+                          value={(settings[field] as string) || settings.llm_model || providerModelOptions[0]?.value}
+                          onChange={(value) => update(field, (value || "") as Settings[typeof field])}
+                          searchable
+                        />
+                      ) : (
+                        <TextInput
+                          key={field}
+                          label={label}
+                          description={hint}
+                          placeholder={settings.llm_model || "Falls back to Model above"}
+                          value={settings[field] as string}
+                          onChange={(event) => update(field, event.currentTarget.value as Settings[typeof field])}
+                        />
+                      ),
+                    )}
+                  </SimpleGrid>
+                </Paper>
+              )}
+
               <Group>
                 <Button variant="outline" color="dark" loading={loading} onClick={testProviderConnection}>
                   Test Connection

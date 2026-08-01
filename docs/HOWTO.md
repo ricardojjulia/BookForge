@@ -15,6 +15,8 @@ LM Studio (or a cloud provider) configured.
 6. [Choose between LM Studio and a cloud provider](#6-choose-between-lm-studio-and-a-cloud-provider)
 7. [Read the Model Status panel when something misbehaves](#7-read-the-model-status-panel-when-something-misbehaves)
 8. [Export and mark a version finished](#8-export-and-mark-a-version-finished)
+9. [Set up OpenRouter and per-task model routing](#9-set-up-openrouter-and-per-task-model-routing)
+10. [Run a full-book rewrite, watch progress, and handle failures](#10-run-a-full-book-rewrite-watch-progress-and-handle-failures)
 
 ---
 
@@ -152,7 +154,8 @@ Laptop went to sleep, network dropped, tab got closed mid-run — it happens.
   right now, and which configured slot each visible model would be best
   suited for.
 - Under the **Cloud Provider** tab, add an API key and model for OpenAI,
-  Anthropic, or Google.
+  Anthropic, Google, or OpenRouter. See the next section for OpenRouter
+  specifically and per-task model overrides.
 
 ## 7. Read the Model Status panel when something misbehaves
 
@@ -186,3 +189,63 @@ picked and what context it's loaded with next time.
    download button points to — mark it **finished**. This doesn't lock the
    manuscript from further revision; it just designates which export is
    current.
+
+## 9. Set up OpenRouter and per-task model routing
+
+OpenRouter fronts hundreds of models (DeepSeek, Gemini, Claude, GPT, and more)
+behind one API key and one OpenAI-compatible endpoint — useful if you don't
+want to manage separate OpenAI/Anthropic/Google keys, or want access to models
+those three don't offer directly.
+
+1. Grab a key from [openrouter.ai/keys](https://openrouter.ai/keys).
+2. **Settings → AI Settings → Cloud Provider tab.** Select **OpenRouter**,
+   paste the key, and pick a default model.
+3. Flip **Execution mode** to **Cloud** or **Auto** so cloud-eligible tasks
+   actually route there (see [section 6](#6-choose-between-lm-studio-and-a-cloud-provider)).
+4. Turn on **Optimize per feature** to assign a different model per task
+   instead of one model for everything:
+   - **Critic lenses** and **extraction/summaries** are high-volume, latency-sensitive
+     calls — a cheap, fast model is the right fit (BookForge pre-fills
+     `google/gemini-2.5-flash-lite` here for OpenRouter).
+   - **Architecture & planning** calls are lower volume and benefit from
+     stronger reasoning (pre-filled with `anthropic/claude-haiku-4.5`).
+   - **Full-book rewrite passes** are the actual cost driver — this is the one
+     worth spending on quality (pre-filled with `deepseek/deepseek-v4-pro`).
+   - Leave any of the four blank and it falls back to the single model chosen
+     in step 2.
+5. Use **Test Connection** before relying on it for a real run — it sends a
+   minimal real chat completion, not just a health check, so a bad key or
+   unsupported model shows up immediately instead of mid-job.
+
+See `docs/openrouter-integration-plan.md` for the full model shortlist and the
+cost reasoning behind each default.
+
+## 10. Run a full-book rewrite, watch progress, and handle failures
+
+Beyond the small sample batch in [section 1](#1-revise-an-existing-manuscript),
+here's what to expect running rewrite execution at full scale, and what to do
+if part of it fails.
+
+1. In **Studio Actions → Execute Rewrite**, raise **Draft rewrite batch size**
+   to cover the whole book (or use the **Rewrite Campaign** panel further down
+   the book page to run it in tracked batches instead of one giant click).
+2. Paragraphs are processed **one chapter at a time, in order** — chapter *N*
+   always finishes completely before chapter *N+1* starts. Within a chapter,
+   BookForge now processes several paragraphs at once (bounded concurrency)
+   rather than strictly one at a time, so a large book finishes noticeably
+   faster without changing the chapter-by-chapter ordering that keeps
+   paragraph-to-paragraph and chapter-to-chapter drift/consistency intact.
+3. Watch the **Persistent AI Jobs** panel for live progress — attempted,
+   successful, and failed counts update as chunks of paragraphs complete.
+4. If a model returns an unusable (empty) response for a paragraph, BookForge
+   retries that one paragraph up to 3 times before giving up on it — this is
+   automatic, nothing to do here.
+5. If a paragraph still fails after retries, it shows up under **failed**,
+   not silently mixed in with successful rewrites — the original text is left
+   untouched for that paragraph rather than getting a fake "rewritten"
+   version. Re-run just the failed paragraphs from the job's retry action
+   instead of re-running the whole batch.
+6. If a batch is going to run for a long time, it's safe to close the tab or
+   let the connection drop — the job keeps running on the server and its
+   progress is exactly what you'll see reflected in the Jobs panel when you
+   come back, not something you need to keep a tab open to guarantee.

@@ -1,5 +1,6 @@
 import OpenAI from "openai";
-import type { LmStudioSettings } from "@/lib/types";
+import type { LmStudioSettings, LmStudioTaskKind } from "@/lib/types";
+export type { LmStudioTaskKind } from "@/lib/types";
 import {
   getLmStudioContextErrorMessage,
   getLmStudioRuntimeLimits,
@@ -24,8 +25,6 @@ export type NativeLmStudioModel = {
   loaded_instances?: Array<{ id: string; config?: { context_length?: number } }>;
   max_context_length?: number;
 };
-
-export type LmStudioTaskKind = "planning" | "rewrite" | "critic" | "extraction";
 
 export type PreparedLmStudioModel = {
   model: string;

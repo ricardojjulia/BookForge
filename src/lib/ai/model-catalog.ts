@@ -11,10 +11,14 @@
  * Cloud model IDs: only the Anthropic entries below are treated as
  * authoritative (this repo has tooling that tracks Claude's current model
  * lineup). OpenAI and Google entries are best-effort and should be
- * spot-checked against each provider's own docs periodically.
+ * spot-checked against each provider's own docs periodically. OpenRouter
+ * entries use OpenRouter's own namespaced IDs (e.g. "deepseek/deepseek-v4-pro")
+ * and were checked against the live `GET /api/v1/models` catalog on
+ * 2026-07-31 — re-verify periodically, since OpenRouter model IDs/pricing
+ * change as new versions ship. See docs/openrouter-integration-plan.md.
  */
 
-import type { LlmProvider } from "@/lib/types";
+import type { LlmProvider, LmStudioTaskKind } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Cloud models
@@ -128,6 +132,71 @@ export const CLOUD_MODEL_CATALOG: CloudModelInfo[] = [
     bestFor: "Legacy/compatibility fallback when 2.5 models aren't available on the account.",
     costTier: "low",
   },
+
+  // --- OpenRouter (one API key, many backends — pricing verified live 2026-07-31, see docs/openrouter-integration-plan.md) ---
+  {
+    provider: "openrouter",
+    id: "google/gemini-2.5-flash-lite",
+    label: "Gemini 2.5 Flash Lite (OpenRouter)",
+    contextWindowTokens: 1_000_000,
+    strengths: ["fastest", "cheapest reliable option", "structured JSON output"],
+    bestFor: "Default for the 8 critic lenses — high call volume, short prompts, cost is a rounding error here.",
+    costTier: "low",
+  },
+  {
+    provider: "openrouter",
+    id: "deepseek/deepseek-v4-flash",
+    label: "DeepSeek V4 Flash (OpenRouter)",
+    contextWindowTokens: 1_000_000,
+    strengths: ["cheapest of the shortlist", "fast MoE (13B active params)"],
+    bestFor: "Critic-lens alternate/fallback when provider diversity or lower cost is preferred over Gemini.",
+    costTier: "low",
+  },
+  {
+    provider: "openrouter",
+    id: "deepseek/deepseek-v4-pro",
+    label: "DeepSeek V4 Pro (OpenRouter)",
+    contextWindowTokens: 1_000_000,
+    strengths: ["best cost/quality balance for long-form rewrite", "long context"],
+    bestFor: "Default for full-manuscript rewrite-strategy passes (rewrite-execute) — the actual cost driver in the pipeline.",
+    costTier: "low",
+  },
+  {
+    provider: "openrouter",
+    id: "google/gemini-2.5-flash",
+    label: "Gemini 2.5 Flash (OpenRouter)",
+    contextWindowTokens: 1_000_000,
+    strengths: ["fast", "cheap input", "long context"],
+    bestFor: "Rewrite-pass alternate to DeepSeek V4 Pro when a call is input-token-heavy (large context packets).",
+    costTier: "low",
+  },
+  {
+    provider: "openrouter",
+    id: "anthropic/claude-haiku-4.5",
+    label: "Claude Haiku 4.5 (OpenRouter)",
+    contextWindowTokens: 200_000,
+    strengths: ["fast", "strong prose/instruction-following", "premium but not wasteful"],
+    bestFor: "Pro/Studio-tier premium unlock for rewrite passes and drafting.",
+    costTier: "medium",
+  },
+  {
+    provider: "openrouter",
+    id: "openai/gpt-5-mini",
+    label: "GPT-5 Mini (OpenRouter)",
+    contextWindowTokens: 400_000,
+    strengths: ["cheapest true premium tier", "good instruction following"],
+    bestFor: "Pro/Studio-tier premium unlock when the user prefers OpenAI-family output over Anthropic.",
+    costTier: "medium",
+  },
+  {
+    provider: "openrouter",
+    id: "google/gemini-2.5-pro",
+    label: "Gemini 2.5 Pro (OpenRouter)",
+    contextWindowTokens: 1_000_000,
+    strengths: ["flagship reasoning", "very long context", "multimodal"],
+    bestFor: "Studio-tier opt-in for critic/revision passes that genuinely need flagship-level reasoning.",
+    costTier: "high",
+  },
 ];
 
 export function getCloudModelsForProvider(provider: Exclude<LlmProvider, "lmstudio">): CloudModelInfo[] {
@@ -137,6 +206,22 @@ export function getCloudModelsForProvider(provider: Exclude<LlmProvider, "lmstud
 export function getCloudModelInfo(provider: LlmProvider, id: string): CloudModelInfo | null {
   return CLOUD_MODEL_CATALOG.find((entry) => entry.provider === provider && entry.id === id) || null;
 }
+
+/**
+ * Recommended per-task OpenRouter models — a cheap fast model for
+ * high-volume critic/extraction calls, a stronger one for the
+ * full-manuscript rewrite passes that actually drive cost, and a
+ * mid-tier model for lower-volume architecture/planning calls. See
+ * docs/openrouter-integration-plan.md for the cost reasoning behind each
+ * pick. Used to pre-fill the onboarding wizard's "optimize per feature"
+ * default — the user can still override any of them.
+ */
+export const OPENROUTER_TASK_MODEL_DEFAULTS: Record<LmStudioTaskKind, string> = {
+  critic: "google/gemini-2.5-flash-lite",
+  extraction: "google/gemini-2.5-flash-lite",
+  rewrite: "deepseek/deepseek-v4-pro",
+  planning: "anthropic/claude-haiku-4.5",
+};
 
 // ---------------------------------------------------------------------------
 // Local (LM Studio) model families
