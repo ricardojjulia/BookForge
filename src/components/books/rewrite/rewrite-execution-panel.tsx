@@ -141,6 +141,7 @@ export function RewriteExecutionPanel({
     distributeAcrossChapters?: boolean;
     coverageMode?: "normal" | "uncovered_chapter_sample";
     campaignId?: string;
+    chapterId?: string;
     strategyId?: RewriteStrategyId;
     strategySettings?: RewriteStrategySettings;
     authorInstructions?: string;
@@ -153,8 +154,10 @@ export function RewriteExecutionPanel({
     );
     if (!confirmed) return;
 
-    const requestedMaxUnits = overrides.maxUnits ?? Number(maxUnits || eligibleParagraphCount);
-    const totalUnits = Math.min(requestedMaxUnits, eligibleParagraphCount || requestedMaxUnits || 1);
+    const targetChapter = overrides.chapterId ? rewriteCoverage.find((c) => c.chapterId === overrides.chapterId) : undefined;
+    const chapterRemaining = targetChapter ? Math.max(0, targetChapter.totalParagraphs - targetChapter.rewrittenParagraphs) : undefined;
+    const requestedMaxUnits = overrides.maxUnits ?? chapterRemaining ?? Number(maxUnits || eligibleParagraphCount);
+    const totalUnits = chapterRemaining ?? Math.min(requestedMaxUnits, eligibleParagraphCount || requestedMaxUnits || 1);
     const estimatedSecondsPerCall = 24;
     const startedAt = Date.now();
     setLoading(true);
@@ -180,8 +183,9 @@ export function RewriteExecutionPanel({
     });
 
     const payload = {
-      maxUnits: overrides.maxUnits ?? (maxUnits || undefined),
+      maxUnits: overrides.maxUnits ?? (targetChapter ? undefined : maxUnits || undefined),
       campaignId: overrides.campaignId,
+      chapterId: overrides.chapterId,
       rewriteExistingDrafts: overrides.rewriteExistingDrafts ?? rewriteExistingDrafts,
       rewriteAccepted: overrides.rewriteAccepted ?? rewriteAccepted,
       distributeAcrossChapters: overrides.distributeAcrossChapters ?? distributeAcrossChapters,
@@ -492,7 +496,11 @@ export function RewriteExecutionPanel({
             {typeof latestJob.settings?.rewritten === "number" ? ` · ${latestJob.settings.rewritten} rewritten` : ""}
           </Alert>
         )}
-        <RewriteCoverageSummary coverage={rewriteCoverage} />
+        <RewriteCoverageSummary
+          coverage={rewriteCoverage}
+          disabled={!hasPlan || loading}
+          onRewriteChapter={(chapterId) => executeRewriteWith({ chapterId })}
+        />
         <RewriteReadinessGate readiness={readiness} />
         <GuidedRewriteRun
           bookId={bookId}
@@ -1825,6 +1833,8 @@ function StrategyNumber({
 
 function RewriteCoverageSummary({
   coverage,
+  disabled,
+  onRewriteChapter,
 }: {
   coverage: Array<{
     chapterId: string;
@@ -1833,6 +1843,8 @@ function RewriteCoverageSummary({
     totalParagraphs: number;
     rewrittenParagraphs: number;
   }>;
+  disabled?: boolean;
+  onRewriteChapter?: (chapterId: string) => void;
 }) {
   const touchedChapters = coverage.filter((chapter) => chapter.rewrittenParagraphs > 0).length;
   const totalChapters = coverage.length;
@@ -1863,9 +1875,21 @@ function RewriteCoverageSummary({
                 {chapter.chapterNumber}. {chapter.title || "Untitled"}
               </Text>
               <Progress value={chapterPercent} color={chapterPercent ? "teal" : "gray"} radius="xl" size="sm" my={6} />
-              <Text size="xs" c="dimmed">
+              <Text size="xs" c="dimmed" mb={6}>
                 {chapter.rewrittenParagraphs}/{chapter.totalParagraphs} paragraphs
               </Text>
+              {onRewriteChapter && chapter.rewrittenParagraphs < chapter.totalParagraphs && (
+                <Button
+                  size="compact-xs"
+                  variant="light"
+                  color="grape"
+                  fullWidth
+                  disabled={disabled}
+                  onClick={() => onRewriteChapter(chapter.chapterId)}
+                >
+                  Rewrite this chapter
+                </Button>
+              )}
             </Paper>
           );
         })}

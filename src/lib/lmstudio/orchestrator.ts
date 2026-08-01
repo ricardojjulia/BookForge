@@ -342,7 +342,7 @@ export type ActiveModelPlan = PreparedLmStudioTaskModel & { client: OpenAI };
  * cloud – always cloud
  * local – always LM Studio
  */
-function shouldUseCloud(settings: LmStudioSettings, task: LmStudioTaskKind): boolean {
+export function shouldUseCloud(settings: LmStudioSettings, task: LmStudioTaskKind): boolean {
   if (!settings.standardSettings) return false;
   if (settings.executionMode === "cloud") return true;
   if (settings.executionMode === "local") return false;

@@ -1,4 +1,6 @@
 import { matchLocalModelFamily } from "@/lib/ai/model-catalog";
+import { PROVIDER_META } from "@/lib/ai/providers";
+import type { StandardLlmSettings } from "@/lib/types";
 
 export type RewriteModelSuitability = {
   model: string;
@@ -14,6 +16,40 @@ export type RewriteModelSelection = {
   candidates: RewriteModelSuitability[];
   warning: string | null;
 };
+
+/**
+ * The local-model suitability heuristics below (size/quantization/family
+ * name-matching) are meaningless for a cloud model — an opaque ID like
+ * "deepseek/deepseek-v4-pro" carries none of those signals, and there's
+ * nothing to "load." When the rewrite task actually routes to a cloud
+ * provider (see shouldUseCloud in orchestrator.ts), build the equivalent
+ * RewriteModelSelection shape directly from what's configured instead of
+ * running the LM Studio scorer against an empty model list — which is what
+ * produced the previously-shipped "No suitable rewrite model was detected"
+ * false warning for every cloud-configured rewrite.
+ */
+export function buildCloudRewriteModelSelection(std: StandardLlmSettings): RewriteModelSelection {
+  const providerLabel = PROVIDER_META.find((p) => p.id === std.provider)?.label || std.provider;
+  const model = std.taskModels?.rewrite || std.model || "";
+
+  if (!model) {
+    return {
+      threshold: 80,
+      best: null,
+      candidates: [],
+      warning: `No rewrite model configured for ${providerLabel}. Set one in Settings before running a full-book rewrite.`,
+    };
+  }
+
+  const suitability: RewriteModelSuitability = {
+    model,
+    score: 100,
+    label: "excellent",
+    reasons: [`Configured ${providerLabel} cloud model for full-book rewrite passes.`],
+    math: [],
+  };
+  return { threshold: 80, best: suitability, candidates: [suitability], warning: null };
+}
 
 export function selectBestRewriteModel(
   availableModels: string[],

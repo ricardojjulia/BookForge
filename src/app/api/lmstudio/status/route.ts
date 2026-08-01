@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getConfiguredTaskModels, isModelAvailable } from "@/lib/ai/model-status";
 import { getModelsTaskHealth } from "@/lib/ai/model-performance";
-import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
+import { buildCloudRewriteModelSelection, selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
 import { testLmStudioConnection } from "@/lib/lmstudio/client";
 import { getLmStudioRuntimeLimits } from "@/lib/lmstudio/runtime-limits";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
@@ -35,10 +35,17 @@ export async function GET() {
       ...item,
       available: isModelAvailable(item.model, availableModels),
     }));
-    const rewriteModelSuitability = selectBestRewriteModel(availableModels, {
-      qualityProfile: settings.qualityProfile,
-      contextWindowTokens: settings.contextWindowTokens,
-    });
+    // Rewrite routes to cloud only in execution mode "cloud" (mirrors
+    // shouldUseCloud in orchestrator.ts — "auto" always keeps rewrite
+    // local). Scoring LM Studio models by name heuristics is meaningless
+    // when rewrite isn't even using LM Studio.
+    const rewriteUsesCloud = settings.executionMode === "cloud" && Boolean(settings.standardSettings);
+    const rewriteModelSuitability = rewriteUsesCloud
+      ? buildCloudRewriteModelSelection(settings.standardSettings!)
+      : selectBestRewriteModel(availableModels, {
+          qualityProfile: settings.qualityProfile,
+          contextWindowTokens: settings.contextWindowTokens,
+        });
     const runtimeLimits = {
       planning: getLmStudioRuntimeLimits(settings, "planning"),
       rewrite: getLmStudioRuntimeLimits(settings, "rewrite"),

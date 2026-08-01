@@ -8,12 +8,12 @@ import {
   waitWhileRevisionJobPaused,
 } from "@/lib/ai/job-state";
 import { estimateAiCallPlan } from "@/lib/ai/call-planner";
-import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
+import { buildCloudRewriteModelSelection, selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
 import { getReasoningModelCandidates } from "@/lib/lmstudio/model-selection";
-import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
+import { selectAndPrepareActiveModel, shouldUseCloud } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { resolveMetadataSnapshotContext } from "@/lib/book-metadata/timeline";
 import { applyRewritePlanDefaults } from "@/lib/rewrite/plan-defaults";
@@ -223,10 +223,17 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         telemetry: { supabase, userId: user.id },
       });
       const { client, model, preparedModel, modelSelection, availableModels, telemetryContext } = modelPlan;
-      const rewriteModelSelection = selectBestRewriteModel(availableModels, {
-        qualityProfile: settings.qualityProfile,
-        contextWindowTokens: settings.contextWindowTokens,
-      });
+      // The upcoming rewrite pass may route to cloud even when this planning
+      // call didn't (execution mode "auto" sends planning to cloud but
+      // rewrite to local, or vice versa) — check the rewrite task
+      // specifically, not whichever task this call happened to use.
+      const rewriteModelSelection =
+        shouldUseCloud(settings, "rewrite") && settings.standardSettings
+          ? buildCloudRewriteModelSelection(settings.standardSettings)
+          : selectBestRewriteModel(availableModels, {
+              qualityProfile: settings.qualityProfile,
+              contextWindowTokens: settings.contextWindowTokens,
+            });
       const plan = estimateAiCallPlan({
         task: "critic",
         selectedModel: model,

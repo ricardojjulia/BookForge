@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildJobProgress, createRevisionJobHeartbeat, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
-import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
+import { buildCloudRewriteModelSelection, selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
@@ -20,6 +20,7 @@ const schema = z.object({
   maxUnits: z.number().int().positive().max(5000).optional(),
   campaignId: z.string().uuid().optional(),
   paragraphId: z.string().uuid().optional(),
+  chapterId: z.string().uuid().optional(),
   rewriteExistingDrafts: z.boolean().default(false),
   rewriteAccepted: z.boolean().default(false),
   retryJobId: z.string().uuid().optional(),
@@ -213,10 +214,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       telemetry: { supabase, userId: user.id },
     });
     const { client, model, preparedModel, modelSelection, availableModels, telemetryContext } = modelPlan;
-    const rewriteSelection = selectBestRewriteModel(availableModels, {
-      qualityProfile: settings.qualityProfile,
-      contextWindowTokens: settings.contextWindowTokens,
-    });
+    const rewriteSelection =
+      preparedModel.isCloud && settings.standardSettings
+        ? buildCloudRewriteModelSelection(settings.standardSettings)
+        : selectBestRewriteModel(availableModels, {
+            qualityProfile: settings.qualityProfile,
+            contextWindowTokens: settings.contextWindowTokens,
+          });
     const selectedStrategy = getRewriteStrategy(body.strategyId);
     const rewriteStrategy = {
       ...selectedStrategy,
@@ -361,6 +365,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     for (const [chapterIndex, chapter] of ((chapters || []) as ChapterRow[]).entries()) {
       if (chapter.exclude_from_rewrite) {
+        continue;
+      }
+      if (body.chapterId && chapter.id !== body.chapterId) {
         continue;
       }
       const { data: paragraphs, error: paragraphsError } = await supabase

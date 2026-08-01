@@ -211,6 +211,7 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
             chapterCount={chapterCount}
             hasBlueprint={Boolean(bible)}
             criticDone={criticCoverage.done}
+            criticTotal={Object.keys(criticLenses).length}
             hasRewritePlan={Boolean(rewritePlan)}
           />
         </div>
