@@ -134,66 +134,71 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     });
     const modelExecution = await preloadCriticModelExecution(supabase, user.id);
 
+    const pauseStatus = await waitWhileRevisionJobPaused(supabase, jobId);
+    const preDispatchStatus = pauseStatus === "cancelled" ? "cancelled" : await getRevisionJobStatus(supabase, jobId);
+
+    // All 8 lenses are independent, read-only evaluations of the same static
+    // context — unlike rewrite-execute's paragraphs, there's no ordering or
+    // drift concern, so they run fully concurrently rather than one at a
+    // time. Shared state (counters, job progress, failedUnits) is only ever
+    // touched in the plain sequential loop below, over already-settled
+    // results, so there's no race on the job row's progress column.
+    jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+      currentUnit: `Running all ${lenses.length} critic lenses`,
+      totalUnits: lenses.length,
+      attempted: 0,
+      successful: 0,
+      failed: 0,
+      skipped: 0,
+    });
+    const heartbeat = createRevisionJobHeartbeat(supabase, jobId, jobSettings, {
+      currentUnit: `Running all ${lenses.length} critic lenses`,
+      totalUnits: lenses.length,
+      attempted: 0,
+      successful: 0,
+      failed: 0,
+      skipped: 0,
+    });
+    const settled =
+      preDispatchStatus === "cancelled"
+        ? []
+        : await Promise.allSettled(
+            lenses.map((lens) =>
+              runCriticLens({
+                supabase,
+                bookId,
+                userId: user.id,
+                lens,
+                stage: batchStage,
+                preloadedContext,
+                modelExecution,
+              }),
+            ),
+          );
+    heartbeat.stop();
+
     for (const [index, lens] of lenses.entries()) {
-      const pauseStatus = await waitWhileRevisionJobPaused(supabase, jobId);
-      if (pauseStatus === "cancelled") break;
       const currentStatus = await getRevisionJobStatus(supabase, jobId);
       if (currentStatus === "cancelled") break;
 
       attempted += 1;
-      jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
-        currentUnit: `${criticLenses[lens].label} (${index + 1}/${lenses.length})`,
-        totalUnits: lenses.length,
-        attempted,
-        successful: results.length,
-        failed,
-        skipped: 0,
-      });
-      const heartbeat = createRevisionJobHeartbeat(supabase, jobId, jobSettings, {
-        currentUnit: `${criticLenses[lens].label} (${index + 1}/${lenses.length})`,
-        totalUnits: lenses.length,
-        attempted,
-        successful: results.length,
-        failed,
-        skipped: 0,
-      });
-      try {
-        const content = await runCriticLens({
-          supabase,
-          bookId,
-          userId: user.id,
-          lens,
-          stage: batchStage,
-          preloadedContext,
-          modelExecution,
-        });
-        results.push({ lens, score: content.score });
-        jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
-          currentUnit: index + 1 >= lenses.length ? "Finalizing critic batch" : `Critic lens ${index + 2} of ${lenses.length}`,
-          totalUnits: lenses.length,
-          attempted,
-          successful: results.length,
-          failed,
-          skipped: 0,
-          failedUnits,
-        });
-      } catch (criticError) {
+      const result = settled[index];
+      if (result.status === "fulfilled") {
+        results.push({ lens, score: result.value.score });
+      } else {
         failed += 1;
-        const message = getErrorMessage(criticError);
+        const message = getErrorMessage(result.reason);
         failedUnits.push({ id: lens, type: "critic_lens", label: criticLenses[lens].label, error: message });
-        await updateRevisionJobProgress(supabase, jobId, jobSettings, {
-          currentUnit: `Failed at ${criticLenses[lens].label}`,
-          totalUnits: lenses.length,
-          attempted,
-          successful: results.length,
-          failed,
-          skipped: 0,
-          message,
-          failedUnits,
-        });
-      } finally {
-        heartbeat.stop();
       }
+      jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+        currentUnit: attempted >= lenses.length ? "Finalizing critic batch" : `Critic lens ${attempted + 1} of ${lenses.length}`,
+        totalUnits: lenses.length,
+        attempted,
+        successful: results.length,
+        failed,
+        skipped: 0,
+        failedUnits,
+      });
     }
 
     if (results.length === 0 && failed > 0) {
