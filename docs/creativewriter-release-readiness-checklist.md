@@ -1,7 +1,7 @@
 # CreativeWriter Release Readiness Checklist
 
 Date: 2026-08-02
-Phase: 4F-R Structural Conflict Design
+Phase: 4I Structural Version And Tombstone Foundation
 Status: Not ready for broad release
 
 ## Current Readiness
@@ -24,11 +24,11 @@ Status: Not ready for broad release
 - [x] Support context can be searched and pinned locally per book.
 - [x] Structural create/delete/reorder operations remain rejected until conflict semantics exist.
 - [x] Structural conflict design exists before structural UI exposure.
+- [x] Structure versioning and tombstone strategy are implemented.
 - [ ] Desktop executable exists.
 - [ ] Local CreativeWriter database exists.
 - [ ] Notes/research/bible edits sync through a designed non-manuscript contract.
 - [ ] Pinned context syncs across devices or has explicit local-only product language.
-- [ ] Structure versioning and tombstone strategy are implemented.
 - [ ] Visual order conflict review exists.
 - [ ] Import jobs run outside request/response lifecycle.
 - [ ] Full cloud browser/API/data verification exists.

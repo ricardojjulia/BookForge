@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   creativeWriterLocalChangeSchema,
+  creativeWriterParagraphCreatePayloadSchema,
+  creativeWriterParagraphDeletePayloadSchema,
+  creativeWriterParagraphReorderPayloadSchema,
   creativeWriterSyncPushRequestSchema,
   detectCreativeWriterConflict,
 } from "@/lib/creativewriter-sync";
@@ -75,5 +78,61 @@ describe("CreativeWriter sync contracts", () => {
   it("detects local/cloud write conflicts", () => {
     expect(detectCreativeWriterConflict({ localBaseVersion: 4, cloudVersion: 5, localDirty: true, cloudChanged: true })).toBe(true);
     expect(detectCreativeWriterConflict({ localBaseVersion: 4, cloudVersion: 4, localDirty: true, cloudChanged: false })).toBe(false);
+  });
+
+  it("validates paragraph structural payload contracts", () => {
+    const createPayload = creativeWriterParagraphCreatePayloadSchema.parse({
+      bookId: "book-1",
+      chapterId: "chapter-1",
+      clientEntityId: "local-paragraph-1",
+      paragraphNumber: 3,
+      currentText: "New paragraph.",
+      baseChapterStructureVersion: 2,
+      afterParagraphId: "paragraph-2",
+    });
+
+    const deletePayload = creativeWriterParagraphDeletePayloadSchema.parse({
+      bookId: "book-1",
+      chapterId: "chapter-1",
+      lastKnownText: "Removed paragraph.",
+      lastKnownParagraphNumber: 2,
+      baseChapterStructureVersion: 2,
+      deletedAt: "2026-08-02T00:00:00.000Z",
+      deleteReason: "Author removed duplicate beat.",
+    });
+
+    const reorderPayload = creativeWriterParagraphReorderPayloadSchema.parse({
+      bookId: "book-1",
+      chapterId: "chapter-1",
+      baseOrderedParagraphIds: ["paragraph-1", "paragraph-2", "paragraph-3"],
+      orderedParagraphIds: ["paragraph-2", "paragraph-1", "paragraph-3"],
+      baseChapterStructureVersion: 2,
+    });
+
+    expect(createPayload.clientEntityId).toBe("local-paragraph-1");
+    expect(deletePayload.deleteReason).toContain("duplicate");
+    expect(reorderPayload.orderedParagraphIds[0]).toBe("paragraph-2");
+  });
+
+  it("rejects incomplete paragraph structural payloads", () => {
+    expect(() =>
+      creativeWriterParagraphCreatePayloadSchema.parse({
+        bookId: "book-1",
+        chapterId: "chapter-1",
+        paragraphNumber: 1,
+        currentText: "Missing local identifier.",
+        baseChapterStructureVersion: 0,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      creativeWriterParagraphReorderPayloadSchema.parse({
+        bookId: "book-1",
+        chapterId: "chapter-1",
+        baseOrderedParagraphIds: ["paragraph-1"],
+        orderedParagraphIds: [],
+        baseChapterStructureVersion: 0,
+      }),
+    ).toThrow();
   });
 });
