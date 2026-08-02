@@ -395,8 +395,8 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
             <Link href={`/books/${bookId}/world`} style={{ textDecoration: "none" }}>
               <Button size="xs" color="violet" variant="light">World Bible</Button>
             </Link>
-            <Link href={`/books/${bookId}/read`} style={{ textDecoration: "none" }}>
-              <Button size="xs" color="cyan" variant="light">Beta Reader View</Button>
+            <Link href={`/books/${bookId}/read?returnTo=${encodeURIComponent(`/books/${bookId}`)}&returnLabel=${encodeURIComponent("Back to Book")}`} style={{ textDecoration: "none" }}>
+              <Button size="xs" color="cyan" variant="light">Reader View</Button>
             </Link>
             <Link href={`/books/${bookId}/abridgement`} style={{ textDecoration: "none" }}>
               <Button size="xs" color="teal" variant="light">Abridged Edition</Button>

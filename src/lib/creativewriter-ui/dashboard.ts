@@ -20,10 +20,22 @@ export type CreativeWriterChapterView = {
 export type CreativeWriterParagraphView = {
   id: string;
   chapterId: string;
+  sceneId: string | null;
+  sceneNumber: number | null;
   paragraphNumber: number;
+  sourceParagraphNumber: number;
   currentText: string | null;
   acceptedText: string | null;
   updatedAt: string | null;
+};
+
+export type CreativeWriterReaderCommentView = {
+  id: string;
+  paragraphId: string | null;
+  annotatorId: string;
+  note: string;
+  resolved: boolean;
+  createdAt: string | null;
 };
 
 export type CreativeWriterConflictView = CreativeWriterConflict & {
@@ -84,6 +96,7 @@ export type CreativeWriterWorkspaceData = {
   selectedBook: CreativeWriterBookOption | null;
   chapters: CreativeWriterChapterView[];
   paragraphs: CreativeWriterParagraphView[];
+  readerComments: CreativeWriterReaderCommentView[];
   conflicts: CreativeWriterConflictView[];
   support: CreativeWriterSupportContextView;
   project: {
@@ -129,10 +142,26 @@ type ChapterRow = {
 type ParagraphRow = {
   id: string;
   chapter_id: string;
+  scene_id: string | null;
   paragraph_number: number;
   current_text: string | null;
   accepted_text: string | null;
   updated_at: string | null;
+};
+
+type SceneRow = {
+  id: string;
+  chapter_id: string;
+  scene_number: number;
+};
+
+type ReaderCommentRow = {
+  id: string;
+  paragraph_id: string | null;
+  annotator_id: string;
+  note: string;
+  resolved: boolean;
+  created_at: string | null;
 };
 
 type ConflictEventRow = {
@@ -208,6 +237,7 @@ export async function getCreativeWriterWorkspaceData(input: {
       selectedBook: null,
       chapters: [],
       paragraphs: [],
+      readerComments: [],
       conflicts: [],
       support: emptySupportContext(),
       project: null,
@@ -216,7 +246,9 @@ export async function getCreativeWriterWorkspaceData(input: {
 
   const [
     { data: chapterRows, error: chaptersError },
+    { data: sceneRows, error: scenesError },
     { data: paragraphRows, error: paragraphsError },
+    { data: readerCommentRows, error: readerCommentsError },
     { data: conflictRows, error: conflictsError },
     { data: authorNotesRow, error: authorNotesError },
     { data: referenceRows, error: referencesError },
@@ -233,11 +265,23 @@ export async function getCreativeWriterWorkspaceData(input: {
           .eq("book_id", selectedBook.id)
           .order("chapter_number"),
       ),
+      resolveList<SceneRow>(
+        table(input.supabase, "scenes")
+          .select("id,chapter_id,scene_number")
+          .eq("book_id", selectedBook.id)
+          .order("scene_number"),
+      ),
       resolveList<ParagraphRow>(
         table(input.supabase, "paragraphs")
-          .select("id,chapter_id,paragraph_number,current_text,accepted_text,updated_at")
+          .select("id,chapter_id,scene_id,paragraph_number,current_text,accepted_text,updated_at")
           .eq("book_id", selectedBook.id)
           .order("paragraph_number"),
+      ),
+      resolveList<ReaderCommentRow>(
+        table(input.supabase, "reader_annotations")
+          .select("id,paragraph_id,annotator_id,note,resolved,created_at")
+          .eq("book_id", selectedBook.id)
+          .order("created_at", { ascending: false }),
       ),
       resolveList<ConflictEventRow>(
         table(input.supabase, "creativewriter_sync_events")
@@ -298,7 +342,9 @@ export async function getCreativeWriterWorkspaceData(input: {
       ),
     ]);
   if (chaptersError) throw chaptersError;
+  if (scenesError) throw scenesError;
   if (paragraphsError) throw paragraphsError;
+  if (readerCommentsError) throw readerCommentsError;
   if (conflictsError && !isMissingCreativeWriterLedger(conflictsError)) throw conflictsError;
   const supportErrors = [authorNotesError, referencesError, bookBibleError, charactersError, locationsError, themesError, motifsError, timelineError].filter(Boolean);
   const blockingSupportError = supportErrors.find((error) => !isMissingCreativeWriterLedger(error));
@@ -315,7 +361,8 @@ export async function getCreativeWriterWorkspaceData(input: {
     books,
     selectedBook,
     chapters: (chapterRows || []).map(toChapterView),
-    paragraphs: (paragraphRows || []).map(toParagraphView),
+    paragraphs: toParagraphViews(paragraphRows || [], sceneRows || [], chapterRows || []),
+    readerComments: (readerCommentRows || []).map(toReaderCommentView),
     conflicts: conflictsError ? [] : (conflictRows || []).flatMap(toConflictView),
     support: {
       authorNotes: authorNotesError ? null : toAuthorNotesView(authorNotesRow),
@@ -374,14 +421,48 @@ function toChapterView(row: ChapterRow): CreativeWriterChapterView {
   };
 }
 
-function toParagraphView(row: ParagraphRow): CreativeWriterParagraphView {
+function toParagraphViews(rows: ParagraphRow[], scenes: SceneRow[], chapters: ChapterRow[]): CreativeWriterParagraphView[] {
+  const chapterOrder = new Map(chapters.map((chapter) => [chapter.id, chapter.chapter_number]));
+  const sceneById = new Map(scenes.map((scene) => [scene.id, scene]));
+  const nextParagraphNumberByChapter = new Map<string, number>();
+
+  return rows
+    .slice()
+    .sort((a, b) => {
+      const chapterCompare = (chapterOrder.get(a.chapter_id) ?? Number.MAX_SAFE_INTEGER) - (chapterOrder.get(b.chapter_id) ?? Number.MAX_SAFE_INTEGER);
+      if (chapterCompare !== 0) return chapterCompare;
+      const sceneCompare = (sceneById.get(a.scene_id || "")?.scene_number ?? Number.MAX_SAFE_INTEGER) - (sceneById.get(b.scene_id || "")?.scene_number ?? Number.MAX_SAFE_INTEGER);
+      if (sceneCompare !== 0) return sceneCompare;
+      const paragraphCompare = a.paragraph_number - b.paragraph_number;
+      if (paragraphCompare !== 0) return paragraphCompare;
+      return a.id.localeCompare(b.id);
+    })
+    .map((row) => {
+      const paragraphNumber = (nextParagraphNumberByChapter.get(row.chapter_id) || 0) + 1;
+      nextParagraphNumberByChapter.set(row.chapter_id, paragraphNumber);
+      const scene = sceneById.get(row.scene_id || "");
+      return {
+        id: row.id,
+        chapterId: row.chapter_id,
+        sceneId: row.scene_id,
+        sceneNumber: scene?.scene_number ?? null,
+        paragraphNumber,
+        sourceParagraphNumber: row.paragraph_number,
+        currentText: row.current_text,
+        acceptedText: row.accepted_text,
+        updatedAt: row.updated_at,
+      };
+    });
+}
+
+function toReaderCommentView(row: ReaderCommentRow): CreativeWriterReaderCommentView {
   return {
     id: row.id,
-    chapterId: row.chapter_id,
-    paragraphNumber: row.paragraph_number,
-    currentText: row.current_text,
-    acceptedText: row.accepted_text,
-    updatedAt: row.updated_at,
+    paragraphId: row.paragraph_id,
+    annotatorId: row.annotator_id,
+    note: row.note,
+    resolved: row.resolved,
+    createdAt: row.created_at,
   };
 }
 
