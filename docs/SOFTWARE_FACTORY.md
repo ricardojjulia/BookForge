@@ -8,6 +8,70 @@ Branch: feat/v0.3.0-next
 
 Execute the v0.3.0 software-factory cycle with traceable phases, explicit acceptance criteria, and fresh documentation.
 
+## World Bible Factory Slice — AI Discovery
+
+Date: 2026-08-02
+Status: Implemented, focused verification passed
+Owner: Product + Engineering
+
+### Scope Lock
+
+In scope:
+
+- A **Discover with AI** action in the World Bible.
+- Reuse of the durable Manuscript Blueprint extraction job.
+- Normalized persistence for characters, locations, themes, motifs, and timeline notes.
+- Per-book processed status, completion timestamp, and manuscript source hash.
+- AI provenance and deterministic discovery keys on normalized entities.
+- Manual-entry preservation and promotion of edited AI rows to manual ownership.
+- Focused service and component tests plus local migration proof.
+
+Out of scope:
+
+- Semantic entity merging or an author-facing conflict resolver.
+- Automatic stale-state calculation after manuscript edits.
+- A separate discovery job/event table.
+- Cloud Supabase migration deployment.
+
+### Approval Gates
+
+- Architecture approval: discovery is an explicit mode of the existing durable Blueprint analyzer, not a second extraction pipeline.
+- Data approval: AI inserts only missing entities; manual rows are never overwritten.
+- Ownership approval: editing an AI-discovered entity clears its discovery provenance and makes it manual.
+- Reliability approval: queue-first handoff, job heartbeats, cancellation, and Jobs History remain the source of truth.
+- Verification approval: focused tests, scoped lint, local migration application, and schema dump proof pass before closeout.
+
+### Decisions
+
+- Store detailed Blueprint metadata in `book_bibles.content` and normalized editable entities in their existing tables.
+- Add `world_bible_processed`, `world_bible_status`, `world_bible_processed_at`, and `world_bible_source_hash` to `books`.
+- Use partial unique indexes for AI discovery keys while allowing intentional duplicate manual entries.
+- Recover from a partial entity-batch failure through idempotent rerun rather than adding a new transaction RPC in this slice.
+
+### Verification Evidence
+
+- Passed: `npx vitest run src/lib/world/discovery.test.ts src/lib/world/discovery-server.test.ts src/components/books/world/world-bible-editor.test.tsx`
+- Result: 3 test files passed, 7 tests passed.
+- Passed: scoped ESLint and editor diagnostics for discovery services, analyzer, World Bible routes/page/component, prompt builder, and tests.
+- Passed: local migration `202608020003_world_bible_discovery.sql` applied with `supabase migration up --local`.
+- Passed: local schema dump confirmed book status fields, entity provenance checks, and five partial unique discovery-key indexes.
+- Runtime proof: the existing dev server returned HTTP 200 for BookForge and HTTP 200 with the expected `Book not found` state for a placeholder World Bible route, confirming the modified page compiled and executed.
+- Browser screenshot proof was unavailable because the workspace Playwright Chromium binary is not installed.
+- Blocked by 11 unrelated existing test typing errors in six files: `npx tsc --noEmit`.
+
+### Deliverables
+
+- `supabase/migrations/202608020003_world_bible_discovery.sql`
+- `src/lib/world/discovery.ts`
+- `src/lib/world/discovery-server.ts`
+- `src/lib/world/discovery.test.ts`
+- `src/lib/world/discovery-server.test.ts`
+- `src/components/books/world/world-bible-editor.tsx`
+- `src/components/books/world/world-bible-editor.test.tsx`
+- `src/app/api/books/[bookId]/analyze/route.ts`
+- `src/app/api/books/[bookId]/world/[entityType]/[entityId]/route.ts`
+- `src/app/books/[bookId]/world/page.tsx`
+
 ## CreativeWriter Factory Slice — Phase 1 Foundation
 
 Date: 2026-08-02

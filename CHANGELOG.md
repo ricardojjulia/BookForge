@@ -19,6 +19,12 @@
 - Added CreativeWriter factory artifacts covering architecture, API contracts, security, data integrity, failure modes, council review, release readiness, phase evaluations, and structural conflict design.
 - Added authenticated browser verification and local Supabase data proof across the CreativeWriter prototype phases.
 
+### World Bible discovery
+
+- Added **Discover with AI** to populate characters, locations, themes, motifs, and timeline notes from the manuscript through the durable Blueprint workflow.
+- Added per-book World Bible processing status and source hash plus AI provenance and idempotent discovery keys on normalized entities.
+- Preserved author-owned entries during discovery; editing an AI-discovered entry now promotes it to manual ownership.
+
 ## 0.4.0 - 2026-08-01
 
 ### OpenRouter provider

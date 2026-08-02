@@ -29,7 +29,11 @@ export default async function WorldBiblePage({ params }: { params: Promise<{ boo
     { data: timelineNotes },
     { data: chapters },
   ] = await Promise.all([
-    supabase.from("books").select("id,title").eq("id", bookId).single(),
+    supabase
+      .from("books")
+      .select("id,title,world_bible_processed,world_bible_status,world_bible_processed_at")
+      .eq("id", bookId)
+      .single(),
     supabase.from("characters").select("*").eq("book_id", bookId).order("created_at"),
     supabase.from("locations").select("*").eq("book_id", bookId).order("created_at"),
     supabase.from("themes").select("*").eq("book_id", bookId).order("created_at"),
@@ -61,6 +65,9 @@ export default async function WorldBiblePage({ params }: { params: Promise<{ boo
           initialMotifs={motifs || []}
           initialTimeline={timelineNotes || []}
           chapters={(chapters || []).map((c) => ({ id: c.id, chapter_number: c.chapter_number, title: c.title ?? null }))}
+          discoveryStatus={book.world_bible_status}
+          discoveryProcessed={book.world_bible_processed}
+          discoveryProcessedAt={book.world_bible_processed_at}
         />
       </Container>
     </AppShell>
