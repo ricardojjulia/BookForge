@@ -27,6 +27,7 @@ type RevisionSample = {
   original_text: string;
   revised_text: string;
   revision_notes: string | null;
+  created_at?: string;
   chapters?: { title?: string | null; chapter_number?: number | null } | null;
   paragraphs?: { paragraph_number?: number | null } | null;
 };
@@ -211,16 +212,11 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         return NextResponse.json({ skipped: true, reason: "No rewrite job found — drift check skipped." });
       }
 
-      const [
-        { data: bible },
-        { data: rewritePlan },
-        { data: continuityLedger },
-        { data: revisions, error: revisionsError },
-      ] = await Promise.all([
+      const [{ data: bible }, { data: rewritePlanRow }, { data: continuityLedger }] = await Promise.all([
         supabase.from("book_bibles").select("content").eq("book_id", bookId).maybeSingle(),
         supabase
           .from("coherence_reports")
-          .select("content")
+          .select("content,created_at")
           .eq("book_id", bookId)
           .eq("report_type", "rewrite_plan")
           .order("created_at", { ascending: false })
@@ -234,17 +230,47 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
-        supabase
-          .from("revision_versions")
-          .select("original_text,revised_text,revision_notes,chapters(title,chapter_number),paragraphs(paragraph_number)")
-          .eq("book_id", bookId)
-          .eq("revision_job_id", revisionJobId)
-          .order("created_at", { ascending: false })
-          .limit(30),
       ]);
+      const rewritePlan = rewritePlanRow;
+
+      // A real rewrite pass is split across many small revision_jobs rows
+      // (the UI caps "Execute Rewrite" at ~25 paragraphs/click), so filtering
+      // to one job_id -- even the right one -- only sees whichever chapter
+      // that particular click happened to land on. A fresh Rewrite Architect
+      // plan is generated before each full pass in the normal workflow, so
+      // "everything revised since the current plan was created" is a much
+      // better definition of "this pass" than any single job row. Falls back
+      // to the single-job filter only if no plan exists yet.
+      const passSinceIso = rewritePlanRow?.created_at || null;
+      let revisionsQuery = supabase
+        .from("revision_versions")
+        .select("original_text,revised_text,revision_notes,created_at,chapters(title,chapter_number),paragraphs(paragraph_number)")
+        .eq("book_id", bookId);
+      revisionsQuery = passSinceIso
+        ? revisionsQuery.gte("created_at", passSinceIso)
+        : revisionsQuery.eq("revision_job_id", revisionJobId);
+      const { data: allPassRevisions, error: revisionsError } = await revisionsQuery.order("created_at", { ascending: true });
       if (revisionsError) throw revisionsError;
 
-      const revisionSamples = ((revisions || []) as RevisionSample[]).map((revision) => ({
+      const manuscriptOrdered = ((allPassRevisions || []) as RevisionSample[]).slice().sort((a, b) => {
+        const chapterDiff = (a.chapters?.chapter_number ?? 0) - (b.chapters?.chapter_number ?? 0);
+        if (chapterDiff !== 0) return chapterDiff;
+        return (a.paragraphs?.paragraph_number ?? 0) - (b.paragraphs?.paragraph_number ?? 0);
+      });
+      // Sample ~10% of the pass's revisions (floor 10, cap 40) evenly spaced
+      // across manuscript order, so a small book still gets a meaningful
+      // check, a huge one stays within a sane prompt/cost budget, and every
+      // sample spans beginning-to-end instead of clustering wherever the
+      // most recent click happened to leave off.
+      const targetSampleSize = Math.min(40, Math.max(10, Math.ceil(manuscriptOrdered.length * 0.1)));
+      const sampledRevisions =
+        manuscriptOrdered.length <= targetSampleSize
+          ? manuscriptOrdered
+          : Array.from({ length: targetSampleSize }, (_, index) =>
+              manuscriptOrdered[Math.floor((index * manuscriptOrdered.length) / targetSampleSize)],
+            );
+
+      const revisionSamples = sampledRevisions.map((revision) => ({
         chapterTitle: revision.chapters?.title || `Chapter ${revision.chapters?.chapter_number || "unknown"}`,
         paragraphNumber: revision.paragraphs?.paragraph_number || null,
         originalText: revision.original_text.slice(0, 1800),
