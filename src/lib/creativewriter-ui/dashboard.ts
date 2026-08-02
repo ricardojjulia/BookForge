@@ -1,0 +1,475 @@
+import { createCreativeWriterSyncCursor, type CreativeWriterConflict } from "@/lib/creativewriter-sync";
+
+export type CreativeWriterBookOption = {
+  id: string;
+  title: string;
+  authorName: string | null;
+  status: string | null;
+  updatedAt: string | null;
+};
+
+export type CreativeWriterChapterView = {
+  id: string;
+  chapterNumber: number;
+  title: string | null;
+  summary: string | null;
+  currentText: string | null;
+  updatedAt: string | null;
+};
+
+export type CreativeWriterParagraphView = {
+  id: string;
+  chapterId: string;
+  paragraphNumber: number;
+  currentText: string | null;
+  acceptedText: string | null;
+  updatedAt: string | null;
+};
+
+export type CreativeWriterConflictView = CreativeWriterConflict & {
+  eventId: string;
+};
+
+export type CreativeWriterAuthorNotesView = {
+  creativeInstructions: string | null;
+  voiceGuidance: string | null;
+  worldviewNotes: string | null;
+  theologicalAlignment: string | null;
+  forbiddenChanges: string | null;
+  updatedAt: string | null;
+};
+
+export type CreativeWriterReferenceMaterialView = {
+  id: string;
+  title: string;
+  materialType: string | null;
+  content: string | null;
+  includeInPrompts: boolean;
+  createdAt: string | null;
+};
+
+export type CreativeWriterNamedContextView = {
+  id: string;
+  name: string;
+  description: string | null;
+  detail: string | null;
+};
+
+export type CreativeWriterTimelineNoteView = {
+  id: string;
+  note: string;
+  sequenceOrder: number | null;
+  detail: string | null;
+};
+
+export type CreativeWriterBookBibleView = {
+  content: Record<string, unknown> | null;
+  updatedAt: string | null;
+  characters: CreativeWriterNamedContextView[];
+  locations: CreativeWriterNamedContextView[];
+  themes: CreativeWriterNamedContextView[];
+  motifs: CreativeWriterNamedContextView[];
+  timeline: CreativeWriterTimelineNoteView[];
+};
+
+export type CreativeWriterSupportContextView = {
+  authorNotes: CreativeWriterAuthorNotesView | null;
+  references: CreativeWriterReferenceMaterialView[];
+  bible: CreativeWriterBookBibleView;
+};
+
+export type CreativeWriterWorkspaceData = {
+  accountId: string;
+  books: CreativeWriterBookOption[];
+  selectedBook: CreativeWriterBookOption | null;
+  chapters: CreativeWriterChapterView[];
+  paragraphs: CreativeWriterParagraphView[];
+  conflicts: CreativeWriterConflictView[];
+  support: CreativeWriterSupportContextView;
+  project: {
+    localProjectId: string;
+    accountId: string;
+    bookforgeBookId: string;
+    syncCursor: string;
+    lastCloudVersion: number;
+    linkedAt: string;
+  } | null;
+};
+
+export type CreativeWriterDashboardSupabaseLike = {
+  from: (table: string) => unknown;
+};
+
+type QueryBuilder = {
+  select: (columns: string, options?: unknown) => QueryBuilder;
+  eq: (column: string, value: unknown) => QueryBuilder;
+  order: (column: string, options?: { ascending?: boolean }) => QueryBuilder;
+  limit: (count: number) => QueryBuilder;
+  maybeSingle?: () => Promise<{ data?: unknown; error?: unknown }>;
+  then: (resolve: (value: { data?: unknown; error?: unknown }) => unknown) => unknown;
+};
+
+type BookRow = {
+  id: string;
+  title: string;
+  author_name: string | null;
+  status: string | null;
+  updated_at: string | null;
+};
+
+type ChapterRow = {
+  id: string;
+  chapter_number: number;
+  title: string | null;
+  summary: string | null;
+  current_text: string | null;
+  updated_at: string | null;
+};
+
+type ParagraphRow = {
+  id: string;
+  chapter_id: string;
+  paragraph_number: number;
+  current_text: string | null;
+  accepted_text: string | null;
+  updated_at: string | null;
+};
+
+type ConflictEventRow = {
+  id: string;
+  conflict_id: string | null;
+  conflict_payload: Record<string, unknown> | null;
+  resolution_status: CreativeWriterConflict["resolutionStatus"] | null;
+  created_at: string | null;
+};
+
+type AuthorNotesRow = {
+  creative_instructions: string | null;
+  voice_guidance: string | null;
+  worldview_notes: string | null;
+  theological_alignment: string | null;
+  forbidden_changes: string | null;
+  updated_at: string | null;
+};
+
+type ReferenceMaterialRow = {
+  id: string;
+  title: string;
+  material_type: string | null;
+  content: string | null;
+  include_in_prompts: boolean | null;
+  created_at: string | null;
+};
+
+type BookBibleRow = {
+  content: Record<string, unknown> | null;
+  updated_at: string | null;
+};
+
+type NamedContextRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  role?: string | null;
+  voice_notes?: string | null;
+  arc_notes?: string | null;
+  relationship_notes?: string | null;
+};
+
+type TimelineNoteRow = {
+  id: string;
+  note: string | null;
+  event?: string | null;
+  date_time?: string | null;
+  continuity_notes?: string | null;
+  sequence_order: number | null;
+};
+
+export async function getCreativeWriterWorkspaceData(input: {
+  supabase: CreativeWriterDashboardSupabaseLike;
+  accountId: string;
+  selectedBookId?: string | null;
+}): Promise<CreativeWriterWorkspaceData> {
+  const { data: bookRows, error: booksError } = await resolveList<BookRow>(
+    table(input.supabase, "books")
+      .select("id,title,author_name,status,updated_at")
+      .order("updated_at", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(40),
+  );
+  if (booksError) throw booksError;
+
+  const books = (bookRows || []).map(toBookOption);
+  const selectedBook = books.find((book) => book.id === input.selectedBookId) || books[0] || null;
+  if (!selectedBook) {
+    return {
+      accountId: input.accountId,
+      books,
+      selectedBook: null,
+      chapters: [],
+      paragraphs: [],
+      conflicts: [],
+      support: emptySupportContext(),
+      project: null,
+    };
+  }
+
+  const [
+    { data: chapterRows, error: chaptersError },
+    { data: paragraphRows, error: paragraphsError },
+    { data: conflictRows, error: conflictsError },
+    { data: authorNotesRow, error: authorNotesError },
+    { data: referenceRows, error: referencesError },
+    { data: bookBibleRow, error: bookBibleError },
+    { data: characterRows, error: charactersError },
+    { data: locationRows, error: locationsError },
+    { data: themeRows, error: themesError },
+    { data: motifRows, error: motifsError },
+    { data: timelineRows, error: timelineError },
+  ] = await Promise.all([
+      resolveList<ChapterRow>(
+        table(input.supabase, "chapters")
+          .select("id,chapter_number,title,summary,current_text,updated_at")
+          .eq("book_id", selectedBook.id)
+          .order("chapter_number"),
+      ),
+      resolveList<ParagraphRow>(
+        table(input.supabase, "paragraphs")
+          .select("id,chapter_id,paragraph_number,current_text,accepted_text,updated_at")
+          .eq("book_id", selectedBook.id)
+          .order("paragraph_number"),
+      ),
+      resolveList<ConflictEventRow>(
+        table(input.supabase, "creativewriter_sync_events")
+          .select("id,conflict_id,conflict_payload,resolution_status,created_at")
+          .eq("book_id", selectedBook.id)
+          .eq("account_id", input.accountId)
+          .eq("status", "conflict")
+          .eq("resolution_status", "unresolved")
+          .order("created_at", { ascending: false })
+          .limit(20),
+      ),
+      resolveMaybe<AuthorNotesRow>(
+        table(input.supabase, "author_notes")
+          .select("creative_instructions,voice_guidance,worldview_notes,theological_alignment,forbidden_changes,updated_at")
+          .eq("book_id", selectedBook.id),
+      ),
+      resolveList<ReferenceMaterialRow>(
+        table(input.supabase, "reference_materials")
+          .select("id,title,material_type,content,include_in_prompts,created_at")
+          .eq("book_id", selectedBook.id)
+          .order("created_at", { ascending: false })
+          .limit(12),
+      ),
+      resolveMaybe<BookBibleRow>(
+        table(input.supabase, "book_bibles")
+          .select("content,updated_at")
+          .eq("book_id", selectedBook.id),
+      ),
+      resolveList<NamedContextRow>(
+        table(input.supabase, "characters")
+          .select("*")
+          .eq("book_id", selectedBook.id)
+          .order("created_at"),
+      ),
+      resolveList<NamedContextRow>(
+        table(input.supabase, "locations")
+          .select("*")
+          .eq("book_id", selectedBook.id)
+          .order("created_at"),
+      ),
+      resolveList<NamedContextRow>(
+        table(input.supabase, "themes")
+          .select("*")
+          .eq("book_id", selectedBook.id)
+          .order("created_at"),
+      ),
+      resolveList<NamedContextRow>(
+        table(input.supabase, "motifs")
+          .select("*")
+          .eq("book_id", selectedBook.id)
+          .order("created_at"),
+      ),
+      resolveList<TimelineNoteRow>(
+        table(input.supabase, "timeline_notes")
+          .select("*")
+          .eq("book_id", selectedBook.id)
+          .order("sequence_order", { ascending: true }),
+      ),
+    ]);
+  if (chaptersError) throw chaptersError;
+  if (paragraphsError) throw paragraphsError;
+  if (conflictsError && !isMissingCreativeWriterLedger(conflictsError)) throw conflictsError;
+  const supportErrors = [authorNotesError, referencesError, bookBibleError, charactersError, locationsError, themesError, motifsError, timelineError].filter(Boolean);
+  const blockingSupportError = supportErrors.find((error) => !isMissingCreativeWriterLedger(error));
+  if (blockingSupportError) throw blockingSupportError;
+
+  const cloudVersion = Math.max(
+    versionFromDate(selectedBook.updatedAt),
+    ...(chapterRows || []).map((chapter) => versionFromDate(chapter.updated_at)),
+    ...(paragraphRows || []).map((paragraph) => versionFromDate(paragraph.updated_at)),
+  );
+
+  return {
+    accountId: input.accountId,
+    books,
+    selectedBook,
+    chapters: (chapterRows || []).map(toChapterView),
+    paragraphs: (paragraphRows || []).map(toParagraphView),
+    conflicts: conflictsError ? [] : (conflictRows || []).flatMap(toConflictView),
+    support: {
+      authorNotes: authorNotesError ? null : toAuthorNotesView(authorNotesRow),
+      references: referencesError ? [] : (referenceRows || []).map(toReferenceMaterialView),
+      bible: {
+        content: bookBibleError ? null : bookBibleRow?.content || null,
+        updatedAt: bookBibleError ? null : bookBibleRow?.updated_at || null,
+        characters: charactersError ? [] : (characterRows || []).map(toNamedContextView),
+        locations: locationsError ? [] : (locationRows || []).map(toNamedContextView),
+        themes: themesError ? [] : (themeRows || []).map(toNamedContextView),
+        motifs: motifsError ? [] : (motifRows || []).map(toNamedContextView),
+        timeline: timelineError ? [] : (timelineRows || []).map(toTimelineNoteView),
+      },
+    },
+    project: {
+      localProjectId: `web-${selectedBook.id}`,
+      accountId: input.accountId,
+      bookforgeBookId: selectedBook.id,
+      syncCursor: createCreativeWriterSyncCursor({ bookId: selectedBook.id, cloudVersion }),
+      lastCloudVersion: cloudVersion,
+      linkedAt: selectedBook.updatedAt || new Date(0).toISOString(),
+    },
+  };
+}
+
+export function isMissingCreativeWriterLedger(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error as { code?: unknown; message?: unknown };
+  return maybeError.code === "PGRST205" && typeof maybeError.message === "string" && maybeError.message.includes("creativewriter_sync_events");
+}
+
+export function versionFromDate(value: string | null | undefined): number {
+  if (!value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? Math.floor(time / 1000) : 0;
+}
+
+function toBookOption(row: BookRow): CreativeWriterBookOption {
+  return {
+    id: row.id,
+    title: row.title,
+    authorName: row.author_name,
+    status: row.status,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toChapterView(row: ChapterRow): CreativeWriterChapterView {
+  return {
+    id: row.id,
+    chapterNumber: row.chapter_number,
+    title: row.title,
+    summary: row.summary,
+    currentText: row.current_text,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toParagraphView(row: ParagraphRow): CreativeWriterParagraphView {
+  return {
+    id: row.id,
+    chapterId: row.chapter_id,
+    paragraphNumber: row.paragraph_number,
+    currentText: row.current_text,
+    acceptedText: row.accepted_text,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toConflictView(row: ConflictEventRow): CreativeWriterConflictView[] {
+  if (!row.conflict_id || !row.conflict_payload) return [];
+  return [
+    {
+      ...(row.conflict_payload as CreativeWriterConflict),
+      id: row.conflict_id,
+      eventId: row.id,
+      resolutionStatus: row.resolution_status || "unresolved",
+      createdAt: row.created_at || String(row.conflict_payload.createdAt || new Date(0).toISOString()),
+    },
+  ];
+}
+
+function toAuthorNotesView(row: AuthorNotesRow | null | undefined): CreativeWriterAuthorNotesView | null {
+  if (!row) return null;
+  return {
+    creativeInstructions: row.creative_instructions,
+    voiceGuidance: row.voice_guidance,
+    worldviewNotes: row.worldview_notes,
+    theologicalAlignment: row.theological_alignment,
+    forbiddenChanges: row.forbidden_changes,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toReferenceMaterialView(row: ReferenceMaterialRow): CreativeWriterReferenceMaterialView {
+  return {
+    id: row.id,
+    title: row.title,
+    materialType: row.material_type,
+    content: row.content,
+    includeInPrompts: Boolean(row.include_in_prompts),
+    createdAt: row.created_at,
+  };
+}
+
+function toNamedContextView(row: NamedContextRow): CreativeWriterNamedContextView {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    detail: [row.role, row.voice_notes, row.arc_notes, row.relationship_notes].filter(Boolean).join(" | ") || null,
+  };
+}
+
+function toTimelineNoteView(row: TimelineNoteRow): CreativeWriterTimelineNoteView {
+  return {
+    id: row.id,
+    note: row.event || row.note || "",
+    sequenceOrder: row.sequence_order,
+    detail: [row.date_time, row.continuity_notes, row.event && row.note ? row.note : null].filter(Boolean).join(" | ") || null,
+  };
+}
+
+function emptySupportContext(): CreativeWriterSupportContextView {
+  return {
+    authorNotes: null,
+    references: [],
+    bible: {
+      content: null,
+      updatedAt: null,
+      characters: [],
+      locations: [],
+      themes: [],
+      motifs: [],
+      timeline: [],
+    },
+  };
+}
+
+function table(supabase: CreativeWriterDashboardSupabaseLike, name: string): QueryBuilder {
+  return supabase.from(name) as QueryBuilder;
+}
+
+async function resolveList<T>(builder: QueryBuilder): Promise<{ data: T[] | null; error: unknown }> {
+  const result = await (builder as unknown as Promise<{ data?: T[] | null; error?: unknown }>);
+  return { data: result?.data ?? [], error: result?.error ?? null };
+}
+
+async function resolveMaybe<T>(builder: QueryBuilder): Promise<{ data: T | null; error: unknown }> {
+  if (builder.maybeSingle) {
+    const result = await builder.maybeSingle();
+    return { data: (result?.data as T | null | undefined) ?? null, error: result?.error ?? null };
+  }
+  const result = await (builder as unknown as Promise<{ data?: T[] | null; error?: unknown }>);
+  const rows = result?.data || [];
+  return { data: rows[0] ?? null, error: result?.error ?? null };
+}

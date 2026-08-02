@@ -10,7 +10,7 @@
 [![LM Studio](https://img.shields.io/badge/AI%20Engine-LM%20Studio%20%7C%20Cloud-8A2BE2)](https://lmstudio.ai/)
 [![OpenRouter](https://img.shields.io/badge/Cloud%20Routing-OpenRouter-0F172A)](https://openrouter.ai/)
 
-[Quick Start](#quick-start) · [How-To Guide](docs/HOWTO.md) · [Changelog](CHANGELOG.md) · [Architecture](docs/ARCHITECTURE.md)
+[Quick Start](#quick-start) · [CreativeWriter](#bookforge-creativewriter) · [How-To Guide](docs/HOWTO.md) · [Changelog](CHANGELOG.md) · [Architecture](docs/ARCHITECTURE.md)
 
 </div>
 
@@ -72,6 +72,24 @@ Every arrow above can be driven by hand, one step at a time — or handed to the
 
 **Learns from what actually happens on your machine** — every local model call is recorded (success, empty output, too-short output, context-related crashes). BookForge uses that history to avoid repeating a model+task combination that's already failed, and to request a safer context size the next time — because no two locally loaded models behave the same way, and static name-matching heuristics alone can't tell you that.
 
+## BookForge CreativeWriter
+
+**CreativeWriter 0.1.0** is the first internal prototype of the BookForge-aware writing desk. It is not a standalone desktop executable yet; it is an authenticated BookForge route that proves the product contract before offline packaging work begins.
+
+What is in 0.1.0:
+
+- Linked manuscript workspace with book selection, chapter navigation, paragraph editing, word counts, and dirty-draft protection
+- Authenticated sync APIs for link, pull, push, and conflict resolution
+- Durable sync ledger migration with applied/rejected/conflict event recording and idempotency checks
+- `.bookforge` package import/export helpers and authenticated package transfer routes
+- Expanded import intake for common manuscript files and best-effort writing-app exports
+- Conflict review with local/cloud comparison, manual merge text, and explicit resolution actions
+- Read-only Notes, Research, and Bible panels using existing BookForge metadata
+- Support-context search and per-book pinned context cards
+- Structural create/delete/reorder guardrails: those operations are rejected until structure versioning, tombstones, and order-conflict review are implemented
+
+The factory plan is documented in [docs/creativewriter-implementation-plan.md](docs/creativewriter-implementation-plan.md), with release readiness tracked in [docs/creativewriter-release-readiness-checklist.md](docs/creativewriter-release-readiness-checklist.md).
+
 ---
 
 ## Architecture
@@ -132,6 +150,7 @@ This is opt-in per user (**Settings → AI Settings → Optimize per feature**) 
 | AI engine | LM Studio (local, OpenAI-compatible) or OpenAI / Anthropic / Google |
 | Document handling | DOCX, EPUB, PDF, Markdown, and archive parsing/export |
 | Testing | Vitest |
+| Current release | BookForge AI 0.5.0, CreativeWriter 0.1.0 |
 
 ---
 

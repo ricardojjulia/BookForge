@@ -49,6 +49,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Anchor component={Link} href="/books/new">
               Import
             </Anchor>
+            <Anchor component={Link} href="/creativewriter">
+              CreativeWriter
+            </Anchor>
             <Anchor component={Link} href="/series">
               Series
             </Anchor>

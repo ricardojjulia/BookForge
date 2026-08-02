@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.0 - 2026-08-02
+
+### BookForge CreativeWriter 0.1.0
+
+- Added the first internal **BookForge CreativeWriter** prototype: an authenticated writing desk for linked BookForge manuscripts with book selection, chapter navigation, paragraph editing, word counts, dirty-draft state, and push/pull sync controls.
+- Added `.bookforge` package contracts plus authenticated package download/upload routes for fallback cloud-to-local and local-to-cloud transfer.
+- Added expanded CreativeWriter import intake for TXT, Markdown, Org text, DOCX, PDF, EPUB, RTF best effort, `.bookforge.json`, Wavemaker `.wmProj`, and readable archive exports from tools such as novelWriter, Manuskript, Zettlr, Obsidian, Logseq, Joplin Markdown export, Wavemaker, and bibisco-style archives.
+- Added BookForge-aware sync APIs for link, pull, push, and conflict resolution through authenticated BookForge routes. CreativeWriter still does not connect directly to Supabase.
+- Added durable CreativeWriter sync ledger tables, local migration, RLS policies, idempotency handling, applied/rejected/conflict event recording, and local Supabase verification harness.
+- Added conflict review ergonomics: local/cloud payload comparison, editable manual merge text, and clearer actions for keeping cloud, using local, or applying a manual merge.
+- Added read-only Notes, Research, and Bible support panels using existing BookForge author notes, reference materials, book bible, characters, locations, themes, motifs, and timeline notes.
+- Added support-context search, search-aware tab counts, per-book pinned context cards, and a visible `CreativeWriter 0.1.0` release badge.
+- Added structural conflict design and guardrails: create/delete/reorder operations remain rejected and ledgered until structure versioning, tombstones, and visual order conflict review are implemented.
+
+### Software factory
+
+- Added CreativeWriter factory artifacts covering architecture, API contracts, security, data integrity, failure modes, council review, release readiness, phase evaluations, and structural conflict design.
+- Added authenticated browser verification and local Supabase data proof across the CreativeWriter prototype phases.
+
 ## 0.4.0 - 2026-08-01
 
 ### OpenRouter provider
