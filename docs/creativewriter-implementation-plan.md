@@ -477,6 +477,16 @@ Phase 4F-R limitations:
 6. Add regression coverage for current structural-operation rejection guardrails.
 7. Run focused tests, broader CreativeWriter tests, scoped lint, typecheck, and factory documentation updates.
 
+## Phase 4I Implementation Steps
+
+1. Add direct `structure_version` columns to `books` and `chapters`.
+2. Add immutable CreativeWriter structural tombstone storage.
+3. Protect tombstones with book-scoped RLS policies.
+4. Add typed paragraph create, delete, and reorder payload validators.
+5. Keep runtime structural operations rejected until conflict semantics are service-tested.
+6. Add focused sync contract tests for valid and invalid structural payloads.
+7. Run focused tests, scoped lint, migration application, typecheck, and factory documentation updates.
+
 ## Phase 2B Implementation Steps
 
 1. Add CreativeWriter import adapter for direct document files.
@@ -514,3 +524,4 @@ Phase 4F-R limitations:
 | Browser/data verification approval | Local Supabase, browser route, authenticated sync routes, and ledger persistence are verified together before broader editor work. |
 | Editor ergonomics approval | Pull merge and dirty-draft protections work before expanding editing features. |
 | Conflict ergonomics approval | Conflict review exposes both sides and sends explicit edited merge payloads before wider writing surfaces. |
+| Structural foundation approval | Structure version columns, tombstone retention, and typed paragraph structural payloads exist before applying structural edits. |

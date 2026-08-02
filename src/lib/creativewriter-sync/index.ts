@@ -57,6 +57,39 @@ export const creativeWriterLocalChangeSchema = z.object({
 });
 export type CreativeWriterLocalChange = z.infer<typeof creativeWriterLocalChangeSchema>;
 
+export const creativeWriterParagraphCreatePayloadSchema = z.object({
+  bookId: z.string().min(1),
+  chapterId: z.string().min(1),
+  clientEntityId: z.string().min(1),
+  paragraphNumber: z.number().int().positive(),
+  originalText: z.string().optional(),
+  currentText: z.string().min(1),
+  afterParagraphId: z.string().min(1).nullable().optional(),
+  beforeParagraphId: z.string().min(1).nullable().optional(),
+  baseChapterStructureVersion: z.number().int().nonnegative(),
+});
+export type CreativeWriterParagraphCreatePayload = z.infer<typeof creativeWriterParagraphCreatePayloadSchema>;
+
+export const creativeWriterParagraphDeletePayloadSchema = z.object({
+  bookId: z.string().min(1),
+  chapterId: z.string().min(1),
+  lastKnownText: z.string().optional(),
+  lastKnownParagraphNumber: z.number().int().positive().optional(),
+  baseChapterStructureVersion: z.number().int().nonnegative(),
+  deletedAt: z.string().min(1),
+  deleteReason: z.string().max(500).optional(),
+});
+export type CreativeWriterParagraphDeletePayload = z.infer<typeof creativeWriterParagraphDeletePayloadSchema>;
+
+export const creativeWriterParagraphReorderPayloadSchema = z.object({
+  bookId: z.string().min(1),
+  chapterId: z.string().min(1),
+  baseOrderedParagraphIds: z.array(z.string().min(1)).min(1),
+  orderedParagraphIds: z.array(z.string().min(1)).min(1),
+  baseChapterStructureVersion: z.number().int().nonnegative(),
+});
+export type CreativeWriterParagraphReorderPayload = z.infer<typeof creativeWriterParagraphReorderPayloadSchema>;
+
 export const creativeWriterCloudChangeSchema = z.object({
   entityType: creativeWriterSyncEntityTypeSchema,
   entityId: z.string().min(1),
