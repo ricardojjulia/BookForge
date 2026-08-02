@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition, type CSSProperties
 import Link from "next/link";
 import { ActionIcon, Alert, Badge, Button, Container, Divider, Group, Paper, ScrollArea, SegmentedControl, Stack, Tabs, Text, Textarea, TextInput, Title, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconBook, IconCloudDown, IconCloudUp, IconGitMerge, IconMapPin, IconMessage, IconNotes, IconPalette, IconPin, IconPinFilled, IconRefresh, IconSearch, IconSparkles, IconUsers, IconWriting, IconX } from "@tabler/icons-react";
+import { IconBook, IconCheck, IconCloudDown, IconCloudUp, IconGitMerge, IconMapPin, IconMessage, IconNotes, IconPalette, IconPin, IconPinFilled, IconRefresh, IconSearch, IconSparkles, IconUsers, IconWriting, IconX } from "@tabler/icons-react";
 import { versionFromDate, type CreativeWriterConflictView, type CreativeWriterWorkspaceData } from "@/lib/creativewriter-ui/dashboard";
 import { CREATIVEWRITER_RELEASE_LABEL } from "@/lib/creativewriter-ui/version";
 import type { CreativeWriterCloudChange } from "@/lib/creativewriter-sync";
@@ -29,6 +29,8 @@ type WorkspaceLayout = {
   left: number;
   right: number;
 };
+
+type CommentReviewFilter = "open" | "all" | "resolved";
 
 const DEFAULT_WORKSPACE_LAYOUT: WorkspaceLayout = { left: 280, right: 320 };
 const MIN_LEFT_WIDTH = 220;
@@ -56,6 +58,7 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
   const [draftText, setDraftText] = useState(selectedParagraph?.currentText || selectedParagraph?.acceptedText || "");
   const [conflictDrafts, setConflictDrafts] = useState<Record<string, string>>({});
   const [supportSearch, setSupportSearch] = useState("");
+  const [commentReviewFilter, setCommentReviewFilter] = useState<CommentReviewFilter>("open");
   const [pinnedSupportIds, setPinnedSupportIds] = useState<string[]>(() => loadPinnedSupportIds(initialData.selectedBook?.id || ""));
   const [message, setMessage] = useState<SyncMessage | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -65,6 +68,9 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
   const chapterWords = useMemo(() => countWords(chapterParagraphs.map((paragraph) => paragraph.currentText || paragraph.acceptedText || "").join(" ")), [chapterParagraphs]);
   const commentsByParagraph = useMemo(() => groupReaderCommentsByParagraph(data.readerComments), [data.readerComments]);
   const selectedParagraphComments = selectedParagraph ? commentsByParagraph[selectedParagraph.id] || [] : [];
+  const commentParagraphNumbers = useMemo(() => new Map(data.paragraphs.map((paragraph) => [paragraph.id, paragraph.paragraphNumber])), [data.paragraphs]);
+  const openCommentCount = useMemo(() => data.readerComments.filter((comment) => !comment.resolved).length, [data.readerComments]);
+  const resolvedCommentCount = data.readerComments.length - openCommentCount;
   const supportEntries = useMemo(() => buildSupportEntries(data), [data]);
   const pinnedSupportEntries = useMemo(
     () => pinnedSupportIds.flatMap((id) => supportEntries.find((entry) => entry.id === id) || []),
@@ -78,6 +84,10 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
   const locationEntries = useMemo(() => filterSupportEntries(supportEntries.filter((entry) => entry.kind === "location"), supportSearch), [supportEntries, supportSearch]);
   const themeEntries = useMemo(() => filterSupportEntries(supportEntries.filter((entry) => entry.kind === "theme"), supportSearch), [supportEntries, supportSearch]);
   const motifEntries = useMemo(() => filterSupportEntries(supportEntries.filter((entry) => entry.kind === "motif"), supportSearch), [supportEntries, supportSearch]);
+  const reviewComments = useMemo(
+    () => filterReaderComments(data.readerComments, supportSearch, commentReviewFilter, commentParagraphNumbers),
+    [commentParagraphNumbers, commentReviewFilter, data.readerComments, supportSearch],
+  );
 
   useEffect(() => {
     savePinnedSupportIds(data.selectedBook?.id || "", pinnedSupportIds);
@@ -148,6 +158,19 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
     const paragraph = data.paragraphs.find((item) => item.id === paragraphId) || null;
     setSelectedParagraphId(paragraphId);
     setDraftText(paragraph?.currentText || paragraph?.acceptedText || "");
+  }
+
+  function selectCommentParagraph(paragraphId: string | null) {
+    if (!paragraphId) return;
+    if (!canLeaveDraft()) return;
+    const paragraph = data.paragraphs.find((item) => item.id === paragraphId) || null;
+    if (!paragraph) {
+      setMessage({ tone: "yellow", text: "That comment is not attached to an available paragraph." });
+      return;
+    }
+    setSelectedChapterId(paragraph.chapterId);
+    setSelectedParagraphId(paragraph.id);
+    setDraftText(paragraph.currentText || paragraph.acceptedText || "");
   }
 
   function canLeaveDraft() {
@@ -277,6 +300,29 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
         return next;
       });
       setMessage({ tone: "green", text: "Conflict resolved in the cloud ledger." });
+    });
+  }
+
+  function updateReaderCommentResolution(commentId: string, resolved: boolean) {
+    if (!data.selectedBook) return;
+    const bookId = data.selectedBook.id;
+    setMessage(null);
+    startTransition(async () => {
+      const response = await fetch(`/api/books/${bookId}/annotations/${commentId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ resolved }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.error) {
+        setMessage({ tone: "red", text: payload.error || "Comment update failed." });
+        return;
+      }
+      setData((current) => ({
+        ...current,
+        readerComments: current.readerComments.map((comment) => (comment.id === commentId ? { ...comment, resolved } : comment)),
+      }));
+      setMessage({ tone: "green", text: resolved ? "Reader comment marked resolved." : "Reader comment reopened." });
     });
   }
 
@@ -544,13 +590,33 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                     <Group justify="space-between">
                       <div>
                         <Text fw={700}>Comments</Text>
-                        <Text size="sm" c="dimmed">Beta reader notes attached to the manuscript</Text>
+                        <Text size="sm" c="dimmed">Contributor review queue attached to the manuscript</Text>
                       </div>
                       <Badge color="orange" variant="light">
-                        {data.readerComments.filter((comment) => !comment.resolved).length} open
+                        {openCommentCount} open
                       </Badge>
                     </Group>
-                    <SupportEntryList entries={commentEntries} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No reader comments match this search." : "No reader comments for this book."} />
+                    <SegmentedControl
+                      aria-label="Comment review filter"
+                      value={commentReviewFilter}
+                      onChange={(value) => setCommentReviewFilter(value as CommentReviewFilter)}
+                      data={[
+                        { label: `Open (${openCommentCount})`, value: "open" },
+                        { label: `All (${data.readerComments.length})`, value: "all" },
+                        { label: `Resolved (${resolvedCommentCount})`, value: "resolved" },
+                      ]}
+                      fullWidth
+                    />
+                    <CommentReviewList
+                      comments={reviewComments}
+                      paragraphNumberById={commentParagraphNumbers}
+                      pinnedIds={pinnedSupportIds}
+                      onTogglePin={togglePinnedSupport}
+                      onSelectParagraph={selectCommentParagraph}
+                      onSetResolved={updateReaderCommentResolution}
+                      updating={isPending}
+                      empty={supportSearch ? "No reader comments match this review filter." : "No reader comments in this review queue."}
+                    />
                   </Stack>
                 </Tabs.Panel>
 
@@ -685,6 +751,113 @@ function SupportEntryList({
   );
 }
 
+function CommentReviewList({
+  comments,
+  paragraphNumberById,
+  pinnedIds,
+  onTogglePin,
+  onSelectParagraph,
+  onSetResolved,
+  updating,
+  empty,
+}: {
+  comments: CreativeWriterWorkspaceData["readerComments"];
+  paragraphNumberById: Map<string, number>;
+  pinnedIds: string[];
+  onTogglePin: (entryId: string) => void;
+  onSelectParagraph: (paragraphId: string | null) => void;
+  onSetResolved: (commentId: string, resolved: boolean) => void;
+  updating: boolean;
+  empty: string;
+}) {
+  if (!comments.length) return <Alert color="gray" variant="light">{empty}</Alert>;
+  return (
+    <Stack gap="xs">
+      {comments.map((comment) => (
+        <CommentReviewCard
+          key={comment.id}
+          comment={comment}
+          paragraphNumber={comment.paragraphId ? paragraphNumberById.get(comment.paragraphId) || null : null}
+          pinned={pinnedIds.includes(commentSupportId(comment.id))}
+          onTogglePin={onTogglePin}
+          onSelectParagraph={onSelectParagraph}
+          onSetResolved={onSetResolved}
+          updating={updating}
+        />
+      ))}
+    </Stack>
+  );
+}
+
+function CommentReviewCard({
+  comment,
+  paragraphNumber,
+  pinned,
+  onTogglePin,
+  onSelectParagraph,
+  onSetResolved,
+  updating,
+}: {
+  comment: CreativeWriterWorkspaceData["readerComments"][number];
+  paragraphNumber: number | null;
+  pinned: boolean;
+  onTogglePin: (entryId: string) => void;
+  onSelectParagraph: (paragraphId: string | null) => void;
+  onSetResolved: (commentId: string, resolved: boolean) => void;
+  updating: boolean;
+}) {
+  const title = paragraphNumber ? `Paragraph ${paragraphNumber}` : "General book comment";
+  const supportId = commentSupportId(comment.id);
+  return (
+    <Paper withBorder radius="sm" p="sm" bg={pinned ? "#f8fff9" : comment.resolved ? "#f8f9fa" : "#fff9f0"}>
+      <Stack gap="xs">
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <div>
+            <Group gap={6}>
+              <Text size="sm" fw={700}>{title}</Text>
+              <Badge size="xs" color={comment.resolved ? "gray" : "orange"}>{comment.resolved ? "Resolved" : "Open"}</Badge>
+            </Group>
+            <Text size="xs" c="dimmed">{formatDateTime(comment.createdAt)}</Text>
+          </div>
+          <Tooltip label={pinned ? "Unpin context" : "Pin context"}>
+            <ActionIcon
+              aria-label={`${pinned ? "Unpin" : "Pin"} ${title}`}
+              size="sm"
+              variant="subtle"
+              color={pinned ? "teal" : "dark"}
+              onClick={() => onTogglePin(supportId)}
+            >
+              {pinned ? <IconPinFilled size={15} /> : <IconPin size={15} />}
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+        <Text size="sm">{comment.note}</Text>
+        <Group gap="xs">
+          <Button
+            size="xs"
+            variant="light"
+            color="dark"
+            disabled={!comment.paragraphId}
+            onClick={() => onSelectParagraph(comment.paragraphId)}
+          >
+            Go to paragraph
+          </Button>
+          <Button
+            size="xs"
+            color={comment.resolved ? "orange" : "teal"}
+            variant={comment.resolved ? "light" : "filled"}
+            leftSection={!comment.resolved ? <IconCheck size={13} /> : undefined}
+            loading={updating}
+            onClick={() => onSetResolved(comment.id, !comment.resolved)}
+          >
+            {comment.resolved ? "Reopen" : "Mark resolved"}
+          </Button>
+        </Group>
+      </Stack>
+    </Paper>
+  );
+}
+
 function SupportEntryCard({
   entry,
   pinned,
@@ -733,7 +906,7 @@ function buildSupportEntries(data: CreativeWriterWorkspaceData): SupportEntry[] 
     const paragraphNumber = comment.paragraphId ? paragraphNumberById.get(comment.paragraphId) : null;
     addTextEntry(
       entries,
-      `comment:${comment.id}`,
+      commentSupportId(comment.id),
       "comment",
       paragraphNumber ? `Paragraph ${paragraphNumber}` : "General book comment",
       comment.note,
@@ -773,6 +946,27 @@ function buildSupportEntries(data: CreativeWriterWorkspaceData): SupportEntry[] 
   data.support.bible.themes.forEach((entry) => addTextEntry(entries, `theme:${entry.id}`, "theme", entry.name, entry.description, entry.detail));
   data.support.bible.motifs.forEach((entry) => addTextEntry(entries, `motif:${entry.id}`, "motif", entry.name, entry.description, entry.detail));
   return entries;
+}
+
+function filterReaderComments(
+  comments: CreativeWriterWorkspaceData["readerComments"],
+  query: string,
+  status: CommentReviewFilter,
+  paragraphNumberById: Map<string, number>,
+) {
+  const normalized = query.trim().toLowerCase();
+  return comments.filter((comment) => {
+    if (status === "open" && comment.resolved) return false;
+    if (status === "resolved" && !comment.resolved) return false;
+    if (!normalized) return true;
+    const paragraphNumber = comment.paragraphId ? paragraphNumberById.get(comment.paragraphId) : null;
+    const paragraphLabel = paragraphNumber ? `Paragraph ${paragraphNumber}` : "General book comment";
+    return [paragraphLabel, comment.note, comment.resolved ? "Resolved" : "Open", formatDateTime(comment.createdAt)].some((value) => value.toLowerCase().includes(normalized));
+  });
+}
+
+function commentSupportId(commentId: string) {
+  return `comment:${commentId}`;
 }
 
 function addTextEntry(entries: SupportEntry[], id: string, kind: SupportEntryKind, title: string, text: string | null | undefined, detail?: string | null, badge?: string | null) {

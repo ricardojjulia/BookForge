@@ -1,7 +1,7 @@
 # CreativeWriter Release Readiness Checklist
 
 Date: 2026-08-02
-Phase: 4I Structural Version And Tombstone Foundation
+Phase: 5A Contributor Comment Review Triage
 Status: Not ready for broad release
 
 ## Current Readiness
@@ -25,8 +25,11 @@ Status: Not ready for broad release
 - [x] Structural create/delete/reorder operations remain rejected until conflict semantics exist.
 - [x] Structural conflict design exists before structural UI exposure.
 - [x] Structure versioning and tombstone strategy are implemented.
+- [x] Contributor comments can be triaged in CreativeWriter with Open, All, and Resolved review filters.
+- [x] Reader comments can be marked resolved or reopened from CreativeWriter through the existing authenticated annotation API.
 - [ ] Desktop executable exists.
 - [ ] Local CreativeWriter database exists.
+- [ ] Contributor assignments, suggestions, approvals, and contributor status sync are implemented.
 - [ ] Notes/research/bible edits sync through a designed non-manuscript contract.
 - [ ] Pinned context syncs across devices or has explicit local-only product language.
 - [ ] Visual order conflict review exists.

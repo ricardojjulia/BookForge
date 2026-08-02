@@ -282,7 +282,7 @@ describe("CreativeWriterWorkspace", () => {
     expect(screen.getByText("Quenched steel")).toBeInTheDocument();
   });
 
-  it("shows beta reader comments in the editor and comments tab", async () => {
+  it("shows reader comments in the editor and contributor review queue", async () => {
     stubBrowserLayoutApis();
     const user = userEvent.setup();
 
@@ -293,9 +293,44 @@ describe("CreativeWriterWorkspace", () => {
 
     await user.click(screen.getByRole("tab", { name: /Comments/i }));
 
-    expect(screen.getByText("Beta reader notes attached to the manuscript")).toBeInTheDocument();
+    expect(screen.getByText("Contributor review queue attached to the manuscript")).toBeInTheDocument();
     expect(screen.getByText("Paragraph 1")).toBeInTheDocument();
     expect(screen.getAllByText("This line landed for me.").length).toBeGreaterThan(0);
+  });
+
+  it("filters and resolves reader comments from the CreativeWriter review queue", async () => {
+    stubBrowserLayoutApis();
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ annotation: { id: "comment-1", resolved: true } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderWorkspace(workspaceData({ conflicts: [] }));
+
+    await user.click(screen.getByRole("tab", { name: /Comments/i }));
+
+    expect(screen.getByRole("radio", { name: "Open (1)" })).toBeChecked();
+    expect(screen.getAllByText("This line landed for me.").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Already handled.")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Mark resolved" }));
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    expect(String(mockFetch.mock.calls[0]?.[0])).toBe("/api/books/book-1/annotations/comment-1");
+    expect(JSON.parse(String(mockFetch.mock.calls[0]?.[1]?.body))).toEqual({ resolved: true });
+    expect(await screen.findByText("Reader comment marked resolved.")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Open (0)" })).toBeChecked();
+    expect(screen.getByText("No reader comments in this review queue.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "Resolved (2)" }));
+
+    expect(screen.getAllByText("This line landed for me.").length).toBeGreaterThan(0);
+    expect(screen.getByText("Already handled.")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Reopen" })).toHaveLength(2);
   });
 
   it("filters support context and pins selected entries per book", async () => {
@@ -474,6 +509,14 @@ function workspaceData(
         note: "This line landed for me.",
         resolved: false,
         createdAt: "2026-08-02T12:00:00.000Z",
+      },
+      {
+        id: "comment-2",
+        paragraphId: null,
+        annotatorId: "reader-1",
+        note: "Already handled.",
+        resolved: true,
+        createdAt: "2026-08-02T12:05:00.000Z",
       },
     ],
     conflicts: options.conflicts ?? [

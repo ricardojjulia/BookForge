@@ -961,6 +961,69 @@ Out of scope:
 - `docs/creativewriter-release-readiness-checklist.md`
 - `docs/SOFTWARE_FACTORY.md`
 
+## CreativeWriter Factory Slice — Phase 5A Contributor Comment Review Triage
+
+Date: 2026-08-02
+Status: Implemented, focused verification passed
+Owner: Product + Engineering
+
+### Scope Lock
+
+This slice begins Phase 5 contributor workflow with comment review triage because reader annotations already exist as authenticated BookForge Cloud data.
+
+In scope:
+
+- Open, All, and Resolved comment review filters in CreativeWriter.
+- Comment resolution and reopening through the existing BookForge annotation API.
+- Comment-to-paragraph navigation from the CreativeWriter support rail.
+- Existing dirty-draft protection before comment-driven paragraph navigation.
+- Support-context pin compatibility for comment cards.
+- Focused component coverage.
+
+Out of scope:
+
+- Contributor assignments.
+- Suggested edit workflows.
+- Approval routing.
+- Contributor role management.
+- Contributor status sync ledger.
+- Offline/local DB persistence for comment state.
+
+### Approval Gates
+
+- Scope approval: comment review triage only; no broader contributor workflow claims.
+- API approval: reuse `/api/books/[bookId]/annotations/[annotationId]` instead of creating a parallel CreativeWriter-only endpoint.
+- Data approval: use existing `reader_annotations.resolved` state for this slice.
+- UX approval: comment navigation must respect unsynced draft protection.
+- Verification approval: focused tests, broader CreativeWriter tests, scoped lint, diff check, and available browser route check are recorded before closeout.
+
+### Decisions
+
+- Treat comments as the first credible contributor workflow because they already have cloud persistence.
+- Keep the active paragraph comment panel and the right-rail review queue both visible when relevant.
+- Allow general book comments in the review queue, but disable paragraph jump for comments without a paragraph target.
+- Keep assignments, suggestions, approvals, and contributor status sync as future Phase 5 slices.
+
+### Verification Evidence
+
+- Passed: `npx vitest run src/components/creativewriter/creativewriter-workspace.test.tsx`
+- Passed: `npx vitest run src/components/creativewriter/creativewriter-workspace.test.tsx src/lib/creativewriter-ui/dashboard.test.ts src/lib/creativewriter-sync.test.ts src/app/api/creativewriter/sync/push/route.test.ts src/app/api/creativewriter/sync/pull/route.test.ts src/app/api/creativewriter/sync/resolve-conflict/route.test.ts`
+- Result: 5 test files passed, 22 tests passed.
+- Passed: scoped ESLint for CreativeWriter workspace and dashboard files.
+- Passed: `git diff --check`
+- Passed: `curl -I http://localhost:4747/creativewriter` returned 200 from the running local dev server.
+- Browser smoke: `npx --yes agent-browser open http://localhost:4747/creativewriter` loaded without a Next.js error overlay, but the automation browser session was signed out and only exposed the public nav/sign-in state.
+- Blocked by unrelated existing generated route and route-test typing errors: `npx tsc --noEmit`
+
+### Phase 5A Deliverables
+
+- `src/components/creativewriter/creativewriter-workspace.tsx`
+- `src/components/creativewriter/creativewriter-workspace.test.tsx`
+- `docs/creativewriter-phase-5a-evaluation.md`
+- `docs/creativewriter-implementation-plan.md`
+- `docs/creativewriter-release-readiness-checklist.md`
+- `docs/SOFTWARE_FACTORY.md`
+
 ## Scope
 
 - Lock the v0.3.0 release slice.
@@ -1055,6 +1118,7 @@ Acceptance:
 - 2026-08-02: Restored separated CreativeWriter world-context tabs for Characters, Locations, Themes, and Motifs, and narrowed Book Bible to the Blueprint Summary.
 - 2026-08-02: Made Reader View caller-aware with safe return links from CreativeWriter and the book workspace, including an explicit back button on the Reader View page.
 - 2026-08-02: Added resizable CreativeWriter workspace columns with draggable and keyboard-accessible handles between the Books, Editor, and Support panels, persisted in browser local storage.
+- 2026-08-02: Completed CreativeWriter Phase 5A contributor comment review triage with Open/All/Resolved filters, comment-to-paragraph navigation, resolved/reopened API updates, local state refresh, focused coverage, and readiness documentation.
 - 2026-06-02: Added auto-review wizard resume success-path regression coverage to verify launch-token reuse and consistent job-id propagation across handshake and worker-launch calls.
 - 2026-06-02: Added auto-review wizard success-path regression coverage that verifies launch-token reuse between `launchOnly` handshake and worker-launch calls, and stabilized wizard tests by mocking the runner dependency.
 - 2026-06-02: Added auto-review wizard regression coverage for resume-path launch-handshake failure, verifying inline error surfacing and single process-launch attempt semantics.
