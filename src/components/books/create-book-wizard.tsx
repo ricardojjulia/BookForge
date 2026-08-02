@@ -22,6 +22,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { DIALOG_DENSITY_LABELS, DIALOG_DENSITY_LEVELS, type DialogDensity } from "@/lib/dialogue-density";
+import { estimateWordsForPages } from "@/lib/manuscript/page-estimate";
 
 type CloudProviderInfo = {
   provider: string;
@@ -333,7 +334,7 @@ export function CreateBookWizard() {
 
   const recommendedMode = getRecommendedCreationMode(status);
   const pageCount = Number(targetPages || 0);
-  const wordTarget = Math.round(pageCount * 275);
+  const wordTarget = estimateWordsForPages(pageCount);
   const expectedChapters = Math.max(6, Math.min(24, Math.round(pageCount / 8)));
   const missingConceptInputs: string[] = [];
   if (!workingTitle.trim()) missingConceptInputs.push("working title");

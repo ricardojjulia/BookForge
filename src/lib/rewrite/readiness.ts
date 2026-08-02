@@ -47,6 +47,7 @@ export function getRewriteReadiness(input: {
   ).length;
   const usableSummaries = input.chapters.length - weakSummaries;
   const criticDone = getCriticCoverage(input.criticReports);
+  const criticTotal = Object.keys(criticLenses).length;
   const hasSample = Boolean(input.latestRewriteJobId || input.workflow.sample_revision_job_id);
   const hasReviewedSample = input.acceptedParagraphCount > 0;
   const strategyApproved = input.workflow.strategy_approved || Boolean(input.workflow.campaign_id);
@@ -68,27 +69,27 @@ export function getRewriteReadiness(input: {
     },
     {
       key: "summaries",
-      label: "Chapter Summaries",
+      label: "Chapter Summary Quality",
       status: input.chapters.length > 0 && weakSummaries === 0 ? "ready" : usableSummaries > 0 ? "recommended" : "blocked",
       detail:
         input.chapters.length === 0
           ? "No chapters exist yet."
           : weakSummaries === 0
-            ? `${usableSummaries}/${input.chapters.length} summaries look usable.`
-            : `${weakSummaries} chapter summary/summaries need review before they become reliable context.`,
+            ? `${usableSummaries}/${input.chapters.length} existing summaries look usable.`
+            : `${weakSummaries} existing chapter summary/summaries are too thin/generic to be reliable rewrite context (separate from whether a summary exists at all — see the "Chapter summaries generated" card above).`,
       actionLabel: weakSummaries ? "Review Summaries" : undefined,
       href: weakSummaries ? `/books/${input.bookId}` : undefined,
     },
     {
       key: "critic",
       label: "BookForge Critic",
-      status: criticDone >= 7 ? "ready" : criticDone >= 4 ? "recommended" : "blocked",
+      status: criticDone >= criticTotal ? "ready" : criticDone >= 4 ? "recommended" : "blocked",
       detail:
-        criticDone >= 7
-          ? "All seven Critic lenses have baseline coverage."
-          : `${criticDone}/7 Critic lenses have run. More lenses produce a stronger rewrite plan.`,
-      actionLabel: criticDone >= 7 ? undefined : "Run Critic",
-      href: criticDone >= 7 ? undefined : `/books/${input.bookId}`,
+        criticDone >= criticTotal
+          ? `All ${criticTotal} Critic lenses have baseline coverage.`
+          : `${criticDone}/${criticTotal} Critic lenses have run. More lenses produce a stronger rewrite plan.`,
+      actionLabel: criticDone >= criticTotal ? undefined : "Run Critic",
+      href: criticDone >= criticTotal ? undefined : `/books/${input.bookId}`,
     },
     {
       key: "rewrite_plan",
@@ -103,8 +104,11 @@ export function getRewriteReadiness(input: {
     {
       key: "model",
       label: "Rewrite Model Fit",
-      status:
-        modelEvaluation.connected === false || modelEvaluation.available === false
+      status: modelEvaluation.usedForRewrite
+        ? modelEvaluation.cloudModel
+          ? "ready"
+          : "blocked"
+        : modelEvaluation.connected === false || modelEvaluation.available === false
           ? "blocked"
           : modelScore == null
             ? "recommended"
@@ -113,8 +117,11 @@ export function getRewriteReadiness(input: {
               : modelScore >= 65
                 ? "recommended"
                 : "blocked",
-      detail:
-        modelEvaluation.connected === false
+      detail: modelEvaluation.usedForRewrite
+        ? modelEvaluation.cloudModel
+          ? `Full-book rewrite passes use ${modelEvaluation.cloudModel} via ${modelEvaluation.cloudProvider || "your configured cloud provider"} — LM Studio local suitability scoring doesn't apply.`
+          : `No rewrite model configured for ${modelEvaluation.cloudProvider || "your cloud provider"}. Set one in Settings.`
+        : modelEvaluation.connected === false
           ? "LM Studio was disconnected during the last model evaluation."
           : modelEvaluation.available === false
             ? `${modelEvaluation.model || "Configured rewrite model"} was not loaded in LM Studio.`
@@ -238,6 +245,9 @@ function parseModelEvaluation(value: Record<string, unknown> | null | undefined)
     available: typeof configured?.available === "boolean" ? configured.available : null,
     score,
     evaluatedAt: typeof value?.evaluatedAt === "string" ? value.evaluatedAt : "",
+    usedForRewrite: typeof value?.usedForRewrite === "boolean" ? value.usedForRewrite : false,
+    cloudProvider: typeof value?.cloudProvider === "string" ? value.cloudProvider : "",
+    cloudModel: typeof value?.cloudModel === "string" ? value.cloudModel : "",
   };
 }
 

@@ -83,9 +83,6 @@ export default function Home() {
               <Button component="a" href="/books/new" size="lg" color="grape">
                 Import Manuscript
               </Button>
-              <Button component="a" href="/settings" size="lg" variant="outline" color="dark">
-                Configure LM Studio
-              </Button>
             </Group>
           </Stack>
 

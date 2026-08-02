@@ -23,6 +23,7 @@ type StatusResponse = {
   rewriteModelSuitability?: RewriteModelSuitability;
   configuredRewriteModel?: { model: string; available: boolean; suitability: Candidate | null };
   configuredRewriteModelSuitability?: Candidate | null;
+  cloudProvider?: { provider: string; model: string | null; executionMode: string; usedForPlanning: boolean; usedForRewrite: boolean } | null;
   warnings?: string[];
   error?: string | null;
 };
@@ -77,6 +78,13 @@ export function RewriteModelEvaluator({
                 warning: status.rewriteModelSuitability?.warning || null,
                 warnings: status.warnings || [],
                 error: status.error || null,
+                // Rewrite may not even use LM Studio — see cloudProvider.usedForRewrite.
+                // Without this, a cloud-configured rewrite always reads as
+                // "no suitable model" downstream in the readiness gate, since
+                // that reflects LM Studio's local model list, not the cloud model actually used.
+                usedForRewrite: Boolean(status.cloudProvider?.usedForRewrite),
+                cloudProvider: status.cloudProvider?.provider || "",
+                cloudModel: status.cloudProvider?.model || "",
               },
             },
           }),

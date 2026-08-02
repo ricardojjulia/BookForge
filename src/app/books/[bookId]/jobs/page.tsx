@@ -191,9 +191,13 @@ export default async function JobsHistoryPage({
                         </Text>
                       </td>
                       <td>
-                        <Text size="sm">OK {job.progress?.successful || 0}</Text>
-                        <Text size="sm">Skipped {job.progress?.skipped || 0}</Text>
-                        <Text size="sm">Failed {job.progress?.failed || 0}</Text>
+                        <Group gap={6} wrap="nowrap">
+                          <Text size="sm" c="green">{job.progress?.successful || 0} ok</Text>
+                          <Text size="sm" c="dimmed">·</Text>
+                          <Text size="sm" c={job.progress?.skipped ? "yellow.8" : "dimmed"}>{job.progress?.skipped || 0} skipped</Text>
+                          <Text size="sm" c="dimmed">·</Text>
+                          <Text size="sm" c={job.progress?.failed ? "red" : "dimmed"}>{job.progress?.failed || 0} failed</Text>
+                        </Group>
                       </td>
                       <td>
                         <Text size="sm">{new Date(job.created_at).toLocaleString()}</Text>

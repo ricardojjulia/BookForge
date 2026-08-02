@@ -12,9 +12,11 @@ type ChapterMetadata = StructureAuditChapter & {
 };
 
 export function ChapterMetadataPanel({
+  bookId,
   chapters,
   paragraphs,
 }: {
+  bookId: string;
   chapters: ChapterMetadata[];
   paragraphs: StructureAuditParagraph[];
 }) {
@@ -25,9 +27,16 @@ export function ChapterMetadataPanel({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmMerge, setConfirmMerge] = useState(false);
+  const [repairsApplied, setRepairsApplied] = useState<string[]>([]);
   const issues = useMemo(() => auditBookStructure(chapters, paragraphs), [chapters, paragraphs]);
+  const sortedChapters = useMemo(() => [...chapters].sort((a, b) => a.chapter_number - b.chapter_number), [chapters]);
   const selected = chapters.find((chapter) => chapter.id === selectedId) || chapters[0] || null;
   const selectedIssues = selected ? issues.filter((issue) => issue.chapterId === selected.id) : [];
+  const hasIssueType = (prefix: string) => selectedIssues.some((issue) => issue.id.startsWith(prefix));
+  const nextChapter = selected
+    ? sortedChapters.find((chapter) => chapter.chapter_number > selected.chapter_number) || null
+    : null;
 
   async function deleteChapter() {
     if (!selected) return;
@@ -47,13 +56,136 @@ export function ChapterMetadataPanel({
     }
   }
 
+  async function generateChapterDraft() {
+    if (!selected) return;
+    setLoading(true);
+    setMessage("");
+    setError("");
+    try {
+      const result = await fetchJson<{ content?: { generated?: number; message?: string } }>(
+        `/api/books/${bookId}/generate-draft`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ chapterId: selected.id }),
+        },
+        "Generate chapter draft",
+      );
+      const generated = result.content?.generated || 0;
+      if (generated > 0) {
+        setRepairsApplied((prev) => [...prev, `Generated a draft for Chapter ${selected.chapter_number}`]);
+      } else {
+        setError(result.content?.message || "No draft was generated — this chapter may not be eligible for draft generation.");
+      }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to generate this chapter.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function expandChapter() {
+    if (!selected) return;
+    setLoading(true);
+    setMessage("");
+    setError("");
+    try {
+      const result = await fetchJson<{ content?: { rewritten?: number; attempted?: number; skipped?: number } }>(
+        `/api/books/${bookId}/rewrite-execute`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            chapterId: selected.id,
+            strategyId: "creative_enhancement",
+            rewriteExistingDrafts: true,
+            rewriteAccepted: true,
+            forceTinyParagraphs: true,
+          }),
+        },
+        "Expand chapter",
+      );
+      const rewritten = result.content?.rewritten || 0;
+      if (rewritten > 0) {
+        setRepairsApplied((prev) => [...prev, `Expanded Chapter ${selected.chapter_number} (${rewritten} paragraph(s) rewritten)`]);
+      } else {
+        setError(
+          `No paragraphs were rewritten (${result.content?.attempted || 0} attempted, ${result.content?.skipped || 0} skipped). This chapter may have no eligible paragraphs, or generate a Rewrite Architect plan first.`,
+        );
+      }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to expand this chapter.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function shortenChapter() {
+    if (!selected) return;
+    setLoading(true);
+    setMessage("");
+    setError("");
+    try {
+      const result = await fetchJson<{ content?: { rewritten?: number; attempted?: number; skipped?: number } }>(
+        `/api/books/${bookId}/rewrite-execute`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            chapterId: selected.id,
+            strategyId: "downsize_abridge",
+            rewriteExistingDrafts: true,
+            rewriteAccepted: true,
+          }),
+        },
+        "Shorten chapter",
+      );
+      const rewritten = result.content?.rewritten || 0;
+      if (rewritten > 0) {
+        setRepairsApplied((prev) => [...prev, `Shortened Chapter ${selected.chapter_number} (${rewritten} paragraph(s) rewritten)`]);
+      } else {
+        setError(
+          `No paragraphs were rewritten (${result.content?.attempted || 0} attempted, ${result.content?.skipped || 0} skipped). This chapter may have no eligible paragraphs, or generate a Rewrite Architect plan first.`,
+        );
+      }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to shorten this chapter.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function mergeChapter() {
+    if (!selected) return;
+    setLoading(true);
+    setMessage("");
+    setError("");
+    try {
+      await fetchJson(`/api/chapters/${selected.id}/merge-next`, { method: "PATCH" }, "Merge chapter");
+      setRepairsApplied((prev) => [
+        ...prev,
+        `Merged Chapter ${selected.chapter_number}${nextChapter ? ` with "${nextChapter.title || `Chapter ${nextChapter.chapter_number}`}"` : ""}`,
+      ]);
+      setConfirmMerge(false);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to merge this chapter.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function saveChapter(formData: FormData) {
     if (!selected) return;
     setLoading(true);
     setMessage("");
     setError("");
     try {
-      await fetchJson(
+      const hasRepairs = repairsApplied.length > 0;
+      const result = await fetchJson<{ content?: { invalidatedCount?: number } }>(
         `/api/chapters/${selected.id}`,
         {
           method: "PATCH",
@@ -65,11 +197,18 @@ export function ChapterMetadataPanel({
             excludeFromExport: formData.get("excludeFromExport") === "on",
             structureNotes: String(formData.get("structureNotes") || ""),
             clearSummary: true,
+            invalidateBookEvaluations: hasRepairs,
           }),
         },
         "Update chapter metadata",
       );
-      setMessage("Chapter metadata saved. Summary was cleared so it can be regenerated.");
+      const invalidatedCount = result.content?.invalidatedCount || 0;
+      setMessage(
+        hasRepairs
+          ? `Chapter repairs saved. Cleared ${invalidatedCount} stale book-wide evaluation${invalidatedCount === 1 ? "" : "s"} (critic scores, rewrite plan, drift/continuity reports) — rerun them before trusting downstream work.`
+          : "Chapter metadata saved. Summary was cleared so it can be regenerated.",
+      );
+      setRepairsApplied([]);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to save chapter metadata.");
@@ -144,6 +283,65 @@ export function ChapterMetadataPanel({
             </Paper>
           </Group>
 
+          {selected && (hasIssueType("empty-") || hasIssueType("planned-") || hasIssueType("short-") || hasIssueType("long-") || nextChapter) && (
+            <Paper withBorder radius="md" p="md" bg="#f8fff4">
+              <Text fw={800} mb="xs">
+                Repair actions for this chapter
+              </Text>
+              <Group gap="xs">
+                {hasIssueType("planned-") && (
+                  <Button size="xs" color="teal" variant="light" loading={loading} onClick={generateChapterDraft}>
+                    Generate chapter draft
+                  </Button>
+                )}
+                {(hasIssueType("short-") || hasIssueType("empty-")) && (
+                  <Button size="xs" color="teal" variant="light" loading={loading} onClick={expandChapter}>
+                    Expand this chapter
+                  </Button>
+                )}
+                {hasIssueType("long-") && (
+                  <Button size="xs" color="teal" variant="light" loading={loading} onClick={shortenChapter}>
+                    Shorten this chapter
+                  </Button>
+                )}
+                {nextChapter &&
+                  (hasIssueType("short-") || hasIssueType("empty-") || hasIssueType("planned-") || hasIssueType("repeat-title")) &&
+                  (confirmMerge ? (
+                    <Group gap="xs">
+                      <Text size="sm" c="red" fw={700}>
+                        Merge into &quot;{nextChapter.title || `Chapter ${nextChapter.chapter_number}`}&quot;? This chapter&apos;s text will be combined and it will no longer exist on its own.
+                      </Text>
+                      <Button size="xs" color="red" loading={loading} onClick={mergeChapter}>
+                        Yes, merge
+                      </Button>
+                      <Button size="xs" variant="subtle" color="dark" onClick={() => setConfirmMerge(false)}>
+                        Cancel
+                      </Button>
+                    </Group>
+                  ) : (
+                    <Button size="xs" color="orange" variant="light" disabled={loading} onClick={() => setConfirmMerge(true)}>
+                      Merge with next chapter
+                    </Button>
+                  ))}
+              </Group>
+              <Text size="xs" c="dimmed" mt={6}>
+                Expand/shorten use the saved Rewrite Architect plan and run as a real rewrite pass — they need a plan generated first.
+              </Text>
+              {repairsApplied.length > 0 && (
+                <Stack gap={2} mt="sm">
+                  <Text size="sm" fw={700} c="teal">
+                    Repairs applied this session — click Save below to commit and reset stale evaluations:
+                  </Text>
+                  {repairsApplied.map((label, i) => (
+                    <Text size="sm" key={i}>
+                      ✓ {label}
+                    </Text>
+                  ))}
+                </Stack>
+              )}
+            </Paper>
+          )}
+
           {selected && (
             <form action={saveChapter}>
               <Stack>
@@ -202,7 +400,7 @@ export function ChapterMetadataPanel({
                     </Button>
                   )}
                   <Button color="grape" loading={loading} type="submit">
-                    Save Chapter Metadata
+                    {repairsApplied.length > 0 ? "Save & Apply Repairs" : "Save Chapter Metadata"}
                   </Button>
                 </Group>
               </Stack>

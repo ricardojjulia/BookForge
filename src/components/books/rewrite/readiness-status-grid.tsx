@@ -12,6 +12,7 @@ type Props = {
   chapterCount: number;
   hasBlueprint: boolean;
   criticDone: number;
+  criticTotal: number;
   hasRewritePlan: boolean;
 };
 
@@ -22,13 +23,13 @@ type CardAction = {
   loading?: boolean;
 };
 
-export function ReadinessStatusGrid({ bookId, summarized, chapterCount, hasBlueprint, criticDone, hasRewritePlan }: Props) {
+export function ReadinessStatusGrid({ bookId, summarized, chapterCount, hasBlueprint, criticDone, criticTotal, hasRewritePlan }: Props) {
   const router = useRouter();
   const [running, setRunning] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const summariesReady = chapterCount > 0 && summarized === chapterCount;
-  const criticReady = criticDone === 7;
+  const criticReady = criticDone >= criticTotal;
 
   async function runTask(key: string, path: string, body?: unknown) {
     setRunning(key);
@@ -85,10 +86,11 @@ export function ReadinessStatusGrid({ bookId, summarized, chapterCount, hasBluep
   }> = [
     {
       key: "summaries",
-      label: "Chapter summaries",
+      label: "Chapter summaries generated",
       value: `${summarized}/${chapterCount}`,
       ready: summariesReady,
-      guidance: "Summaries give the rewrite plan focused per-chapter context. Every chapter needs one before planning.",
+      guidance:
+        "Whether every chapter has a summary at all. Existing summaries are separately checked for quality further down this page (Rewrite Readiness Gate) — a chapter can show ready here and still need a stronger summary there.",
       action: {
         label: "Summarize chapters",
         onClick: () => runTask("summaries", `/api/books/${bookId}/chapters/summarize`),
@@ -110,9 +112,9 @@ export function ReadinessStatusGrid({ bookId, summarized, chapterCount, hasBluep
     {
       key: "critic",
       label: "Critic lenses",
-      value: `${criticDone}/7`,
+      value: `${criticDone}/${criticTotal}`,
       ready: criticReady,
-      guidance: `${criticDone === 0 ? "No lenses have run yet." : `${7 - criticDone} lens${7 - criticDone === 1 ? "" : "es"} still missing.`} The plan is strongest when all seven have scored the manuscript.`,
+      guidance: `${criticDone === 0 ? "No lenses have run yet." : criticReady ? "" : `${criticTotal - criticDone} lens${criticTotal - criticDone === 1 ? "" : "es"} still missing.`} The plan is strongest when all ${criticTotal} have scored the manuscript.`,
       action: {
         label: criticDone === 0 ? "Run all critics" : "Run missing critics",
         onClick: () => runTask("critic", `/api/books/${bookId}/critic/all`, { stage: "baseline" }),

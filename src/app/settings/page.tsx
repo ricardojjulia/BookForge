@@ -32,11 +32,15 @@ export default async function SettingsPage() {
   }
 
   const { data } = await supabase.from("user_settings").select("*").eq("user_id", user.id).maybeSingle();
+  // llm_api_key is a write-only column (see the 202608010001 migration) —
+  // it's always null on read. Never send the real key value to the client;
+  // just tell the form whether one is already saved.
+  const initial = data ? { ...data, llm_api_key: "" } : undefined;
 
   return (
     <AppShell>
       <Container size="lg">
-        <SettingsPageClient userId={user.id} initial={data || undefined} />
+        <SettingsPageClient userId={user.id} initial={initial} hasApiKey={Boolean(data?.llm_api_key_secret_id)} />
       </Container>
     </AppShell>
   );

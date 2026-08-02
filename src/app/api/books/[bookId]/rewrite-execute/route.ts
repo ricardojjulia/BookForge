@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildJobProgress, createRevisionJobHeartbeat, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
-import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
+import { buildCloudRewriteModelSelection, selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
@@ -20,8 +20,14 @@ const schema = z.object({
   maxUnits: z.number().int().positive().max(5000).optional(),
   campaignId: z.string().uuid().optional(),
   paragraphId: z.string().uuid().optional(),
+  chapterId: z.string().uuid().optional(),
   rewriteExistingDrafts: z.boolean().default(false),
   rewriteAccepted: z.boolean().default(false),
+  // shouldSkipParagraph's <8-word threshold exists to avoid wasting calls on
+  // title-echo fragments during a normal full-book pass — but that's exactly
+  // the paragraph an "expand this near-empty chapter" repair is targeting.
+  // Set true to bypass it for a deliberate, narrowly-targeted repair call.
+  forceTinyParagraphs: z.boolean().default(false),
   retryJobId: z.string().uuid().optional(),
   distributeAcrossChapters: z.boolean().default(false),
   coverageMode: z.enum(["normal", "uncovered_chapter_sample"]).default("normal"),
@@ -213,10 +219,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       telemetry: { supabase, userId: user.id },
     });
     const { client, model, preparedModel, modelSelection, availableModels, telemetryContext } = modelPlan;
-    const rewriteSelection = selectBestRewriteModel(availableModels, {
-      qualityProfile: settings.qualityProfile,
-      contextWindowTokens: settings.contextWindowTokens,
-    });
+    const rewriteSelection =
+      preparedModel.isCloud && settings.standardSettings
+        ? buildCloudRewriteModelSelection(settings.standardSettings)
+        : selectBestRewriteModel(availableModels, {
+            qualityProfile: settings.qualityProfile,
+            contextWindowTokens: settings.contextWindowTokens,
+          });
     const selectedStrategy = getRewriteStrategy(body.strategyId);
     const rewriteStrategy = {
       ...selectedStrategy,
@@ -363,6 +372,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       if (chapter.exclude_from_rewrite) {
         continue;
       }
+      if (body.chapterId && chapter.id !== body.chapterId) {
+        continue;
+      }
       const { data: paragraphs, error: paragraphsError } = await supabase
         .from("paragraphs")
         .select("id,paragraph_number,original_text,accepted_text,is_locked,scene_id")
@@ -382,7 +394,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         if (retryParagraphIds && !retryParagraphIds.has(paragraph.id)) {
           continue;
         }
-        if (paragraph.is_locked || shouldSkipParagraph(paragraph.original_text, chapter.title)) {
+        if (paragraph.is_locked || (!body.forceTinyParagraphs && shouldSkipParagraph(paragraph.original_text, chapter.title))) {
           skipped += 1;
           continue;
         }
@@ -822,13 +834,23 @@ function shouldSkipParagraph(text: string, title: string | null) {
 }
 
 function parseRewriteResponse(content: string) {
-  return parseModelJsonOrFallback(content, (raw, parseError) => ({
-    revisedText: raw,
-    revisionNotes: `Model returned malformed JSON: ${parseError}`,
-    continuityWarnings: [],
-    ledgerUpdates: [],
-    confidence: 0,
-  }));
+  return parseModelJsonOrFallback(content, (raw, parseError) => {
+    // If the raw fallback text still looks like a JSON object with a
+    // revisedText field that just failed to parse (as opposed to genuine
+    // free-form prose the model wrote instead of JSON), using it verbatim
+    // would leak literal braces and field names into reader-facing
+    // manuscript text. Treat it as an extraction failure instead so the
+    // caller's retry loop fires again (or the paragraph is correctly logged
+    // as failed) rather than silently corrupting accepted text.
+    const looksLikeBrokenJson = /^\s*\{[\s\S]*"revisedText"\s*:/.test(raw);
+    return {
+      revisedText: looksLikeBrokenJson ? "" : raw,
+      revisionNotes: `Model returned malformed JSON: ${parseError}`,
+      continuityWarnings: [],
+      ledgerUpdates: [],
+      confidence: 0,
+    };
+  });
 }
 
 function extractRevisedText(parsed: unknown) {

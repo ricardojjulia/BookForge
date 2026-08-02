@@ -29,17 +29,23 @@ export async function getUserLmStudioSettings(userId: string): Promise<LmStudioS
   const { data } = await supabase
     .from("user_settings")
     .select(
-      "lmstudio_base_url,primary_rewrite_model,reasoning_model,extraction_model,embedding_model,reranker_model,quality_profile,context_window_tokens,temperature,top_p,repeat_penalty,max_output_tokens,llm_provider,llm_api_key,llm_model,llm_base_url,llm_temperature,llm_max_output_tokens,llm_critic_model,llm_rewrite_model,llm_planning_model,llm_extraction_model,execution_mode",
+      "lmstudio_base_url,primary_rewrite_model,reasoning_model,extraction_model,embedding_model,reranker_model,quality_profile,context_window_tokens,temperature,top_p,repeat_penalty,max_output_tokens,llm_provider,llm_api_key_secret_id,llm_model,llm_base_url,llm_temperature,llm_max_output_tokens,llm_critic_model,llm_rewrite_model,llm_planning_model,llm_extraction_model,execution_mode",
     )
     .eq("user_id", userId)
     .maybeSingle();
 
   const provider = (data?.llm_provider || "lmstudio") as LlmProvider;
+  // The API key is never stored in plaintext (see the 202608010001 migration)
+  // — it lives in Supabase Vault, resolved here through a SECURITY DEFINER
+  // function that only returns the caller's own key.
+  const apiKey = data?.llm_api_key_secret_id
+    ? ((await supabase.rpc("get_llm_api_key", { p_user_id: userId })).data as string | null) || undefined
+    : undefined;
   const standardSettings: StandardLlmSettings | null =
     provider !== "lmstudio"
       ? {
           provider,
-          apiKey: data?.llm_api_key || undefined,
+          apiKey,
           model: data?.llm_model || undefined,
           taskModels: buildTaskModels(data),
           baseUrl: data?.llm_base_url || undefined,

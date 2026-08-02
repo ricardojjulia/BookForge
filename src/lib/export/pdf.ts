@@ -147,10 +147,22 @@ function addPageNumbers(doc: PDFKit.PDFDocument) {
   const range = doc.bufferedPageRange();
   for (let pageIndex = range.start; pageIndex < range.start + range.count; pageIndex += 1) {
     doc.switchToPage(pageIndex);
+    // The footer sits 50pt from the bottom edge, inside the page's 72pt
+    // bottom margin. PDFKit's .text() checks the given y against the
+    // printable area (page.height - margins.bottom) regardless of explicit
+    // x/y positioning, and silently starts a brand-new blank page when it
+    // thinks the text would fall outside it — doubling the page count for
+    // every exported PDF (57 real pages became 114). Zeroing the bottom
+    // margin for this one call keeps the footer inside the printable area
+    // without spawning a page, then it's restored immediately after.
+    const originalBottomMargin = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
     doc.font("Helvetica").fontSize(9).fillColor("gray").text(String(pageIndex + 1), 72, doc.page.height - 50, {
       align: "center",
       width: doc.page.width - 144,
+      lineBreak: false,
     });
+    doc.page.margins.bottom = originalBottomMargin;
     doc.fillColor("black");
   }
 }

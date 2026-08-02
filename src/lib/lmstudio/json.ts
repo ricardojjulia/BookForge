@@ -7,26 +7,69 @@ export function parseModelJson(content: string) {
     throw new Error("LM Studio returned an empty response.");
   }
 
+  // Models frequently return otherwise-well-formed JSON where a prose field
+  // (e.g. a rewritten paragraph) contains literal, unescaped newlines/tabs
+  // instead of \n/\t — invalid per the JSON spec, and something jsonrepair
+  // doesn't reliably fix since it can't tell a "broken" raw newline from
+  // intentional multi-line formatting. Escaping raw control characters that
+  // appear inside string literals (tracking quote/escape state) fixes this
+  // dominant real-world failure mode without touching already-valid JSON.
+  const sanitized = escapeRawControlCharsInStrings(trimmed);
+
   try {
-    return JSON.parse(trimmed);
+    return JSON.parse(sanitized);
   } catch {
-    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+    const fenced = sanitized.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
     if (fenced) return parseJsonCandidate(fenced);
 
-    const firstObject = trimmed.indexOf("{");
-    const lastObject = trimmed.lastIndexOf("}");
+    const firstObject = sanitized.indexOf("{");
+    const lastObject = sanitized.lastIndexOf("}");
     if (firstObject >= 0 && lastObject > firstObject) {
-      return parseJsonCandidate(trimmed.slice(firstObject, lastObject + 1));
+      return parseJsonCandidate(sanitized.slice(firstObject, lastObject + 1));
     }
 
-    const firstArray = trimmed.indexOf("[");
-    const lastArray = trimmed.lastIndexOf("]");
+    const firstArray = sanitized.indexOf("[");
+    const lastArray = sanitized.lastIndexOf("]");
     if (firstArray >= 0 && lastArray > firstArray) {
-      return parseJsonCandidate(trimmed.slice(firstArray, lastArray + 1));
+      return parseJsonCandidate(sanitized.slice(firstArray, lastArray + 1));
     }
 
     throw new Error("LM Studio response was not valid JSON.");
   }
+}
+
+function escapeRawControlCharsInStrings(text: string) {
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (!inString) {
+      if (ch === '"') inString = true;
+      result += ch;
+      continue;
+    }
+    if (escaped) {
+      result += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      result += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = false;
+      result += ch;
+      continue;
+    }
+    if (ch === "\n") { result += "\\n"; continue; }
+    if (ch === "\r") { result += "\\r"; continue; }
+    if (ch === "\t") { result += "\\t"; continue; }
+    result += ch;
+  }
+  return result;
 }
 
 export function parseModelJsonOrFallback(content: string, fallback: (raw: string, error: string) => unknown) {

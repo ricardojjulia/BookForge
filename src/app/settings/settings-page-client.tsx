@@ -8,15 +8,17 @@ import type { Settings } from "@/components/settings/settings-form";
 export function SettingsPageClient({
   userId,
   initial,
+  hasApiKey,
 }: {
   userId: string;
   initial?: Partial<Settings>;
+  hasApiKey?: boolean;
 }) {
   const modelStatusRef = useRef<ModelStatusHandle>(null);
 
   return (
     <>
-      <SettingsForm userId={userId} initial={initial} onSaved={() => modelStatusRef.current?.refresh()} />
+      <SettingsForm userId={userId} initial={initial} hasApiKey={hasApiKey} onSaved={() => modelStatusRef.current?.refresh()} />
       <div style={{ marginTop: 24 }}>
         <ModelStatus ref={modelStatusRef} />
       </div>
