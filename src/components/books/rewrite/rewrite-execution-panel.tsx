@@ -489,7 +489,14 @@ export function RewriteExecutionPanel({
             </Text>
           </div>
           <Button color="grape" disabled={!hasPlan || loading || eligibleParagraphCount === 0} loading={loading} onClick={executeRewrite}>
-            Execute Rewrite
+            {eligibleParagraphCount > 0
+              ? // This button only processes one maxUnits-sized batch per click
+                // (default 25) -- with no counter, a user could easily believe a
+                // single click rewrites the whole book. Mirror "Generate Planned
+                // Draft (3 of 6)"'s self-documenting label so partial coverage
+                // is visible up front, not just discoverable after the fact.
+                `Execute Rewrite (${Math.min(Number(maxUnits || eligibleParagraphCount), eligibleParagraphCount).toLocaleString()} of ${eligibleParagraphCount.toLocaleString()})`
+              : "Execute Rewrite"}
           </Button>
           <Button component={Link} href={`/books/${bookId}/revisions`} color="teal" variant="light">
             Review Draft Revisions

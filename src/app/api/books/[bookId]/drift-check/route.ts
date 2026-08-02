@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   buildJobProgress,
   createRevisionJobHeartbeat,
+  getLatestJobIdWithRevisions,
   getRevisionJobStatus,
   updateRevisionJobProgress,
   waitWhileRevisionJobPaused,
@@ -180,7 +181,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     });
 
     try {
-      const revisionJobId = body.revisionJobId || (await getLatestRewriteJobId(supabase, bookId));
+      const revisionJobId = body.revisionJobId || (await getLatestJobIdWithRevisions(supabase, bookId));
       if (!revisionJobId) {
         const completedAt = new Date().toISOString();
         await supabase
@@ -412,19 +413,6 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     console.error("Rewrite drift check failed", error);
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
-}
-
-async function getLatestRewriteJobId(supabase: Awaited<ReturnType<typeof createClient>>, bookId: string) {
-  const { data, error } = await supabase
-    .from("revision_jobs")
-    .select("id")
-    .eq("book_id", bookId)
-    .eq("mode", "full_book_rewrite")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  return data?.id || null;
 }
 
 async function readJsonBody(request: Request) {

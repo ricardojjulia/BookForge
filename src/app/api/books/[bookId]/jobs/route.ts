@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { extractJobProgress, isStaleRunningJob } from "@/lib/ai/job-state";
+import { detectAndHealStaleJobs, extractJobProgress, isStaleRunningJob, logJobCompletionSummaries } from "@/lib/ai/job-state";
 import { createClient } from "@/lib/supabase/server";
 
 type RevisionJobRow = {
@@ -35,9 +35,20 @@ export async function GET(_: Request, context: { params: Promise<{ bookId: strin
       .limit(12);
     if (error) throw error;
 
+    const jobs = (data || []) as RevisionJobRow[];
+    const healedJobIds = await detectAndHealStaleJobs(supabase, user.id, jobs);
+    for (const job of jobs) {
+      if (healedJobIds.includes(job.id)) {
+        job.status = "failed";
+      }
+    }
+    void logJobCompletionSummaries(supabase, user.id, jobs).catch((summaryError) => {
+      console.warn("Job completion summary logging failed", summaryError);
+    });
+
     return NextResponse.json({
       content: {
-        jobs: ((data || []) as RevisionJobRow[]).map((job) => {
+        jobs: jobs.map((job) => {
           const progress = extractJobProgress(job.settings);
           return {
             ...job,

@@ -102,7 +102,7 @@ export function ChapterAcceptanceWorkflow({ chapters }: { chapters: ChapterFinal
                         size="xs"
                         color="green"
                         variant="light"
-                        disabled={!chapter.latestDraftParagraphs}
+                        disabled={!chapter.pendingDraftParagraphs}
                         loading={loadingId === chapter.chapterId}
                         onClick={() => acceptChapter(chapter)}
                       >

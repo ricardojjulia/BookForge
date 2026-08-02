@@ -12,6 +12,7 @@ import { buildFullBookRewriteUnitPrompt } from "@/lib/prompts/builders";
 import { buildRewriteContextPacket } from "@/lib/rewrite/context-packet";
 import { applyRewritePlanDefaults } from "@/lib/rewrite/plan-defaults";
 import { clampStrategySettings, getRewriteStrategy, rewriteStrategies } from "@/lib/rewrite/strategies";
+import { getExistingRevisionState, shouldSkipParagraph, type ExistingRevisionRow } from "@/lib/rewrite/eligibility";
 import { createClient } from "@/lib/supabase/server";
 
 const schema = z.object({
@@ -73,12 +74,6 @@ type ParagraphRow = {
   accepted_text?: string | null;
   is_locked: boolean | null;
   scene_id: string | null;
-};
-
-type ExistingRevisionRow = {
-  paragraph_id: string | null;
-  accepted: boolean | null;
-  rejected: boolean | null;
 };
 
 type AcceptedRevisionContextRow = {
@@ -799,24 +794,6 @@ function estimateSecondsPerRewriteUnit(model: string) {
   return 24;
 }
 
-function getExistingRevisionState(revisions: ExistingRevisionRow[]) {
-  const pendingDraftParagraphIds = new Set<string>();
-  const acceptedParagraphIds = new Set<string>();
-
-  revisions.forEach((revision) => {
-    if (!revision.paragraph_id) return;
-    if (revision.accepted) {
-      acceptedParagraphIds.add(revision.paragraph_id);
-      return;
-    }
-    if (!revision.rejected) {
-      pendingDraftParagraphIds.add(revision.paragraph_id);
-    }
-  });
-
-  return { pendingDraftParagraphIds, acceptedParagraphIds };
-}
-
 async function readJsonBody(request: Request) {
   try {
     return await request.json();
@@ -825,24 +802,21 @@ async function readJsonBody(request: Request) {
   }
 }
 
-function shouldSkipParagraph(text: string, title: string | null) {
-  const clean = text.trim();
-  const words = clean.split(/\s+/).filter(Boolean).length;
-  if (words < 8) return true;
-  if (title && clean.toLowerCase() === title.trim().toLowerCase()) return true;
-  return false;
-}
-
 function parseRewriteResponse(content: string) {
   return parseModelJsonOrFallback(content, (raw, parseError) => {
-    // If the raw fallback text still looks like a JSON object with a
-    // revisedText field that just failed to parse (as opposed to genuine
-    // free-form prose the model wrote instead of JSON), using it verbatim
-    // would leak literal braces and field names into reader-facing
-    // manuscript text. Treat it as an extraction failure instead so the
-    // caller's retry loop fires again (or the paragraph is correctly logged
-    // as failed) rather than silently corrupting accepted text.
-    const looksLikeBrokenJson = /^\s*\{[\s\S]*"revisedText"\s*:/.test(raw);
+    // If the raw fallback text looks like an attempted (but broken or
+    // truncated) JSON object -- rather than genuine free-form prose the
+    // model wrote instead of JSON -- using it verbatim would leak literal
+    // braces/partial field names into reader-facing manuscript text. A
+    // model ignoring the JSON-wrapping instruction would never coincidentally
+    // start its prose with a literal "{", so checking for a full
+    // '"revisedText":' match is too narrow: a response truncated after only
+    // a few characters (e.g. '{\n  "revised') still starts with "{" but
+    // never reaches that far, and previously slipped through as "valid"
+    // text. Treat ANY raw text starting with "{" as a failed attempt instead
+    // so the caller's retry loop fires again (or the paragraph is correctly
+    // logged as failed) rather than silently corrupting accepted text.
+    const looksLikeBrokenJson = /^\s*\{/.test(raw);
     return {
       revisedText: looksLikeBrokenJson ? "" : raw,
       revisionNotes: `Model returned malformed JSON: ${parseError}`,
