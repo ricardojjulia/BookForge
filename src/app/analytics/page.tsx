@@ -22,6 +22,8 @@ import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { RunsTable } from "@/components/analytics/runs-table";
 import { FreshnessTelemetryPanel } from "@/components/analytics/freshness-telemetry-panel";
 import { WorkflowCoverageTable } from "@/components/analytics/workflow-coverage-table";
+import { ManualRunsTable } from "@/components/analytics/manual-runs-table";
+import { EstimationAccuracyTable, StaleIncidentsPanel, type StaleIncidentRow } from "@/components/analytics/job-health-panel";
 import { createClient } from "@/lib/supabase/server";
 import type { RunRecord, StageDuration, ScoreSnapshot } from "@/app/api/analytics/route";
 
@@ -152,10 +154,24 @@ export default async function AnalyticsPage() {
 
   const { data: revisionJobs } = await supabase
     .from("revision_jobs")
-    .select("id, book_id, mode, status, created_at, completed_at, settings, metadata_snapshot_id")
+    .select("id, book_id, mode, status, created_at, completed_at, settings, metadata_snapshot_id, books(title)")
     .eq("created_by", user.id)
     .order("created_at", { ascending: false })
     .limit(200);
+
+  const { data: staleIncidents } = await supabase
+    .from("model_call_events")
+    .select("id, task, duration_ms, error_signature, created_at")
+    .eq("user_id", user.id)
+    .eq("event_type", "job_stale_detected")
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  const { data: completionSummaries } = await supabase
+    .from("model_call_events")
+    .select("task, outcome, duration_ms, estimated_duration_ms")
+    .eq("user_id", user.id)
+    .eq("event_type", "job_completed_summary");
 
   // Build typed RunRecord[] with derived telemetry metrics
   const runs: RunRecord[] = (jobs ?? []).map((job) => {
@@ -238,6 +254,60 @@ export default async function AnalyticsPage() {
     make_longer: "Make Longer",
   };
 
+  // ── Manual workflow runs (Critic/Blueprint/Execute Rewrite/Drift Check,
+  //    clicked individually rather than through the Auto-Review Wizard) ───────
+  type ManualRunRecord = {
+    id: string;
+    book_title: string;
+    mode: string;
+    status: string;
+    durationMs: number | null;
+    progress: { attempted?: number; successful?: number; failed?: number; totalUnits?: number } | null;
+    createdAt: string;
+  };
+  const manualRuns: ManualRunRecord[] = (revisionJobs ?? []).map((job) => {
+    const settings = job.settings as { progress?: ManualRunRecord["progress"] } | null;
+    return {
+      id: job.id,
+      book_title: (job.books as { title?: string } | null)?.title ?? "Unknown Book",
+      mode: job.mode,
+      status: job.status ?? "unknown",
+      durationMs: job.completed_at ? new Date(job.completed_at).getTime() - new Date(job.created_at).getTime() : null,
+      progress: settings?.progress ?? null,
+      createdAt: job.created_at,
+    };
+  });
+  const manualCompleted = manualRuns.filter((r) => r.status === "completed");
+  const manualFailed = manualRuns.filter((r) => r.status === "failed");
+  const manualAvgDurationMs = avg(manualCompleted.map((r) => r.durationMs).filter((d): d is number => d !== null));
+  const manualSuccessRate = manualRuns.length
+    ? Math.round((manualCompleted.length / manualRuns.length) * 100)
+    : null;
+
+  // ── Job health & estimation trust ───────────────────────────────────────────
+  type EstimationAccuracyRow = {
+    task: string;
+    jobCount: number;
+    avgActualMs: number;
+    avgEstimatedMs: number | null;
+  };
+  const accuracyByTask = new Map<string, { durations: number[]; estimates: number[] }>();
+  for (const row of completionSummaries ?? []) {
+    if (row.outcome !== "success" || typeof row.duration_ms !== "number") continue;
+    const bucket = accuracyByTask.get(row.task) ?? { durations: [], estimates: [] };
+    bucket.durations.push(row.duration_ms);
+    if (typeof row.estimated_duration_ms === "number") bucket.estimates.push(row.estimated_duration_ms);
+    accuracyByTask.set(row.task, bucket);
+  }
+  const estimationAccuracy: EstimationAccuracyRow[] = Array.from(accuracyByTask.entries())
+    .map(([task, bucket]) => ({
+      task,
+      jobCount: bucket.durations.length,
+      avgActualMs: avg(bucket.durations) ?? 0,
+      avgEstimatedMs: bucket.estimates.length ? avg(bucket.estimates) : null,
+    }))
+    .sort((a, b) => b.jobCount - a.jobCount);
+
   const explicitRuns = provenanceRuns.filter((run) => run.source === "explicit_snapshot").length;
   const branchRuns = provenanceRuns.filter((run) => run.source === "branch_active").length;
   const fallbackRuns = provenanceRuns.filter((run) => run.source === "active_snapshot").length;
@@ -260,8 +330,9 @@ export default async function AnalyticsPage() {
           <div>
             <Title>Run Analytics</Title>
             <Text c="dimmed">
-              Performance and quality telemetry for every Auto-Review Wizard run.
-              Click any row to see per-stage timing and score progression.
+              Performance and quality telemetry across every workflow — Auto-Review Wizard runs below, manual
+              Critic/Blueprint/Rewrite runs and job-health stats further down. Click any Auto-Review row to see
+              per-stage timing and score progression.
             </Text>
           </div>
 
@@ -343,6 +414,40 @@ export default async function AnalyticsPage() {
               </Text>
             </Group>
             <RunsTable runs={runs} />
+          </div>
+
+          {/* Manual workflow runs -- Critic/Blueprint/Execute Rewrite/Drift
+              Check clicked individually rather than through the Auto-Review
+              Wizard. This is the far more common path in practice; the
+              summary cards/table above only ever reflect Auto-Review runs. */}
+          <div>
+            <Title order={2}>Manual Workflow Runs</Title>
+            <Text c="dimmed" mb="sm">
+              Critic, Blueprint, Execute Rewrite, and Drift Check runs triggered individually rather than through the
+              Auto-Review Wizard.
+            </Text>
+            <SimpleGrid cols={{ base: 2, sm: 4 }} mb="sm">
+              <MetricCard label="Total Runs" value={String(manualRuns.length)} sub={`${manualCompleted.length} completed · ${manualFailed.length} failed`} />
+              <MetricCard label="Avg Duration" value={fmtDuration(manualAvgDurationMs)} sub="completed runs only" />
+              <MetricCard label="Success Rate" value={manualSuccessRate !== null ? `${manualSuccessRate}%` : "—"} sub="of all manual runs" />
+              <MetricCard label="Stale Incidents" value={String(staleIncidents?.length ?? 0)} sub="auto-detected & healed" />
+            </SimpleGrid>
+            <ManualRunsTable runs={manualRuns} />
+          </div>
+
+          {/* Job health & estimation trust -- surfaces the auto-heal sweep's
+              findings and how accurate the AI Task Preflight modal's time
+              estimates actually are, compared against real outcomes. */}
+          <div>
+            <Title order={2}>Job Health &amp; Estimation Trust</Title>
+            <Text c="dimmed" mb="sm">
+              Stalled-job detection and estimated-vs-actual duration, computed from real job outcomes rather than the static
+              formula shown before a run starts.
+            </Text>
+            <Stack gap="md">
+              <StaleIncidentsPanel incidents={(staleIncidents ?? []) as StaleIncidentRow[]} />
+              <EstimationAccuracyTable rows={estimationAccuracy} />
+            </Stack>
           </div>
         </Stack>
       </Container>
