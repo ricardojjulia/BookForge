@@ -31,7 +31,7 @@ export function CriticReportsPanel({ bookId, reports }: { bookId: string; report
   }
 
   return (
-    <Paper withBorder radius="md" p="xl" bg="white" mt="xl">
+    <Paper id="critic-reports" withBorder radius="md" p="xl" bg="white" mt="xl" style={{ scrollMarginTop: 24 }}>
       <Group justify="space-between" mb="md" align="flex-start">
         <div>
           <Title order={2}>Saved Critic Reports</Title>

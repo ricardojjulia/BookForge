@@ -1,7 +1,7 @@
 import { Alert, Badge, Button, Container, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { DeleteBookButton } from "@/components/books/delete-book-button";
+import { DashboardMetrics } from "@/components/dashboard/dashboard-metrics";
 import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
-import { OnboardingChecklist } from "@/components/onboarding/onboarding-checklist";
 import { SetupWizard } from "@/components/onboarding/setup-wizard";
 import { AppShell } from "@/components/layout/app-shell";
 import { getBookAuthorDisplay } from "@/lib/books/status";
@@ -30,21 +30,21 @@ export default async function DashboardPage() {
     );
   }
 
-  const [{ data: books }, { data: reports }, { data: userSettings }] = await Promise.all([
+  const [{ data: books }, { data: bookOptions }, { count: bookCount }, { count: reportCount }, { data: userSettings }] = await Promise.all([
     supabase
       .from("books")
       .select("id,title,author_name,genre,status,finished_export_id,created_at,updated_at")
       .order("updated_at", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(12),
+    supabase.from("books").select("id,title").order("title"),
+    supabase.from("books").select("id", { count: "exact", head: true }),
     supabase
       .from("coherence_reports")
-      .select("id,book_id,report_type,created_at")
-      .order("created_at", { ascending: false })
-      .limit(6),
+      .select("id", { count: "exact", head: true }),
     supabase
       .from("user_settings")
-      .select("onboarding_completed_steps, primary_rewrite_model, llm_api_key_secret_id, llm_provider")
+      .select("onboarding_completed_steps, primary_rewrite_model, llm_api_key_secret_id, llm_provider, execution_mode")
       .eq("user_id", user.id)
       .maybeSingle(),
   ]);
@@ -64,6 +64,28 @@ export default async function DashboardPage() {
     : [];
   const finishedByBook = Object.fromEntries(finishedExports.map((fe) => [fe.bookId, fe]));
   const freshnessFetchedAt = new Date().toISOString();
+  const settings = userSettings as {
+    onboarding_completed_steps?: string[];
+    execution_mode?: string;
+    primary_rewrite_model?: string;
+    llm_provider?: string;
+    llm_api_key_secret_id?: string;
+  } | null;
+  const completedSteps = settings?.onboarding_completed_steps ?? [];
+  const hasLmStudio = settings?.execution_mode === "local" || Boolean(settings?.primary_rewrite_model);
+  const hasCloud = Boolean(settings?.llm_api_key_secret_id);
+  const needsSetup = !hasLmStudio && !hasCloud;
+  const providerLabels: Record<string, string> = {
+    openrouter: "OpenRouter",
+    openai: "OpenAI",
+    anthropic: "Anthropic",
+    google: "Google Gemini",
+  };
+  const aiEngine = hasCloud
+    ? providerLabels[settings?.llm_provider ?? ""] ?? "Cloud provider"
+    : hasLmStudio
+      ? "LM Studio"
+      : "Not configured";
 
   return (
     <AppShell>
@@ -75,20 +97,7 @@ export default async function DashboardPage() {
             <Text c="dimmed">Projects, books, revision progress, and recent critic activity.</Text>
           </div>
           <Group>
-            {(() => {
-              const s = userSettings as { onboarding_completed_steps?: string[]; primary_rewrite_model?: string; llm_api_key_secret_id?: string } | null;
-              const completedSteps = s?.onboarding_completed_steps ?? [];
-              const hasLmStudio = Boolean(s?.primary_rewrite_model);
-              const hasCloud = Boolean(s?.llm_api_key_secret_id);
-              const needsSetup = !hasLmStudio && !hasCloud;
-              return (
-                <SetupWizard
-                  userId={user.id}
-                  completedSteps={completedSteps}
-                  needsSetup={needsSetup}
-                />
-              );
-            })()}
+            {needsSetup && <SetupWizard userId={user.id} completedSteps={completedSteps} needsSetup />}
             <Button component="a" href="/books/create" color="grape">
               Create From Idea
             </Button>
@@ -98,18 +107,12 @@ export default async function DashboardPage() {
           </Group>
         </Group>
 
-        <OnboardingChecklist completedSteps={(userSettings as { onboarding_completed_steps?: string[] } | null)?.onboarding_completed_steps || []} />
-
-        <SimpleGrid cols={{ base: 1, md: 3 }} mb="xl">
-          <Metric label="Books" value={books?.length || 0} />
-          <Metric label="Critic reports" value={reports?.length || 0} />
-          {(() => {
-            const s = userSettings as { llm_provider?: string; llm_api_key_secret_id?: string } | null;
-            const provider = s?.llm_api_key_secret_id ? (s.llm_provider ?? "cloud") : "lmstudio";
-            const labels: Record<string, string> = { lmstudio: "LM Studio", openai: "OpenAI", anthropic: "Anthropic", google: "Google Gemini" };
-            return <Metric label="AI engine" value={labels[provider] ?? "LM Studio"} />;
-          })()}
-        </SimpleGrid>
+        <DashboardMetrics
+          bookCount={bookCount ?? 0}
+          reportCount={reportCount ?? 0}
+          aiEngine={aiEngine}
+          books={bookOptions || []}
+        />
 
         <Paper withBorder radius="md" p="xl" bg="#fbfaf8" mb="xl">
           <Group justify="space-between" align="flex-start">
@@ -128,7 +131,7 @@ export default async function DashboardPage() {
           </Group>
         </Paper>
 
-        <SimpleGrid cols={{ base: 1, md: 3 }}>
+        <SimpleGrid id="books" cols={{ base: 1, md: 3 }} style={{ scrollMarginTop: 24 }}>
           {books?.map((book) => {
             const isFinished = book.status === "finished";
             const finishedExport = finishedByBook[book.id];
@@ -198,17 +201,6 @@ export default async function DashboardPage() {
         )}
       </Container>
     </AppShell>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string | number }) {
-  return (
-    <Paper withBorder radius="md" p="lg" bg="white">
-      <Text size="sm" c="dimmed">
-        {label}
-      </Text>
-      <Title order={2}>{value}</Title>
-    </Paper>
   );
 }
 

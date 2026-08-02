@@ -434,7 +434,7 @@ export function SetupWizard({
         size="xs"
         onClick={() => { setActive(0); setConnected(false); setDone(false); setOpened(true); }}
       >
-        {completedSteps.includes("ai_setup") ? "Reconfigure AI" : "Set up AI engine"}
+        Set up AI engine
       </Button>
 
       <Modal
