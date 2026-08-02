@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ActionIcon, Badge, Button, Group, Paper, Stack, Text, Textarea, Title } from "@mantine/core";
-import { IconCheck, IconMessage } from "@tabler/icons-react";
+import { IconCheck, IconMessage, IconArrowsExchange } from "@tabler/icons-react";
 import { fetchJson } from "@/lib/http/fetch-json";
 
 type Chapter = { id: string; chapter_number: number; title: string | null };
@@ -16,10 +16,24 @@ type Props = {
   initialAnnotations: Annotation[];
 };
 
-export function ReaderView({ bookId, chapters, paragraphs, initialAnnotations }: Props) {
+export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, initialAnnotations }: Props) {
   const [annotations, setAnnotations] = useState<Annotation[]>(initialAnnotations);
+  const [paragraphs, setParagraphs] = useState<Paragraph[]>(initialParagraphs);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [posting, setPosting] = useState<string | null>(null);
+  const [comparing, setComparing] = useState<Record<string, boolean>>({});
+  const [reverting, setReverting] = useState<string | null>(null);
+
+  async function preferOriginal(paragraphId: string) {
+    setReverting(paragraphId);
+    try {
+      await fetchJson(`/api/paragraphs/${paragraphId}/prefer-original`, { method: "PATCH" });
+      setParagraphs((prev) => prev.map((p) => (p.id === paragraphId ? { ...p, accepted_text: null } : p)));
+      setComparing((prev) => { const next = { ...prev }; delete next[paragraphId]; return next; });
+    } finally {
+      setReverting(null);
+    }
+  }
 
   const byParagraph = annotations.reduce<Record<string, Annotation[]>>((acc, a) => {
     const key = a.paragraph_id || "general";
@@ -69,10 +83,23 @@ export function ReaderView({ bookId, chapters, paragraphs, initialAnnotations }:
             const text = para.accepted_text || para.original_text || "";
             const paraAnnotations = byParagraph[para.id] || [];
             const isAnnotating = para.id in drafts;
+            const hasAlternateVersion = Boolean(para.accepted_text && para.accepted_text !== para.original_text);
+            const isComparing = Boolean(comparing[para.id]);
             return (
               <Stack key={para.id} gap="xs">
                 <Group align="flex-start" wrap="nowrap" gap="xs">
                   <Text style={{ flex: 1, lineHeight: 1.8 }}>{text}</Text>
+                  {hasAlternateVersion && (
+                    <ActionIcon
+                      size="sm"
+                      variant={isComparing ? "filled" : "subtle"}
+                      color="teal"
+                      title="Compare with original"
+                      onClick={() => setComparing((prev) => ({ ...prev, [para.id]: !prev[para.id] }))}
+                    >
+                      <IconArrowsExchange size={14} />
+                    </ActionIcon>
+                  )}
                   <ActionIcon
                     size="sm"
                     variant={isAnnotating ? "filled" : "subtle"}
@@ -86,6 +113,28 @@ export function ReaderView({ bookId, chapters, paragraphs, initialAnnotations }:
                     <IconMessage size={14} />
                   </ActionIcon>
                 </Group>
+
+                {isComparing && hasAlternateVersion && (
+                  <Paper withBorder radius="sm" p="sm" bg="#f4faf9">
+                    <Stack gap="xs">
+                      <Badge size="xs" color="teal" variant="light" w="fit-content">
+                        Original version
+                      </Badge>
+                      <Text size="sm" c="dimmed" style={{ lineHeight: 1.7 }}>
+                        {para.original_text}
+                      </Text>
+                      <Button
+                        size="xs"
+                        variant="light"
+                        color="teal"
+                        loading={reverting === para.id}
+                        onClick={() => preferOriginal(para.id)}
+                      >
+                        Prefer this version
+                      </Button>
+                    </Stack>
+                  </Paper>
+                )}
 
                 {isAnnotating && (
                   <Paper withBorder radius="sm" p="sm" bg="#f8f7ff">
