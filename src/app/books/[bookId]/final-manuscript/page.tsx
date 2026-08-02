@@ -6,6 +6,7 @@ import { ChapterAcceptanceWorkflow, type ChapterFinalReadiness } from "@/compone
 import { FinalQualityGate } from "@/components/books/export/final-quality-gate";
 import { FinalManuscriptBuilder } from "@/components/books/export/final-manuscript-builder";
 import { MarkFinishedButton } from "@/components/books/export/mark-finished-button";
+import { getLatestJobIdWithRevisions } from "@/lib/ai/job-state";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -84,7 +85,7 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
     { data: revisions },
     { data: latestDriftReport },
     { data: latestCriticReports },
-    { data: latestRewriteJob },
+    latestRewriteJobId,
     { data: exports },
   ] = await Promise.all([
     supabase.from("books").select("title,status,finished_export_id").eq("id", bookId).single(),
@@ -120,14 +121,7 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
       .or("report_type.like.critic:%,report_type.like.critic_post:%,report_type.eq.humanized_guidance")
       .order("created_at", { ascending: false })
       .limit(30),
-    supabase
-      .from("revision_jobs")
-      .select("id,status,created_at")
-      .eq("book_id", bookId)
-      .eq("mode", "full_book_rewrite")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+    getLatestJobIdWithRevisions(supabase, bookId),
     supabase
       .from("exports")
       .select("id,format,storage_path,status,metadata,created_at,completed_at")
@@ -226,7 +220,7 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
         <FinalQualityGate
           bookId={bookId}
           reports={finalQualityReports}
-          latestRewriteJobId={latestRewriteJob?.id || null}
+          latestRewriteJobId={latestRewriteJobId}
           acceptedPercent={acceptedPercent}
         />
 

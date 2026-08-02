@@ -40,6 +40,13 @@ type ModelStatusResponse = {
   >;
   configuredModels: Array<{ key: string; label: string; model: string; available: boolean }>;
   warnings: string[];
+  cloudProvider?: {
+    provider: string;
+    model: string | null;
+    executionMode: string;
+    usedForPlanning: boolean;
+    usedForRewrite: boolean;
+  } | null;
 };
 
 type AutoRevisionResponse = {
@@ -200,6 +207,16 @@ export function BookActions({
           : task === "generate-draft"
             ? "rewrite"
             : "extraction";
+      // status.connected/configured.available only reflect LOCAL LM Studio
+      // reachability, so every AI Task Preflight modal's "Proceed" button was
+      // permanently disabled for accounts configured to use a cloud provider
+      // (e.g. OpenRouter) — local LM Studio was never expected to be running
+      // for them. Treat the account as ready when its cloud provider is
+      // actually the active path for this task's model kind.
+      const isCloudReadyForTask = Boolean(
+        status.cloudProvider?.model &&
+          (runtimeTask === "rewrite" ? status.cloudProvider.usedForRewrite : status.cloudProvider.usedForPlanning),
+      );
       const runtimeLimits = status.runtimeLimits?.[runtimeTask] || status.runtimeLimits?.planning;
       const plan = estimateAiCallPlan({
         task: task === "critic" || task === "critic-all" || task === "auto-review" ? "critic" : "book-bible",
@@ -318,8 +335,8 @@ export function BookActions({
                 ? "Primary rewrite model"
                 : "Extraction model",
           selectedModel,
-          lmStudioConnected: status.connected,
-          modelAvailable: Boolean(configured?.available),
+          lmStudioConnected: status.connected || isCloudReadyForTask,
+          modelAvailable: Boolean(configured?.available) || isCloudReadyForTask,
           estimatedUnits,
           expectedAiCalls,
           qualityProfile: status.qualityProfile,

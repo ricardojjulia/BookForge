@@ -141,6 +141,132 @@ export function summarizeRevisionJobs(
   return summary;
 }
 
+type StaleHealJobRow = { id: string; mode: string; status: string | null; settings: unknown };
+
+// A dead server-side request leaves a job stuck at status="running" forever
+// -- its heartbeat just stops, with nothing to notice or act on it (the
+// existing isStaleRunningJob check only labels this "possibly interrupted"
+// for whoever happens to be looking at the Jobs History page). This sweep
+// runs opportunistically whenever the jobs list is fetched (no cron
+// infrastructure required) and auto-fails anything stale well past that
+// display threshold, logging the incident for trust/reliability stats.
+export async function detectAndHealStaleJobs(
+  supabase: SupabaseClient,
+  userId: string,
+  jobs: StaleHealJobRow[],
+  staleAfterSeconds = 600,
+) {
+  const healedJobIds: string[] = [];
+  for (const job of jobs) {
+    const progress = extractJobProgress(job.settings);
+    if (!isStaleRunningJob(job.status, progress, staleAfterSeconds)) continue;
+
+    const staleSinceMs = progress?.lastHeartbeatAt ? Date.now() - new Date(progress.lastHeartbeatAt).getTime() : null;
+    const staleMinutes = staleSinceMs ? Math.round(staleSinceMs / 60000) : null;
+
+    const { data: updated, error: updateError } = await supabase
+      .from("revision_jobs")
+      .update({
+        status: "failed",
+        completed_at: new Date().toISOString(),
+        error_message: `Auto-detected as stalled: no heartbeat for over ${staleMinutes ?? "several"} minute(s). The server-side process likely died mid-run without reaching its own failure handler.`,
+      })
+      .eq("id", job.id)
+      .eq("status", "running")
+      .select("id");
+    if (updateError || !updated?.length) continue;
+
+    await supabase.from("model_call_events").insert({
+      user_id: userId,
+      job_id: job.id,
+      model: "n/a",
+      task: job.mode,
+      context_length: 0,
+      outcome: "error",
+      error_signature: "job_stale_auto_detected",
+      duration_ms: staleSinceMs,
+      event_type: "job_stale_detected",
+    });
+    healedJobIds.push(job.id);
+  }
+  return healedJobIds;
+}
+
+type CompletionSummaryJobRow = {
+  id: string;
+  mode: string;
+  status: string | null;
+  settings: unknown;
+  started_at: string | null;
+  completed_at: string | null;
+};
+
+// Logs estimated-vs-actual duration once per terminal job, so estimation
+// accuracy (the "estimatedSecondsPerUnit"/"estimatedTotalSeconds" shown in
+// the AI Task Preflight modal) can eventually be measured and improved from
+// real outcomes instead of the static formula it's computed from today.
+export async function logJobCompletionSummaries(supabase: SupabaseClient, userId: string, jobs: CompletionSummaryJobRow[]) {
+  const terminalJobs = jobs.filter((job) => job.status === "completed" || job.status === "failed");
+  if (!terminalJobs.length) return;
+
+  const { data: existing } = await supabase
+    .from("model_call_events")
+    .select("job_id")
+    .eq("event_type", "job_completed_summary")
+    .in(
+      "job_id",
+      terminalJobs.map((job) => job.id),
+    );
+  const alreadyLogged = new Set((existing || []).map((row) => row.job_id));
+
+  const rowsToInsert = [];
+  for (const job of terminalJobs) {
+    if (alreadyLogged.has(job.id) || !job.started_at || !job.completed_at) continue;
+    const progress = extractJobProgress(job.settings);
+    const actualDurationMs = new Date(job.completed_at).getTime() - new Date(job.started_at).getTime();
+    const estimatedDurationMs =
+      progress?.estimatedSecondsPerUnit && progress.totalUnits
+        ? progress.estimatedSecondsPerUnit * progress.totalUnits * 1000
+        : null;
+    rowsToInsert.push({
+      user_id: userId,
+      job_id: job.id,
+      model: "n/a",
+      task: job.mode,
+      context_length: 0,
+      outcome: job.status === "completed" ? "success" : "error",
+      duration_ms: actualDurationMs,
+      estimated_duration_ms: estimatedDurationMs,
+      event_type: "job_completed_summary",
+    });
+  }
+  if (rowsToInsert.length) {
+    await supabase.from("model_call_events").insert(rowsToInsert);
+  }
+}
+
+// A real rewrite pass is usually many small revision_jobs rows (the UI caps
+// "Execute Rewrite" at ~25 paragraphs per click), so the single
+// most-recently-*created* job of a given mode can easily be a trailing
+// batch that found zero remaining eligible paragraphs -- a legitimate,
+// expected outcome once coverage is complete, not an error. Anything that
+// wants "the job that did the most recent real work" (e.g. drift-check
+// sampling) should look at what actually produced output, not job-row
+// recency, or it silently has nothing to work with even though real work
+// just happened moments earlier.
+export async function getLatestJobIdWithRevisions(supabase: SupabaseClient, bookId: string) {
+  const { data, error } = await supabase
+    .from("revision_versions")
+    .select("revision_job_id")
+    .eq("book_id", bookId)
+    .not("revision_job_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.revision_job_id as string | undefined) || null;
+}
+
 export function mergeJobSettings(settings: unknown, progress: AiJobProgress) {
   const base = settings && typeof settings === "object" ? (settings as Record<string, unknown>) : {};
   return {
