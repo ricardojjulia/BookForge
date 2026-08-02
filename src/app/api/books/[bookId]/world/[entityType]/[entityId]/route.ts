@@ -25,11 +25,25 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ bo
 
   const body = await request.json();
   const safeBody = Object.fromEntries(
-    Object.entries(body as Record<string, unknown>).filter(([k]) => !["id", "book_id", "created_at"].includes(k)),
+    Object.entries(body as Record<string, unknown>).filter(
+      ([k]) => !["id", "book_id", "created_at", "source", "discovery_key", "discovery_job_id", "discovered_at"].includes(k),
+    ),
   );
 
   const table = ENTITY_TABLES[entityType];
-  const { data, error } = await supabase.from(table).update(safeBody).eq("id", entityId).eq("book_id", bookId).select("*").single();
+  const { data, error } = await supabase
+    .from(table)
+    .update({
+      ...safeBody,
+      source: "manual",
+      discovery_key: null,
+      discovery_job_id: null,
+      discovered_at: null,
+    })
+    .eq("id", entityId)
+    .eq("book_id", bookId)
+    .select("*")
+    .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ item: data });
 }

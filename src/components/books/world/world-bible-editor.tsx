@@ -1,8 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Tabs } from "@mantine/core";
+import { useRouter } from "next/navigation";
+import { Alert, Badge, Button, Group, Tabs, Text } from "@mantine/core";
+import { IconSparkles } from "@tabler/icons-react";
 import { EntityList } from "@/components/books/world/entity-list";
+import { fetchJson } from "@/lib/http/fetch-json";
 
 type Chapter = { id: string; chapter_number: number; title: string | null };
 
@@ -14,13 +17,90 @@ type Props = {
   initialMotifs: Record<string, unknown>[];
   initialTimeline: Record<string, unknown>[];
   chapters: Chapter[];
+  discoveryStatus: string;
+  discoveryProcessed: boolean;
+  discoveryProcessedAt: string | null;
 };
 
-export function WorldBibleEditor({ bookId, initialCharacters, initialLocations, initialThemes, initialMotifs, initialTimeline, chapters }: Props) {
+type QueueResponse = { content?: { jobId?: string } };
+
+export function WorldBibleEditor({
+  bookId,
+  initialCharacters,
+  initialLocations,
+  initialThemes,
+  initialMotifs,
+  initialTimeline,
+  chapters,
+  discoveryStatus,
+  discoveryProcessed,
+  discoveryProcessedAt,
+}: Props) {
+  const router = useRouter();
   const [tab, setTab] = useState<string | null>("characters");
+  const [discovering, setDiscovering] = useState(false);
+  const [message, setMessage] = useState<{ color: "green" | "red" | "blue"; text: string } | null>(null);
+
+  async function discoverWithAi() {
+    setDiscovering(true);
+    setMessage(null);
+    try {
+      const queued = await fetchJson<QueueResponse>(
+        `/api/books/${bookId}/analyze`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ serverManaged: true, discoverWorldBible: true }),
+        },
+        "Queue World Bible discovery",
+      );
+      const jobId = queued.content?.jobId;
+      if (!jobId) throw new Error("World Bible discovery job was not created.");
+
+      setMessage({ color: "blue", text: "Discovery is running. You can follow it in Jobs History." });
+      void fetchJson(
+        `/api/books/${bookId}/analyze`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jobId, discoverWorldBible: true }),
+        },
+        "Discover World Bible with AI",
+      )
+        .then(() => {
+          setMessage({ color: "green", text: "World Bible discovery completed." });
+          router.refresh();
+        })
+        .catch((error) => {
+          setMessage({ color: "red", text: error instanceof Error ? error.message : "World Bible discovery failed." });
+        })
+        .finally(() => setDiscovering(false));
+    } catch (error) {
+      setMessage({ color: "red", text: error instanceof Error ? error.message : "World Bible discovery failed." });
+      setDiscovering(false);
+    }
+  }
 
   return (
-    <Tabs value={tab} onChange={setTab}>
+    <>
+      <Group justify="space-between" align="center" mb="lg">
+        <div>
+          <Group gap="xs">
+            <Text fw={700}>Manuscript discovery</Text>
+            <Badge color={discoveryStatus === "completed" ? "green" : discoveryStatus === "failed" ? "red" : "gray"}>
+              {discoveryStatus.replaceAll("_", " ")}
+            </Badge>
+          </Group>
+          {discoveryProcessed && discoveryProcessedAt && (
+            <Text size="xs" c="dimmed">Last processed {new Date(discoveryProcessedAt).toLocaleString()}</Text>
+          )}
+        </div>
+        <Button leftSection={<IconSparkles size={16} />} loading={discovering} onClick={discoverWithAi}>
+          Discover with AI
+        </Button>
+      </Group>
+      {message && <Alert color={message.color} mb="lg" onClose={() => setMessage(null)} withCloseButton>{message.text}</Alert>}
+      <Tabs value={tab} onChange={setTab}>
       <Tabs.List mb="xl">
         <Tabs.Tab value="characters">Characters ({initialCharacters.length})</Tabs.Tab>
         <Tabs.Tab value="locations">Locations ({initialLocations.length})</Tabs.Tab>
@@ -31,6 +111,7 @@ export function WorldBibleEditor({ bookId, initialCharacters, initialLocations, 
 
       <Tabs.Panel value="characters">
         <EntityList
+          key={`characters-${initialCharacters.length}`}
           bookId={bookId}
           entityType="characters"
           initial={initialCharacters}
@@ -49,6 +130,7 @@ export function WorldBibleEditor({ bookId, initialCharacters, initialLocations, 
 
       <Tabs.Panel value="locations">
         <EntityList
+          key={`locations-${initialLocations.length}`}
           bookId={bookId}
           entityType="locations"
           initial={initialLocations}
@@ -62,6 +144,7 @@ export function WorldBibleEditor({ bookId, initialCharacters, initialLocations, 
 
       <Tabs.Panel value="themes">
         <EntityList
+          key={`themes-${initialThemes.length}`}
           bookId={bookId}
           entityType="themes"
           initial={initialThemes}
@@ -75,6 +158,7 @@ export function WorldBibleEditor({ bookId, initialCharacters, initialLocations, 
 
       <Tabs.Panel value="motifs">
         <EntityList
+          key={`motifs-${initialMotifs.length}`}
           bookId={bookId}
           entityType="motifs"
           initial={initialMotifs}
@@ -88,6 +172,7 @@ export function WorldBibleEditor({ bookId, initialCharacters, initialLocations, 
 
       <Tabs.Panel value="timeline">
         <EntityList
+          key={`timeline-${initialTimeline.length}`}
           bookId={bookId}
           entityType="timeline"
           initial={initialTimeline}
@@ -99,6 +184,7 @@ export function WorldBibleEditor({ bookId, initialCharacters, initialLocations, 
           chapters={chapters}
         />
       </Tabs.Panel>
-    </Tabs>
+      </Tabs>
+    </>
   );
 }

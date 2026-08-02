@@ -1,6 +1,6 @@
 # Engineering TODO
 
-Last updated: 2026-06-02
+Last updated: 2026-08-02
 
 ## v0.3.0 Plan
 
@@ -39,6 +39,7 @@ Last updated: 2026-06-02
 
 ### Phase 2 — Product Quality
 
+- [x] Add World Bible AI discovery with normalized persistence, manual-entry preservation, processing status, and focused tests.
 - [x] Persist and prefill export metadata/style controls from latest export.
 - [x] Refine export styling and metadata controls.
 - [x] Improve collaborator workflows where they still require manual coordination.

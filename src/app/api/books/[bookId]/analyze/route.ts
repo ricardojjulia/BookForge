@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildJobProgress, createRevisionJobHeartbeat, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
@@ -10,11 +11,13 @@ import { getExtractionModelCandidates } from "@/lib/lmstudio/model-selection";
 import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { createClient } from "@/lib/supabase/server";
+import { persistWorldDiscovery } from "@/lib/world/discovery-server";
 
 const schema = z.object({
   retryJobId: z.string().uuid().optional(),
   jobId: z.string().uuid().optional(),
   serverManaged: z.boolean().optional(),
+  discoverWorldBible: z.boolean().optional(),
 });
 
 type RetryJobSettings = {
@@ -37,21 +40,38 @@ function getErrorMessage(
 }
 
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
+  let discoveryContext: {
+    bookId: string;
+    supabase: Awaited<ReturnType<typeof createClient>>;
+  } | null = null;
   try {
     const { bookId } = await context.params;
     const body = schema.parse(await readJsonBody(request));
     const supabase = await createClient();
+    if (body.discoverWorldBible) discoveryContext = { bookId, supabase };
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
 
     const [{ data: chapters, error }, { count: scenes }, { count: paragraphs }] = await Promise.all([
-      supabase.from("chapters").select("title,original_text").eq("book_id", bookId).order("chapter_number"),
+      supabase.from("chapters").select("id,chapter_number,title,original_text").eq("book_id", bookId).order("chapter_number"),
       supabase.from("scenes").select("id", { count: "exact", head: true }).eq("book_id", bookId),
       supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId),
     ]);
     if (error) throw error;
+    if (body.discoverWorldBible) {
+      if (!(chapters || []).some((chapter) => chapter.original_text.trim())) {
+        return NextResponse.json({ error: "Add manuscript text before discovering the World Bible." }, { status: 400 });
+      }
+      if (!body.jobId) {
+        const { error: statusError } = await supabase
+          .from("books")
+          .update({ world_bible_status: "processing", world_bible_processed: false })
+          .eq("id", bookId);
+        if (statusError) throw statusError;
+      }
+    }
 
     const settings = await getUserLmStudioSettings(user.id);
     const modelPlan = await selectAndPrepareActiveModel(settings, {
@@ -117,7 +137,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         .from("revision_jobs")
         .insert({
           book_id: bookId,
-          mode: "manuscript_blueprint",
+          mode: body.discoverWorldBible ? "world_bible_discovery" : "manuscript_blueprint",
           status,
           settings: {
             model,
@@ -129,8 +149,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             unit: "analysis_chunk",
             retryJobId: body.retryJobId || null,
             retryChunkNumbers: retryChunkNumbers ? Array.from(retryChunkNumbers) : null,
+            discoverWorldBible: Boolean(body.discoverWorldBible),
             progress: buildJobProgress({
-              taskName: "Generate Manuscript Blueprint",
+              taskName: body.discoverWorldBible ? "Discover World Bible with AI" : "Generate Manuscript Blueprint",
               currentUnit: chunks.length ? `Analysis chunk 1 of ${chunks.length}` : "No chunks",
               totalUnits: chunks.length,
               attempted: 0,
@@ -141,7 +162,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
               estimatedSecondsPerUnit: plan.estimatedSecondsPerCall,
             }),
           },
-          prompt_snapshot: "Manuscript Blueprint analysis: chunked manuscript extraction with no invented full-book facts.",
+          prompt_snapshot: body.discoverWorldBible
+            ? "World Bible discovery: chunked manuscript extraction followed by normalized entity persistence."
+            : "Manuscript Blueprint analysis: chunked manuscript extraction with no invented full-book facts.",
           created_by: user.id,
           started_at: status === "running" ? startedAt : null,
         })
@@ -292,6 +315,38 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     const completedAt = new Date().toISOString();
     const finalStatus = await getRevisionJobStatus(supabase, jobId);
     const completedStatus = finalStatus === "cancelled" ? "cancelled" : "completed";
+    let worldDiscoveryResult: Awaited<ReturnType<typeof persistWorldDiscovery>> | null = null;
+    if (body.discoverWorldBible && completedStatus === "completed") {
+      worldDiscoveryResult = await persistWorldDiscovery({
+        supabase,
+        bookId,
+        jobId,
+        blueprint: contentWithPlan,
+        chapters: (chapters || []).map((chapter) => ({
+          id: chapter.id,
+          chapter_number: chapter.chapter_number,
+        })),
+      });
+      const sourceHash = createHash("sha256")
+        .update(JSON.stringify((chapters || []).map((chapter) => [chapter.id, chapter.original_text])))
+        .digest("hex");
+      const { error: bookStatusError } = await supabase
+        .from("books")
+        .update({
+          world_bible_status: "completed",
+          world_bible_processed: true,
+          world_bible_processed_at: completedAt,
+          world_bible_source_hash: sourceHash,
+          updated_at: completedAt,
+        })
+        .eq("id", bookId);
+      if (bookStatusError) throw bookStatusError;
+    } else if (body.discoverWorldBible) {
+      await supabase
+        .from("books")
+        .update({ world_bible_status: "failed", world_bible_processed: false })
+        .eq("id", bookId);
+    }
     const { error: finalJobError } = await supabase
       .from("revision_jobs")
       .update({
@@ -305,8 +360,10 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           usedLoadedFallback: modelSelection.usedLoadedFallback,
           unit: "analysis_chunk",
           retryJobId: body.retryJobId || null,
+          discoverWorldBible: Boolean(body.discoverWorldBible),
+          worldDiscoveryResult,
           progress: buildJobProgress({
-            taskName: "Generate Manuscript Blueprint",
+            taskName: body.discoverWorldBible ? "Discover World Bible with AI" : "Generate Manuscript Blueprint",
             currentUnit: completedStatus === "cancelled" ? "Cancelled" : "Complete",
             totalUnits: chunks.length,
             attempted,
@@ -320,15 +377,23 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             message:
               completedStatus === "cancelled"
                 ? "Blueprint job cancelled. Completed chunks were merged into the saved Blueprint."
-                : "Manuscript Blueprint saved.",
+                : body.discoverWorldBible
+                  ? "World Bible discoveries saved."
+                  : "Manuscript Blueprint saved.",
           }),
         },
       })
       .eq("id", jobId);
     if (finalJobError) throw finalJobError;
 
-    return NextResponse.json({ content: contentWithPlan });
+    return NextResponse.json({ content: { ...contentWithPlan, worldDiscoveryResult } });
   } catch (error) {
+    if (discoveryContext) {
+      await discoveryContext.supabase
+        .from("books")
+        .update({ world_bible_status: "failed", world_bible_processed: false })
+        .eq("id", discoveryContext.bookId);
+    }
     console.error("Manuscript Blueprint analysis failed", error);
     return NextResponse.json(
       { error: getErrorMessage(error) },

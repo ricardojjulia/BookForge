@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-06-02.
+Last updated: 2026-08-02.
 
 ## v0.3.0 Kickoff (Scaffold)
 
@@ -26,6 +26,7 @@ The app runs on Next.js 16 / Supabase / LM Studio and optionally routes AI calls
 
 ## What Has Been Done
 
+- World Bible AI discovery now extracts and persists characters, locations, themes, motifs, and timeline notes through the durable Blueprint job while preserving manual entries and recording per-book processing status.
 - Full-stack foundation: Next.js 16, React 19, Mantine 9, Tailwind 4, Supabase, LM Studio.
 - Manuscript import (TXT, MD, DOCX, EPUB, KPF/KCB best-effort, paste, manual).
 - Structure audit and repair tools.

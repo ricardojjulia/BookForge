@@ -16,16 +16,18 @@ Return JSON with:
   "tense": "",
   "tone": "",
   "authorialVoice": "",
-  "majorThemes": [],
-  "recurringMotifs": [],
-  "characters": [],
+  "majorThemes": [{ "name": "", "description": "" }],
+  "recurringMotifs": [{ "name": "", "description": "" }],
+  "characters": [{ "name": "", "role": "", "description": "", "arcNotes": "", "voiceNotes": "", "relationshipNotes": "" }],
   "relationships": [],
-  "timeline": [],
-  "locations": [],
+  "timeline": [{ "event": "", "chapterNumber": 1, "sequenceOrder": 1 }],
+  "locations": [{ "name": "", "description": "" }],
   "unresolvedPlotThreads": [],
   "styleRules": [],
   "forbiddenChanges": []
 }
+
+For characters, locations, themes, motifs, and timeline events, return one object per distinct manuscript fact. Use the visible chapter number for timeline.chapterNumber when known. Do not invent missing details.
 
 MANUSCRIPT SAMPLE:
 ${manuscriptSample}`;
