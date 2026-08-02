@@ -1,4 +1,5 @@
-import { Alert, Badge, Container, Stack, Text, Title } from "@mantine/core";
+import Link from "next/link";
+import { Alert, Badge, Button, Container, Group, Stack, Text, Title } from "@mantine/core";
 import { AppShell } from "@/components/layout/app-shell";
 import { ReaderView } from "@/components/books/reader/reader-view";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
@@ -6,7 +7,13 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-export default async function ReaderPage({ params }: { params: Promise<{ bookId: string }> }) {
+export default async function ReaderPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ bookId: string }>;
+  searchParams: Promise<{ returnTo?: string; returnLabel?: string }>;
+}) {
   if (!hasSupabaseEnv()) {
     return (
       <AppShell>
@@ -18,6 +25,9 @@ export default async function ReaderPage({ params }: { params: Promise<{ bookId:
   }
 
   const { bookId } = await params;
+  const { returnTo, returnLabel } = await searchParams;
+  const returnHref = safeReturnHref(returnTo, bookId);
+  const returnText = safeReturnLabel(returnLabel);
   const supabase = await createClient();
 
   const [{ data: book }, { data: chapters }, { data: paragraphs }, { data: annotations }] = await Promise.all([
@@ -41,9 +51,18 @@ export default async function ReaderPage({ params }: { params: Promise<{ bookId:
     <AppShell>
       <Container size="md">
         <Stack gap="xs" mb="xl">
-          <Title>{book.title}</Title>
-          {book.author_name && <Text c="dimmed">{book.author_name}</Text>}
-          <Badge color="grape" variant="light" w="fit-content">Beta Reader View</Badge>
+          <Group justify="space-between" align="flex-start">
+            <div>
+              <Title>{book.title}</Title>
+              {book.author_name && <Text c="dimmed">{book.author_name}</Text>}
+              <Badge color="grape" variant="light" w="fit-content">Reader View</Badge>
+            </div>
+            <Link href={returnHref} style={{ textDecoration: "none" }}>
+              <Button color="dark" variant="light">
+                {returnText}
+              </Button>
+            </Link>
+          </Group>
         </Stack>
         <ReaderView
           bookId={bookId}
@@ -54,4 +73,17 @@ export default async function ReaderPage({ params }: { params: Promise<{ bookId:
       </Container>
     </AppShell>
   );
+}
+
+function safeReturnHref(value: string | undefined, bookId: string) {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\n") || value.includes("\r")) {
+    return `/books/${bookId}`;
+  }
+  return value;
+}
+
+function safeReturnLabel(value: string | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed.length > 48) return "Back to Book";
+  return trimmed;
 }

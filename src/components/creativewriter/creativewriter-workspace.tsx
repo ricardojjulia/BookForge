@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { ActionIcon, Alert, Badge, Button, Container, Divider, Group, Paper, ScrollArea, SegmentedControl, Stack, Tabs, Text, Textarea, TextInput, Title, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconBook, IconCloudDown, IconCloudUp, IconGitMerge, IconNotes, IconPin, IconPinFilled, IconRefresh, IconSearch, IconWriting, IconX } from "@tabler/icons-react";
+import { IconBook, IconCloudDown, IconCloudUp, IconGitMerge, IconMapPin, IconMessage, IconNotes, IconPalette, IconPin, IconPinFilled, IconRefresh, IconSearch, IconSparkles, IconUsers, IconWriting, IconX } from "@tabler/icons-react";
 import { versionFromDate, type CreativeWriterConflictView, type CreativeWriterWorkspaceData } from "@/lib/creativewriter-ui/dashboard";
 import { CREATIVEWRITER_RELEASE_LABEL } from "@/lib/creativewriter-ui/version";
 import type { CreativeWriterCloudChange } from "@/lib/creativewriter-sync";
@@ -14,7 +14,7 @@ type SyncMessage = {
   text: string;
 };
 
-type SupportEntryKind = "note" | "timeline" | "research" | "bible" | "character" | "location" | "theme" | "motif";
+type SupportEntryKind = "note" | "timeline" | "research" | "bible" | "character" | "location" | "theme" | "motif" | "comment";
 
 type SupportEntry = {
   id: string;
@@ -25,12 +25,26 @@ type SupportEntry = {
   badge?: string | null;
 };
 
+type WorkspaceLayout = {
+  left: number;
+  right: number;
+};
+
+const DEFAULT_WORKSPACE_LAYOUT: WorkspaceLayout = { left: 280, right: 320 };
+const MIN_LEFT_WIDTH = 220;
+const MIN_EDITOR_WIDTH = 420;
+const MIN_RIGHT_WIDTH = 260;
+const RESIZE_HANDLE_WIDTH = 10;
+const SUPPORT_TAB_STYLE: CSSProperties = { flex: "1 1 116px", minWidth: 0 };
+
 export function CreativeWriterWorkspace({ initialData }: { initialData: CreativeWriterWorkspaceData }) {
   return <CreativeWriterWorkspaceState key={initialData.selectedBook?.id || "no-book"} initialData={initialData} />;
 }
 
 function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWriterWorkspaceData }) {
+  const workspaceGridRef = useRef<HTMLDivElement | null>(null);
   const [data, setData] = useState(initialData);
+  const [workspaceLayout, setWorkspaceLayout] = useState<WorkspaceLayout>(() => loadWorkspaceLayout());
   const [selectedChapterId, setSelectedChapterId] = useState(data.chapters[0]?.id || "");
   const selectedChapter = data.chapters.find((chapter) => chapter.id === selectedChapterId) || data.chapters[0] || null;
   const chapterParagraphs = useMemo(
@@ -49,6 +63,8 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
   const dirty = selectedParagraph ? draftText !== (selectedParagraph.currentText || selectedParagraph.acceptedText || "") : false;
   const totalWords = useMemo(() => countWords(data.paragraphs.map((paragraph) => paragraph.currentText || paragraph.acceptedText || "").join(" ")), [data.paragraphs]);
   const chapterWords = useMemo(() => countWords(chapterParagraphs.map((paragraph) => paragraph.currentText || paragraph.acceptedText || "").join(" ")), [chapterParagraphs]);
+  const commentsByParagraph = useMemo(() => groupReaderCommentsByParagraph(data.readerComments), [data.readerComments]);
+  const selectedParagraphComments = selectedParagraph ? commentsByParagraph[selectedParagraph.id] || [] : [];
   const supportEntries = useMemo(() => buildSupportEntries(data), [data]);
   const pinnedSupportEntries = useMemo(
     () => pinnedSupportIds.flatMap((id) => supportEntries.find((entry) => entry.id === id) || []),
@@ -56,14 +72,68 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
   );
   const noteEntries = useMemo(() => filterSupportEntries(supportEntries.filter((entry) => entry.kind === "note" || entry.kind === "timeline"), supportSearch), [supportEntries, supportSearch]);
   const researchEntries = useMemo(() => filterSupportEntries(supportEntries.filter((entry) => entry.kind === "research"), supportSearch), [supportEntries, supportSearch]);
-  const bibleEntries = useMemo(
-    () => filterSupportEntries(supportEntries.filter((entry) => ["bible", "character", "location", "theme", "motif"].includes(entry.kind)), supportSearch),
-    [supportEntries, supportSearch],
-  );
+  const commentEntries = useMemo(() => filterSupportEntries(supportEntries.filter((entry) => entry.kind === "comment"), supportSearch), [supportEntries, supportSearch]);
+  const bibleSummaryEntries = useMemo(() => filterSupportEntries(supportEntries.filter((entry) => entry.kind === "bible"), supportSearch), [supportEntries, supportSearch]);
+  const characterEntries = useMemo(() => filterSupportEntries(supportEntries.filter((entry) => entry.kind === "character"), supportSearch), [supportEntries, supportSearch]);
+  const locationEntries = useMemo(() => filterSupportEntries(supportEntries.filter((entry) => entry.kind === "location"), supportSearch), [supportEntries, supportSearch]);
+  const themeEntries = useMemo(() => filterSupportEntries(supportEntries.filter((entry) => entry.kind === "theme"), supportSearch), [supportEntries, supportSearch]);
+  const motifEntries = useMemo(() => filterSupportEntries(supportEntries.filter((entry) => entry.kind === "motif"), supportSearch), [supportEntries, supportSearch]);
 
   useEffect(() => {
     savePinnedSupportIds(data.selectedBook?.id || "", pinnedSupportIds);
   }, [data.selectedBook?.id, pinnedSupportIds]);
+
+  useEffect(() => {
+    saveWorkspaceLayout(workspaceLayout);
+  }, [workspaceLayout]);
+
+  function updateWorkspaceLayout(updater: (current: WorkspaceLayout, containerWidth: number) => WorkspaceLayout) {
+    setWorkspaceLayout((current) => {
+      const containerWidth = workspaceGridRef.current?.getBoundingClientRect().width || 1200;
+      return clampWorkspaceLayout(updater(current, containerWidth), containerWidth);
+    });
+  }
+
+  function startColumnResize(handle: "left" | "right", event: ReactPointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startLayout = workspaceLayout;
+    const containerWidth = workspaceGridRef.current?.getBoundingClientRect().width || 1200;
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const delta = moveEvent.clientX - startX;
+      setWorkspaceLayout(
+        clampWorkspaceLayout(
+          handle === "left"
+            ? { ...startLayout, left: startLayout.left + delta }
+            : { ...startLayout, right: startLayout.right - delta },
+          containerWidth,
+        ),
+      );
+    };
+    const onPointerUp = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  }
+
+  function resizeColumnWithKeyboard(handle: "left" | "right", event: KeyboardEvent<HTMLButtonElement>) {
+    const step = event.shiftKey ? 40 : 16;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    updateWorkspaceLayout((current) => {
+      if (handle === "left") {
+        return { ...current, left: current.left + (event.key === "ArrowRight" ? step : -step) };
+      }
+      return { ...current, right: current.right + (event.key === "ArrowLeft" ? step : -step) };
+    });
+  }
 
   function selectChapter(chapterId: string) {
     if (!canLeaveDraft()) return;
@@ -252,7 +322,13 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
             <Button component={Link} href="/books/new" color="grape" mt="md">Import Manuscript</Button>
           </Paper>
         ) : (
-          <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)_320px]">
+          <div
+            ref={workspaceGridRef}
+            className="grid overflow-x-auto"
+            style={{
+              gridTemplateColumns: `${workspaceLayout.left}px ${RESIZE_HANDLE_WIDTH}px minmax(${MIN_EDITOR_WIDTH}px, 1fr) ${RESIZE_HANDLE_WIDTH}px ${workspaceLayout.right}px`,
+            }}
+          >
             <Paper withBorder radius="md" p="md" bg="white">
               <Stack gap="md">
                 <div>
@@ -281,6 +357,12 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
               </Stack>
             </Paper>
 
+            <ColumnResizeHandle
+              ariaLabel="Resize books panel"
+              onPointerDown={(event) => startColumnResize("left", event)}
+              onKeyDown={(event) => resizeColumnWithKeyboard("left", event)}
+            />
+
             <Paper withBorder radius="md" p="lg" bg="white">
               <Stack gap="md">
                 <Group justify="space-between" align="flex-start">
@@ -289,9 +371,20 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                     <Title order={2}>{selectedChapter?.title || data.selectedBook.title}</Title>
                     <Text c="dimmed">{chapterWords} words in chapter · {totalWords} words in book</Text>
                   </div>
-                  <Button leftSection={<IconCloudUp size={16} />} color="grape" loading={isPending} disabled={!dirty || !selectedParagraph} onClick={pushDraft}>
-                    Push Draft
-                  </Button>
+                  <Group gap="xs">
+                    <Button
+                      component={Link}
+                      href={`/books/${data.selectedBook.id}/read?returnTo=${encodeURIComponent(`/creativewriter?bookId=${data.selectedBook.id}`)}&returnLabel=${encodeURIComponent("Back to CreativeWriter")}`}
+                      leftSection={<IconBook size={16} />}
+                      color="cyan"
+                      variant="light"
+                    >
+                      Reader View
+                    </Button>
+                    <Button leftSection={<IconCloudUp size={16} />} color="grape" loading={isPending} disabled={!dirty || !selectedParagraph} onClick={pushDraft}>
+                      Push Draft
+                    </Button>
+                  </Group>
                 </Group>
 
                 <ScrollArea type="auto" offsetScrollbars>
@@ -312,6 +405,29 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                   placeholder="Select a paragraph to begin editing."
                   leftSection={<IconWriting size={16} />}
                 />
+                {selectedParagraphComments.length > 0 && (
+                  <Paper withBorder radius="sm" p="sm" bg="#fff9f0">
+                    <Stack gap="xs">
+                      <Group justify="space-between">
+                        <Text size="sm" fw={700}>Comments on this paragraph</Text>
+                        <Badge size="xs" color="orange" variant="light">
+                          {selectedParagraphComments.filter((comment) => !comment.resolved).length} open
+                        </Badge>
+                      </Group>
+                      {selectedParagraphComments.map((comment) => (
+                        <Paper key={comment.id} withBorder radius="sm" p="xs" bg={comment.resolved ? "#f8f9fa" : "white"}>
+                          <Group justify="space-between" align="flex-start" wrap="nowrap">
+                            <Text size="sm">{comment.note}</Text>
+                            <Badge size="xs" color={comment.resolved ? "gray" : "orange"} variant="light">
+                              {comment.resolved ? "Resolved" : "Open"}
+                            </Badge>
+                          </Group>
+                          <Text size="xs" c="dimmed">{formatDateTime(comment.createdAt)}</Text>
+                        </Paper>
+                      ))}
+                    </Stack>
+                  </Paper>
+                )}
                 <Group justify="space-between">
                   <Text size="sm" c={dirty ? "yellow" : "dimmed"}>{dirty ? "Unsynced local draft" : "No local changes"}</Text>
                   <Group gap="sm">
@@ -326,12 +442,18 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
               </Stack>
             </Paper>
 
+            <ColumnResizeHandle
+              ariaLabel="Resize support panel"
+              onPointerDown={(event) => startColumnResize("right", event)}
+              onKeyDown={(event) => resizeColumnWithKeyboard("right", event)}
+            />
+
             <Paper withBorder radius="md" p="md" bg="white">
               <Tabs defaultValue="conflicts" keepMounted={false}>
                 <Stack gap="sm" mb="md">
                   <TextInput
                     aria-label="Search support context"
-                    placeholder="Search notes, research, bible"
+                    placeholder="Search comments, notes, research, bible, world"
                     value={supportSearch}
                     onChange={(event) => setSupportSearch(event.currentTarget.value)}
                     leftSection={<IconSearch size={16} />}
@@ -355,11 +477,16 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                   )}
                 </Stack>
 
-                <Tabs.List grow>
-                  <Tabs.Tab value="conflicts" leftSection={<IconGitMerge size={14} />}>Conflicts</Tabs.Tab>
-                  <Tabs.Tab value="notes" leftSection={<IconNotes size={14} />}>Notes {noteEntries.length ? `(${noteEntries.length})` : ""}</Tabs.Tab>
-                  <Tabs.Tab value="research" leftSection={<IconSearch size={14} />}>Research {researchEntries.length ? `(${researchEntries.length})` : ""}</Tabs.Tab>
-                  <Tabs.Tab value="bible" leftSection={<IconBook size={14} />}>Bible {bibleEntries.length ? `(${bibleEntries.length})` : ""}</Tabs.Tab>
+                <Tabs.List style={{ flexWrap: "wrap", gap: 6, overflow: "visible" }}>
+                  <Tabs.Tab value="conflicts" leftSection={<IconGitMerge size={14} />} style={SUPPORT_TAB_STYLE}>Conflicts</Tabs.Tab>
+                  <Tabs.Tab value="comments" leftSection={<IconMessage size={14} />} style={SUPPORT_TAB_STYLE}>Comments {commentEntries.length ? `(${commentEntries.length})` : ""}</Tabs.Tab>
+                  <Tabs.Tab value="notes" leftSection={<IconNotes size={14} />} style={SUPPORT_TAB_STYLE}>Notes {noteEntries.length ? `(${noteEntries.length})` : ""}</Tabs.Tab>
+                  <Tabs.Tab value="research" leftSection={<IconSearch size={14} />} style={SUPPORT_TAB_STYLE}>Research {researchEntries.length ? `(${researchEntries.length})` : ""}</Tabs.Tab>
+                  <Tabs.Tab value="bible" leftSection={<IconBook size={14} />} style={SUPPORT_TAB_STYLE}>Book Bible {bibleSummaryEntries.length ? `(${bibleSummaryEntries.length})` : ""}</Tabs.Tab>
+                  <Tabs.Tab value="characters" leftSection={<IconUsers size={14} />} style={SUPPORT_TAB_STYLE}>Characters {characterEntries.length ? `(${characterEntries.length})` : ""}</Tabs.Tab>
+                  <Tabs.Tab value="locations" leftSection={<IconMapPin size={14} />} style={SUPPORT_TAB_STYLE}>Locations {locationEntries.length ? `(${locationEntries.length})` : ""}</Tabs.Tab>
+                  <Tabs.Tab value="themes" leftSection={<IconSparkles size={14} />} style={SUPPORT_TAB_STYLE}>Themes {themeEntries.length ? `(${themeEntries.length})` : ""}</Tabs.Tab>
+                  <Tabs.Tab value="motifs" leftSection={<IconPalette size={14} />} style={SUPPORT_TAB_STYLE}>Motifs {motifEntries.length ? `(${motifEntries.length})` : ""}</Tabs.Tab>
                 </Tabs.List>
 
                 <Tabs.Panel value="conflicts" pt="md">
@@ -412,6 +539,21 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                   </Stack>
                 </Tabs.Panel>
 
+                <Tabs.Panel value="comments" pt="md">
+                  <Stack gap="sm">
+                    <Group justify="space-between">
+                      <div>
+                        <Text fw={700}>Comments</Text>
+                        <Text size="sm" c="dimmed">Beta reader notes attached to the manuscript</Text>
+                      </div>
+                      <Badge color="orange" variant="light">
+                        {data.readerComments.filter((comment) => !comment.resolved).length} open
+                      </Badge>
+                    </Group>
+                    <SupportEntryList entries={commentEntries} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No reader comments match this search." : "No reader comments for this book."} />
+                  </Stack>
+                </Tabs.Panel>
+
                 <Tabs.Panel value="notes" pt="md">
                   <Stack gap="sm">
                     <Text fw={700}>Author Notes</Text>
@@ -435,16 +577,36 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                       <Text fw={700}>Book Bible</Text>
                       <Text size="xs" c="dimmed">{formatUpdatedAt(data.support.bible.updatedAt)}</Text>
                     </Group>
-                    <SupportEntryList entries={bibleEntries.filter((entry) => entry.kind === "bible")} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No book bible summary matches this search." : "No book bible summary saved for this book."} />
-                    <Divider />
+                    <Text size="sm" c="dimmed">Blueprint Summary</Text>
+                    <SupportEntryList entries={bibleSummaryEntries} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No blueprint summary matches this search." : "No blueprint summary saved for this book."} />
+                  </Stack>
+                </Tabs.Panel>
+
+                <Tabs.Panel value="characters" pt="md">
+                  <Stack gap="sm">
                     <Text fw={700}>Characters</Text>
-                    <SupportEntryList entries={bibleEntries.filter((entry) => entry.kind === "character")} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No character profiles match this search." : "No character profiles saved for this book."} />
+                    <SupportEntryList entries={characterEntries} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No character profiles match this search." : "No character profiles saved for this book."} />
+                  </Stack>
+                </Tabs.Panel>
+
+                <Tabs.Panel value="locations" pt="md">
+                  <Stack gap="sm">
                     <Text fw={700}>Locations</Text>
-                    <SupportEntryList entries={bibleEntries.filter((entry) => entry.kind === "location")} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No locations match this search." : "No locations saved for this book."} />
+                    <SupportEntryList entries={locationEntries} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No locations match this search." : "No locations saved for this book."} />
+                  </Stack>
+                </Tabs.Panel>
+
+                <Tabs.Panel value="themes" pt="md">
+                  <Stack gap="sm">
                     <Text fw={700}>Themes</Text>
-                    <SupportEntryList entries={bibleEntries.filter((entry) => entry.kind === "theme")} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No themes match this search." : "No themes saved for this book."} />
+                    <SupportEntryList entries={themeEntries} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No themes match this search." : "No themes saved for this book."} />
+                  </Stack>
+                </Tabs.Panel>
+
+                <Tabs.Panel value="motifs" pt="md">
+                  <Stack gap="sm">
                     <Text fw={700}>Motifs</Text>
-                    <SupportEntryList entries={bibleEntries.filter((entry) => entry.kind === "motif")} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No motifs match this search." : "No motifs saved for this book."} />
+                    <SupportEntryList entries={motifEntries} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No motifs match this search." : "No motifs saved for this book."} />
                   </Stack>
                 </Tabs.Panel>
               </Tabs>
@@ -458,6 +620,48 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
 
 function countWords(value: string) {
   return value.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function ColumnResizeHandle({
+  ariaLabel,
+  onPointerDown,
+  onKeyDown,
+}: {
+  ariaLabel: string;
+  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      aria-orientation="vertical"
+      role="separator"
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onKeyDown={onKeyDown}
+      style={{
+        width: RESIZE_HANDLE_WIDTH,
+        cursor: "col-resize",
+        border: 0,
+        background: "transparent",
+        padding: 0,
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          display: "block",
+          width: 2,
+          height: "100%",
+          minHeight: 420,
+          margin: "0 auto",
+          borderRadius: 999,
+          background: "#e2e8f0",
+        }}
+      />
+    </button>
+  );
 }
 
 function SupportEntryList({
@@ -524,6 +728,20 @@ function SupportEntryCard({
 
 function buildSupportEntries(data: CreativeWriterWorkspaceData): SupportEntry[] {
   const entries: SupportEntry[] = [];
+  const paragraphNumberById = new Map(data.paragraphs.map((paragraph) => [paragraph.id, paragraph.paragraphNumber]));
+  data.readerComments.forEach((comment) => {
+    const paragraphNumber = comment.paragraphId ? paragraphNumberById.get(comment.paragraphId) : null;
+    addTextEntry(
+      entries,
+      `comment:${comment.id}`,
+      "comment",
+      paragraphNumber ? `Paragraph ${paragraphNumber}` : "General book comment",
+      comment.note,
+      formatDateTime(comment.createdAt),
+      comment.resolved ? "Resolved" : "Open",
+    );
+  });
+
   const notes = data.support.authorNotes;
   if (notes) {
     addTextEntry(entries, "note:creative", "note", "Creative instructions", notes.creativeInstructions);
@@ -578,8 +796,17 @@ function supportKindLabel(kind: SupportEntryKind) {
     location: "Location",
     theme: "Theme",
     motif: "Motif",
+    comment: "Reader comment",
   };
   return labels[kind];
+}
+
+function groupReaderCommentsByParagraph(comments: CreativeWriterWorkspaceData["readerComments"]) {
+  return comments.reduce<Record<string, CreativeWriterWorkspaceData["readerComments"]>>((groups, comment) => {
+    if (!comment.paragraphId) return groups;
+    groups[comment.paragraphId] = [...(groups[comment.paragraphId] || []), comment];
+    return groups;
+  }, {});
 }
 
 function pinnedSupportStorageKey(bookId: string) {
@@ -601,6 +828,44 @@ function savePinnedSupportIds(bookId: string, ids: string[]) {
   window.localStorage.setItem(pinnedSupportStorageKey(bookId), JSON.stringify(ids));
 }
 
+function workspaceLayoutStorageKey() {
+  return "bookforge:creativewriter:workspace-layout";
+}
+
+function loadWorkspaceLayout(): WorkspaceLayout {
+  if (typeof window === "undefined") return DEFAULT_WORKSPACE_LAYOUT;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(workspaceLayoutStorageKey()) || "null") as Partial<WorkspaceLayout> | null;
+    return clampWorkspaceLayout({
+      left: numberOrDefault(parsed?.left, DEFAULT_WORKSPACE_LAYOUT.left),
+      right: numberOrDefault(parsed?.right, DEFAULT_WORKSPACE_LAYOUT.right),
+    });
+  } catch {
+    return DEFAULT_WORKSPACE_LAYOUT;
+  }
+}
+
+function saveWorkspaceLayout(layout: WorkspaceLayout) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(workspaceLayoutStorageKey(), JSON.stringify(layout));
+}
+
+function clampWorkspaceLayout(layout: WorkspaceLayout, containerWidth = 1200): WorkspaceLayout {
+  const maxSideWidth = Math.max(MIN_LEFT_WIDTH, containerWidth - MIN_EDITOR_WIDTH - MIN_RIGHT_WIDTH - RESIZE_HANDLE_WIDTH * 2);
+  const left = clampNumber(Math.round(layout.left), MIN_LEFT_WIDTH, maxSideWidth);
+  const maxRightWidth = Math.max(MIN_RIGHT_WIDTH, containerWidth - MIN_EDITOR_WIDTH - left - RESIZE_HANDLE_WIDTH * 2);
+  const right = clampNumber(Math.round(layout.right), MIN_RIGHT_WIDTH, maxRightWidth);
+  return { left, right };
+}
+
+function numberOrDefault(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
 function summarizeBibleContent(content: Record<string, unknown> | null) {
   if (!content || !Object.keys(content).length) return null;
   const summary = stringValue(content.summary) || stringValue(content.premise) || stringValue(content.voice) || stringValue(content.genre);
@@ -612,6 +877,11 @@ function summarizeBibleContent(content: Record<string, unknown> | null) {
 function formatUpdatedAt(value: string | null) {
   if (!value) return "Not analyzed";
   return `Updated ${new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return "No timestamp";
+  return new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 function formatConflictPayload(payload: Record<string, unknown>) {
@@ -687,7 +957,7 @@ function mergeCloudChanges(
               ? {
                   ...paragraph,
                   chapterId: stringValue(change.payload.chapterId) || paragraph.chapterId,
-                  paragraphNumber: numberValue(change.payload.paragraphNumber) || paragraph.paragraphNumber,
+                  sourceParagraphNumber: numberValue(change.payload.paragraphNumber) || paragraph.sourceParagraphNumber,
                   currentText: nullableStringValue(change.payload.currentText),
                   acceptedText: nullableStringValue(change.payload.acceptedText),
                   updatedAt: change.updatedAt,

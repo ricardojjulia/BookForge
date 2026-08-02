@@ -1,5 +1,5 @@
 import { MantineProvider } from "@mantine/core";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CreativeWriterWorkspace } from "@/components/creativewriter/creativewriter-workspace";
@@ -209,7 +209,49 @@ describe("CreativeWriterWorkspace", () => {
     expect(screen.getByLabelText("CreativeWriter manuscript editor")).toHaveValue("Second book paragraph.");
   });
 
-  it("shows BookForge notes, research, and bible context for the selected book", async () => {
+  it("links the selected book to Reader View beside the draft push action", () => {
+    stubBrowserLayoutApis();
+
+    renderWorkspace(workspaceData({ conflicts: [] }));
+
+    expect(screen.getByRole("link", { name: "Reader View" })).toHaveAttribute(
+      "href",
+      "/books/book-1/read?returnTo=%2Fcreativewriter%3FbookId%3Dbook-1&returnLabel=Back%20to%20CreativeWriter",
+    );
+  });
+
+  it("resizes and persists the CreativeWriter workspace columns", async () => {
+    stubBrowserLayoutApis();
+
+    renderWorkspace(workspaceData({ conflicts: [] }));
+
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize books panel" }), { key: "ArrowRight" });
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize support panel" }), { key: "ArrowLeft", shiftKey: true });
+
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem("bookforge:creativewriter:workspace-layout") || "{}")).toMatchObject({
+        left: 296,
+        right: 360,
+      });
+    });
+  });
+
+  it("wraps support rail tabs instead of forcing horizontal scrolling", () => {
+    stubBrowserLayoutApis();
+
+    renderWorkspace(workspaceData({ conflicts: [] }));
+
+    expect(screen.getByRole("tablist")).toHaveStyle({
+      flexWrap: "wrap",
+      overflow: "visible",
+    });
+    expect(screen.getByRole("tab", { name: /Book Bible/i })).toHaveStyle({
+      flex: "1 1 116px",
+      minWidth: "0",
+    });
+  });
+
+  it("shows BookForge notes, research, bible, and separated world context for the selected book", async () => {
     stubBrowserLayoutApis();
     const user = userEvent.setup();
 
@@ -223,10 +265,37 @@ describe("CreativeWriterWorkspace", () => {
     expect(screen.getByText("Smithing archive")).toBeInTheDocument();
     expect(screen.getByText("Historical notes on hand-forged tools.")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: /Bible/i }));
+    await user.click(screen.getByRole("tab", { name: /Book Bible/i }));
+    expect(screen.getByText("Blueprint Summary")).toBeInTheDocument();
     expect(screen.getByText("A maker learns what must be reforged.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /Characters/i }));
     expect(screen.getByText("Mara Vale")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /Locations/i }));
     expect(screen.getByText("The Old Foundry")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /Themes/i }));
+    expect(screen.getByText("Restoration")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /Motifs/i }));
+    expect(screen.getByText("Quenched steel")).toBeInTheDocument();
+  });
+
+  it("shows beta reader comments in the editor and comments tab", async () => {
+    stubBrowserLayoutApis();
+    const user = userEvent.setup();
+
+    renderWorkspace(workspaceData({ conflicts: [] }));
+
+    expect(screen.getByText("Comments on this paragraph")).toBeInTheDocument();
+    expect(screen.getAllByText("This line landed for me.").length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("tab", { name: /Comments/i }));
+
+    expect(screen.getByText("Beta reader notes attached to the manuscript")).toBeInTheDocument();
+    expect(screen.getByText("Paragraph 1")).toBeInTheDocument();
+    expect(screen.getAllByText("This line landed for me.").length).toBeGreaterThan(0);
   });
 
   it("filters support context and pins selected entries per book", async () => {
@@ -235,7 +304,7 @@ describe("CreativeWriterWorkspace", () => {
 
     renderWorkspace();
 
-    await user.click(screen.getByRole("tab", { name: /Bible/i }));
+    await user.click(screen.getByRole("tab", { name: /Characters/i }));
     await user.type(screen.getByLabelText("Search support context"), "Mara");
 
     expect(screen.getByText("Mara Vale")).toBeInTheDocument();
@@ -249,6 +318,7 @@ describe("CreativeWriterWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Clear support search" }));
 
     expect(screen.getAllByText("Mara Vale")).toHaveLength(2);
+    await user.click(screen.getByRole("tab", { name: /Locations/i }));
     expect(screen.getByText("The Old Foundry")).toBeInTheDocument();
   });
 });
@@ -317,12 +387,16 @@ function workspaceData(
         {
           id: "paragraph-3",
           chapterId: "chapter-2",
+          sceneId: "scene-2",
+          sceneNumber: 1,
           paragraphNumber: 1,
+          sourceParagraphNumber: 1,
           currentText: "Second book paragraph.",
           acceptedText: null,
           updatedAt: "2026-08-02T12:10:00.000Z",
         },
       ],
+      readerComments: [],
       conflicts: options.conflicts ?? [],
       support: emptySupport(),
       project: {
@@ -340,7 +414,10 @@ function workspaceData(
     {
       id: "paragraph-1",
       chapterId: "chapter-1",
+      sceneId: "scene-1",
+      sceneNumber: 1,
       paragraphNumber: 1,
+      sourceParagraphNumber: 1,
       currentText: "Original paragraph.",
       acceptedText: null,
       updatedAt: "2026-08-02T12:00:00.000Z",
@@ -350,7 +427,10 @@ function workspaceData(
     paragraphs.push({
       id: "paragraph-2",
       chapterId: "chapter-1",
+      sceneId: "scene-1",
+      sceneNumber: 1,
       paragraphNumber: 2,
+      sourceParagraphNumber: 2,
       currentText: "Second paragraph.",
       acceptedText: null,
       updatedAt: "2026-08-02T12:00:00.000Z",
@@ -386,6 +466,16 @@ function workspaceData(
       },
     ],
     paragraphs,
+    readerComments: [
+      {
+        id: "comment-1",
+        paragraphId: "paragraph-1",
+        annotatorId: "reader-1",
+        note: "This line landed for me.",
+        resolved: false,
+        createdAt: "2026-08-02T12:00:00.000Z",
+      },
+    ],
     conflicts: options.conflicts ?? [
       {
         id: "conflict-change-1",
