@@ -10,6 +10,7 @@ import { getDraftModelCandidates } from "@/lib/lmstudio/model-selection";
 import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { validateLongFormOutput } from "@/lib/ai/model-performance";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
+import { WORDS_PER_PAGE } from "@/lib/manuscript/page-estimate";
 import { createClient } from "@/lib/supabase/server";
 import { repairCommonMojibake } from "@/lib/text/repair-mojibake";
 
@@ -559,7 +560,7 @@ function constrainChapterTargetsForRuntime(chapter: ArchitectureChapter, runtime
   return {
     ...chapter,
     targetWords: cappedTarget,
-    targetPages: Math.max(1, Math.round(cappedTarget / 250)),
+    targetPages: Math.max(1, Math.round(cappedTarget / WORDS_PER_PAGE)),
   };
 }
 
@@ -573,8 +574,8 @@ function computeChapterWordFloor(
   const explicitPages = Number(chapter.targetPages || 0);
   let derivedTargetWords =
     (explicitWords > 0 ? explicitWords : 0) ||
-    (explicitPages > 0 ? explicitPages * 250 : 0) ||
-    ((Math.max(20, targetPages) * 250) / Math.max(1, chapterCount));
+    (explicitPages > 0 ? explicitPages * WORDS_PER_PAGE : 0) ||
+    ((Math.max(20, targetPages) * WORDS_PER_PAGE) / Math.max(1, chapterCount));
 
   if (runtimeWordCeiling && Number.isFinite(runtimeWordCeiling)) {
     derivedTargetWords = Math.min(derivedTargetWords, Math.max(600, Math.floor(runtimeWordCeiling * 0.95)));

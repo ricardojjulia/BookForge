@@ -1,4 +1,5 @@
 import { describeDialogueDensity } from "@/lib/dialogue-density";
+import { WORDS_PER_PAGE } from "@/lib/manuscript/page-estimate";
 
 export function buildCreationDraftChapterPrompt(input: {
   workingTitle: string;
@@ -18,8 +19,8 @@ export function buildCreationDraftChapterPrompt(input: {
 }) {
   const promptBudget = clampNumber(input.promptCharBudget || 0, 5000, 36000);
   const targetWords = input.chapter.targetWords
-    || (input.chapter.targetPages ? Math.round(input.chapter.targetPages * 250) : null)
-    || Math.round((input.targetPages * 250) / 10);
+    || (input.chapter.targetPages ? Math.round(input.chapter.targetPages * WORDS_PER_PAGE) : null)
+    || Math.round((input.targetPages * WORDS_PER_PAGE) / 10);
   const wordFloor = Math.max(600, Math.round(targetWords * 0.8));
   const wordCeiling = Math.round(targetWords * 1.2);
   const conceptBudget = Math.max(1200, Math.floor(promptBudget * 0.22));

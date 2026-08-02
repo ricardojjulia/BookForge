@@ -834,13 +834,23 @@ function shouldSkipParagraph(text: string, title: string | null) {
 }
 
 function parseRewriteResponse(content: string) {
-  return parseModelJsonOrFallback(content, (raw, parseError) => ({
-    revisedText: raw,
-    revisionNotes: `Model returned malformed JSON: ${parseError}`,
-    continuityWarnings: [],
-    ledgerUpdates: [],
-    confidence: 0,
-  }));
+  return parseModelJsonOrFallback(content, (raw, parseError) => {
+    // If the raw fallback text still looks like a JSON object with a
+    // revisedText field that just failed to parse (as opposed to genuine
+    // free-form prose the model wrote instead of JSON), using it verbatim
+    // would leak literal braces and field names into reader-facing
+    // manuscript text. Treat it as an extraction failure instead so the
+    // caller's retry loop fires again (or the paragraph is correctly logged
+    // as failed) rather than silently corrupting accepted text.
+    const looksLikeBrokenJson = /^\s*\{[\s\S]*"revisedText"\s*:/.test(raw);
+    return {
+      revisedText: looksLikeBrokenJson ? "" : raw,
+      revisionNotes: `Model returned malformed JSON: ${parseError}`,
+      continuityWarnings: [],
+      ledgerUpdates: [],
+      confidence: 0,
+    };
+  });
 }
 
 function extractRevisedText(parsed: unknown) {

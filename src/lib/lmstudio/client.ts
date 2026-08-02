@@ -254,7 +254,17 @@ export async function createManagedChatCompletion(
     const completion = await client.chat.completions.create({
       ...safeParams,
       model: params.model || prepared.model,
-      max_tokens: Math.min(params.max_tokens || prepared.runtimeLimits.maxOutputTokens, prepared.runtimeLimits.maxOutputTokens),
+      // Trust an explicitly-passed max_tokens as-is; only fall back to the
+      // prepared/account default when the caller didn't specify one. The
+      // previous Math.min(params.max_tokens || default, default) is
+      // mathematically always equal to `default` whenever a caller passes
+      // anything larger than it — silently discarding every explicit
+      // request for more output, for every call site in the codebase. This
+      // is what made a book architecture's own increased max_tokens budget
+      // a no-op: it always got re-clamped back down to the account's
+      // general cloud max-output setting (tuned for per-paragraph rewrite
+      // calls), regardless of what the architecture route asked for.
+      max_tokens: params.max_tokens ?? prepared.runtimeLimits.maxOutputTokens,
     });
     recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt);
     return completion;
@@ -271,10 +281,7 @@ export async function createManagedChatCompletion(
       const completion = await client.chat.completions.create({
         ...safeRetryParams,
         model: params.model || prepared.model,
-        max_tokens: Math.min(
-          params.max_tokens || prepared.runtimeLimits.maxOutputTokens,
-          prepared.runtimeLimits.maxOutputTokens,
-        ),
+        max_tokens: params.max_tokens ?? prepared.runtimeLimits.maxOutputTokens,
       });
       recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt);
       return completion;

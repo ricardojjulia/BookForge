@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { WORDS_PER_PAGE, estimateWordsForPages } from "@/lib/manuscript/page-estimate";
 import { createClient } from "@/lib/supabase/server";
 
 function coerceToNumber(val: unknown): unknown {
@@ -250,10 +251,10 @@ function normalizeArchitectureToTargetPages(
   const flat = flattenArchitectureChapters(architecture);
   if (!flat.length) return architecture;
 
-  const totalTargetWords = Math.max(4000, Math.round(requestedTargetPages * 275));
+  const totalTargetWords = Math.max(4000, estimateWordsForPages(requestedTargetPages));
   const rawWeights = flat.map((chapter) => {
     if (typeof chapter.targetWords === "number" && chapter.targetWords > 0) return chapter.targetWords;
-    if (typeof chapter.targetPages === "number" && chapter.targetPages > 0) return chapter.targetPages * 275;
+    if (typeof chapter.targetPages === "number" && chapter.targetPages > 0) return chapter.targetPages * WORDS_PER_PAGE;
     return 1;
   });
   const weightSum = rawWeights.reduce((sum, weight) => sum + weight, 0) || flat.length;
@@ -284,7 +285,7 @@ function normalizeArchitectureToTargetPages(
   const normalizedChapters = flat.map((chapter, index) => {
     const targetPages = distributedPages[index] || 1;
     const proportionalWords = (rawWeights[index] / weightSum) * totalTargetWords;
-    const targetWords = Math.max(250, Math.round((proportionalWords || targetPages * 275) / 25) * 25);
+    const targetWords = Math.max(250, Math.round((proportionalWords || targetPages * WORDS_PER_PAGE) / 25) * 25);
     return {
       ...chapter,
       targetPages,

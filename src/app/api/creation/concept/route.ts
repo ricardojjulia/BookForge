@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildCreationConceptPrompt } from "@/lib/creation/concept-prompt";
 import { DIALOG_DENSITY_LEVELS } from "@/lib/dialogue-density";
+import { estimateWordsForPages } from "@/lib/manuscript/page-estimate";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
     } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
 
-    const estimatedWords = Math.round(body.targetPages * 275);
+    const estimatedWords = estimateWordsForPages(body.targetPages);
     const expectedChapters = Math.max(6, Math.min(24, Math.round(body.targetPages / 8)));
     const prompt = buildCreationConceptPrompt({
       workingTitle: body.workingTitle,

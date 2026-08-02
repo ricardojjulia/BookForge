@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Alert, Badge, Box, Button, Collapse, Divider, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { WORDS_PER_PAGE } from "@/lib/manuscript/page-estimate";
 import classes from "./architecture-roadmap-panel.module.css";
 
 type ArchChapter = {
@@ -76,7 +77,7 @@ function ChapterRow({
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
   const keyBeats = Array.isArray(chapter.keyBeats) ? chapter.keyBeats.map(toStr).filter(Boolean) : [];
-  const targetWords = chapter.targetWords ?? (chapter.targetPages ? chapter.targetPages * 250 : null);
+  const targetWords = chapter.targetWords ?? (chapter.targetPages ? chapter.targetPages * WORDS_PER_PAGE : null);
 
   async function generateThisChapter() {
     if (!dbChapterId) return;
