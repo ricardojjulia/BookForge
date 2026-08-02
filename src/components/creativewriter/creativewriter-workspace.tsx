@@ -1,0 +1,716 @@
+"use client";
+
+import { useEffect, useMemo, useState, useTransition } from "react";
+import Link from "next/link";
+import { ActionIcon, Alert, Badge, Button, Container, Divider, Group, Paper, ScrollArea, SegmentedControl, Stack, Tabs, Text, Textarea, TextInput, Title, Tooltip } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
+import { IconBook, IconCloudDown, IconCloudUp, IconGitMerge, IconNotes, IconPin, IconPinFilled, IconRefresh, IconSearch, IconWriting, IconX } from "@tabler/icons-react";
+import { versionFromDate, type CreativeWriterConflictView, type CreativeWriterWorkspaceData } from "@/lib/creativewriter-ui/dashboard";
+import { CREATIVEWRITER_RELEASE_LABEL } from "@/lib/creativewriter-ui/version";
+import type { CreativeWriterCloudChange } from "@/lib/creativewriter-sync";
+
+type SyncMessage = {
+  tone: "green" | "yellow" | "red" | "blue";
+  text: string;
+};
+
+type SupportEntryKind = "note" | "timeline" | "research" | "bible" | "character" | "location" | "theme" | "motif";
+
+type SupportEntry = {
+  id: string;
+  kind: SupportEntryKind;
+  title: string;
+  text: string;
+  detail?: string | null;
+  badge?: string | null;
+};
+
+export function CreativeWriterWorkspace({ initialData }: { initialData: CreativeWriterWorkspaceData }) {
+  return <CreativeWriterWorkspaceState key={initialData.selectedBook?.id || "no-book"} initialData={initialData} />;
+}
+
+function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWriterWorkspaceData }) {
+  const [data, setData] = useState(initialData);
+  const [selectedChapterId, setSelectedChapterId] = useState(data.chapters[0]?.id || "");
+  const selectedChapter = data.chapters.find((chapter) => chapter.id === selectedChapterId) || data.chapters[0] || null;
+  const chapterParagraphs = useMemo(
+    () => data.paragraphs.filter((paragraph) => paragraph.chapterId === selectedChapter?.id),
+    [data.paragraphs, selectedChapter?.id],
+  );
+  const [selectedParagraphId, setSelectedParagraphId] = useState(chapterParagraphs[0]?.id || data.paragraphs[0]?.id || "");
+  const selectedParagraph = data.paragraphs.find((paragraph) => paragraph.id === selectedParagraphId) || chapterParagraphs[0] || data.paragraphs[0] || null;
+  const [draftText, setDraftText] = useState(selectedParagraph?.currentText || selectedParagraph?.acceptedText || "");
+  const [conflictDrafts, setConflictDrafts] = useState<Record<string, string>>({});
+  const [supportSearch, setSupportSearch] = useState("");
+  const [pinnedSupportIds, setPinnedSupportIds] = useState<string[]>(() => loadPinnedSupportIds(initialData.selectedBook?.id || ""));
+  const [message, setMessage] = useState<SyncMessage | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const dirty = selectedParagraph ? draftText !== (selectedParagraph.currentText || selectedParagraph.acceptedText || "") : false;
+  const totalWords = useMemo(() => countWords(data.paragraphs.map((paragraph) => paragraph.currentText || paragraph.acceptedText || "").join(" ")), [data.paragraphs]);
+  const chapterWords = useMemo(() => countWords(chapterParagraphs.map((paragraph) => paragraph.currentText || paragraph.acceptedText || "").join(" ")), [chapterParagraphs]);
+  const supportEntries = useMemo(() => buildSupportEntries(data), [data]);
+  const pinnedSupportEntries = useMemo(
+    () => pinnedSupportIds.flatMap((id) => supportEntries.find((entry) => entry.id === id) || []),
+    [pinnedSupportIds, supportEntries],
+  );
+  const noteEntries = useMemo(() => filterSupportEntries(supportEntries.filter((entry) => entry.kind === "note" || entry.kind === "timeline"), supportSearch), [supportEntries, supportSearch]);
+  const researchEntries = useMemo(() => filterSupportEntries(supportEntries.filter((entry) => entry.kind === "research"), supportSearch), [supportEntries, supportSearch]);
+  const bibleEntries = useMemo(
+    () => filterSupportEntries(supportEntries.filter((entry) => ["bible", "character", "location", "theme", "motif"].includes(entry.kind)), supportSearch),
+    [supportEntries, supportSearch],
+  );
+
+  useEffect(() => {
+    savePinnedSupportIds(data.selectedBook?.id || "", pinnedSupportIds);
+  }, [data.selectedBook?.id, pinnedSupportIds]);
+
+  function selectChapter(chapterId: string) {
+    if (!canLeaveDraft()) return;
+    const nextParagraph = data.paragraphs.find((paragraph) => paragraph.chapterId === chapterId) || null;
+    setSelectedChapterId(chapterId);
+    setSelectedParagraphId(nextParagraph?.id || "");
+    setDraftText(nextParagraph?.currentText || nextParagraph?.acceptedText || "");
+  }
+
+  function selectParagraph(paragraphId: string) {
+    if (!canLeaveDraft()) return;
+    const paragraph = data.paragraphs.find((item) => item.id === paragraphId) || null;
+    setSelectedParagraphId(paragraphId);
+    setDraftText(paragraph?.currentText || paragraph?.acceptedText || "");
+  }
+
+  function canLeaveDraft() {
+    if (!dirty) return true;
+    setMessage({ tone: "yellow", text: "Push or discard the current draft before switching paragraphs." });
+    return false;
+  }
+
+  function discardDraft() {
+    setDraftText(selectedParagraph?.currentText || selectedParagraph?.acceptedText || "");
+    setMessage({ tone: "blue", text: "Local draft discarded." });
+  }
+
+  function pushDraft() {
+    if (!data.project || !selectedParagraph) return;
+    const project = data.project;
+    const now = new Date().toISOString();
+    const idSuffix = `${selectedParagraph.id}-${Date.now()}`;
+    setMessage(null);
+    startTransition(async () => {
+      const response = await fetch("/api/creativewriter/sync/push", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          project,
+          changes: [
+            {
+              id: `cw-ui-${idSuffix}`,
+              projectId: project.localProjectId,
+              entityType: "paragraph",
+              entityId: selectedParagraph.id,
+              operation: "update",
+              payload: { currentText: draftText },
+              baseVersion: versionFromDate(selectedParagraph.updatedAt),
+              localVersion: versionFromDate(selectedParagraph.updatedAt) + 1,
+              idempotencyKey: `cw-ui-${idSuffix}`,
+              createdAt: now,
+            },
+          ],
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.error) {
+        setMessage({ tone: "red", text: payload.error || "Push failed." });
+        return;
+      }
+
+      const conflicts = payload.content?.conflicts || [];
+      if (conflicts.length) {
+        setMessage({ tone: "yellow", text: "Cloud changed first. Review the conflict before applying your draft." });
+        notifications.show({ color: "yellow", title: "Conflict created", message: "Refresh to load the persisted conflict." });
+        return;
+      }
+
+      setData((current) => ({
+        ...current,
+        project: payload.content?.project || current.project,
+        paragraphs: current.paragraphs.map((paragraph) =>
+          paragraph.id === selectedParagraph.id
+            ? { ...paragraph, currentText: draftText, updatedAt: new Date().toISOString() }
+            : paragraph,
+        ),
+      }));
+      setMessage({ tone: "green", text: "Draft pushed to BookForge Cloud." });
+    });
+  }
+
+  function pullSnapshot() {
+    if (!data.selectedBook || !data.project) return;
+    if (dirty) {
+      setMessage({ tone: "yellow", text: "Push or discard the current draft before pulling cloud changes." });
+      return;
+    }
+    setMessage(null);
+    startTransition(async () => {
+      const response = await fetch("/api/creativewriter/sync/pull", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          bookId: data.selectedBook?.id,
+          localProjectId: data.project?.localProjectId,
+          sinceCursor: data.project?.syncCursor,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.error) {
+        setMessage({ tone: "red", text: payload.error || "Pull failed." });
+        return;
+      }
+      const changes = (payload.content?.changes || []) as CreativeWriterCloudChange[];
+      const nextData = mergeCloudChanges(data, changes, payload.content?.project || data.project);
+      const nextParagraph = nextData.paragraphs.find((paragraph) => paragraph.id === selectedParagraphId) || null;
+      setData(nextData);
+      setDraftText(nextParagraph?.currentText || nextParagraph?.acceptedText || "");
+      setMessage({ tone: "blue", text: `Pulled and merged ${changes.length} cloud changes.` });
+    });
+  }
+
+  function resolveConflict(conflict: CreativeWriterConflictView, resolution: "resolved_cloud" | "resolved_local" | "resolved_manual") {
+    if (!data.project) return;
+    const resolvedPayload = resolution === "resolved_manual" ? buildManualResolutionPayload(conflict, conflictDrafts[conflict.id]) : undefined;
+    setMessage(null);
+    startTransition(async () => {
+      const response = await fetch("/api/creativewriter/sync/resolve-conflict", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          project: data.project,
+          conflictId: conflict.id,
+          resolution,
+          ...(resolvedPayload ? { resolvedPayload } : {}),
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.error) {
+        setMessage({ tone: "red", text: payload.error || "Resolution failed." });
+        return;
+      }
+      setData((current) => ({
+        ...current,
+        project: current.project ? { ...current.project, syncCursor: payload.content.syncCursor, lastCloudVersion: payload.content.cloudVersion } : current.project,
+        conflicts: current.conflicts.filter((item) => item.id !== conflict.id),
+      }));
+      setConflictDrafts((current) => {
+        const next = { ...current };
+        delete next[conflict.id];
+        return next;
+      });
+      setMessage({ tone: "green", text: "Conflict resolved in the cloud ledger." });
+    });
+  }
+
+  function togglePinnedSupport(entryId: string) {
+    setPinnedSupportIds((current) => (current.includes(entryId) ? current.filter((id) => id !== entryId) : [...current, entryId]));
+  }
+
+  function clearSupportSearch() {
+    setSupportSearch("");
+  }
+
+  return (
+    <Container size="xl" py="lg">
+      <Stack gap="lg">
+        <Group justify="space-between" align="flex-start">
+          <div>
+            <Group gap="xs" mb="xs">
+              <Badge color="dark" variant="filled">Internal Prototype</Badge>
+              <Badge color="grape" variant="light">{CREATIVEWRITER_RELEASE_LABEL}</Badge>
+              <Badge color={data.conflicts.length ? "yellow" : "teal"} variant="light">
+                {data.conflicts.length} conflicts
+              </Badge>
+            </Group>
+            <Title>BookForge CreativeWriter</Title>
+            <Text c="dimmed">Focused writing desk for linked BookForge manuscripts.</Text>
+          </div>
+          <Group>
+            <Button leftSection={<IconCloudDown size={16} />} variant="light" color="dark" loading={isPending} onClick={pullSnapshot} disabled={!data.project}>
+              Pull
+            </Button>
+            <Button leftSection={<IconRefresh size={16} />} component={Link} href={`/creativewriter${data.selectedBook ? `?bookId=${data.selectedBook.id}` : ""}`} variant="light" color="grape">
+              Refresh
+            </Button>
+          </Group>
+        </Group>
+
+        {message && <Alert color={message.tone}>{message.text}</Alert>}
+
+        {!data.selectedBook ? (
+          <Paper withBorder radius="md" p="xl" bg="white">
+            <Title order={3}>No books available</Title>
+            <Text c="dimmed" mt="xs">Import or create a book before opening CreativeWriter.</Text>
+            <Button component={Link} href="/books/new" color="grape" mt="md">Import Manuscript</Button>
+          </Paper>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)_320px]">
+            <Paper withBorder radius="md" p="md" bg="white">
+              <Stack gap="md">
+                <div>
+                  <Text size="sm" fw={700} mb="xs">Books</Text>
+                  <Stack gap={6}>
+                    {data.books.map((book) => (
+                      <Button key={book.id} component={Link} href={`/creativewriter?bookId=${book.id}`} variant={book.id === data.selectedBook?.id ? "filled" : "subtle"} color={book.id === data.selectedBook?.id ? "grape" : "dark"} justify="flex-start" fullWidth>
+                        {book.title}
+                      </Button>
+                    ))}
+                  </Stack>
+                </div>
+                <Divider />
+                <div>
+                  <Text size="sm" fw={700} mb="xs">Chapters</Text>
+                  <ScrollArea h={420}>
+                    <Stack gap={6}>
+                      {data.chapters.map((chapter) => (
+                        <Button key={chapter.id} variant={chapter.id === selectedChapter?.id ? "light" : "subtle"} color="dark" justify="flex-start" fullWidth onClick={() => selectChapter(chapter.id)}>
+                          {chapter.chapterNumber}. {chapter.title || "Untitled"}
+                        </Button>
+                      ))}
+                    </Stack>
+                  </ScrollArea>
+                </div>
+              </Stack>
+            </Paper>
+
+            <Paper withBorder radius="md" p="lg" bg="white">
+              <Stack gap="md">
+                <Group justify="space-between" align="flex-start">
+                  <div>
+                    <Badge color="teal" variant="light" mb="xs">{chapterParagraphs.length} paragraphs</Badge>
+                    <Title order={2}>{selectedChapter?.title || data.selectedBook.title}</Title>
+                    <Text c="dimmed">{chapterWords} words in chapter · {totalWords} words in book</Text>
+                  </div>
+                  <Button leftSection={<IconCloudUp size={16} />} color="grape" loading={isPending} disabled={!dirty || !selectedParagraph} onClick={pushDraft}>
+                    Push Draft
+                  </Button>
+                </Group>
+
+                <ScrollArea type="auto" offsetScrollbars>
+                  <SegmentedControl
+                    value={selectedParagraph?.id || ""}
+                    onChange={selectParagraph}
+                    data={chapterParagraphs.map((paragraph) => ({ label: String(paragraph.paragraphNumber), value: paragraph.id }))}
+                    disabled={!chapterParagraphs.length}
+                  />
+                </ScrollArea>
+
+                <Textarea
+                  aria-label="CreativeWriter manuscript editor"
+                  minRows={18}
+                  autosize
+                  value={draftText}
+                  onChange={(event) => setDraftText(event.currentTarget.value)}
+                  placeholder="Select a paragraph to begin editing."
+                  leftSection={<IconWriting size={16} />}
+                />
+                <Group justify="space-between">
+                  <Text size="sm" c={dirty ? "yellow" : "dimmed"}>{dirty ? "Unsynced local draft" : "No local changes"}</Text>
+                  <Group gap="sm">
+                    {dirty && (
+                      <Button size="xs" variant="subtle" color="dark" onClick={discardDraft}>
+                        Discard
+                      </Button>
+                    )}
+                    <Text size="sm" c="dimmed">{countWords(draftText)} words</Text>
+                  </Group>
+                </Group>
+              </Stack>
+            </Paper>
+
+            <Paper withBorder radius="md" p="md" bg="white">
+              <Tabs defaultValue="conflicts" keepMounted={false}>
+                <Stack gap="sm" mb="md">
+                  <TextInput
+                    aria-label="Search support context"
+                    placeholder="Search notes, research, bible"
+                    value={supportSearch}
+                    onChange={(event) => setSupportSearch(event.currentTarget.value)}
+                    leftSection={<IconSearch size={16} />}
+                    rightSection={
+                      supportSearch ? (
+                        <Tooltip label="Clear search">
+                          <ActionIcon aria-label="Clear support search" size="sm" variant="subtle" color="dark" onClick={clearSupportSearch}>
+                            <IconX size={14} />
+                          </ActionIcon>
+                        </Tooltip>
+                      ) : null
+                    }
+                  />
+                  {pinnedSupportEntries.length > 0 && (
+                    <Stack gap="xs">
+                      <Text size="sm" fw={700}>Pinned Context</Text>
+                      {filterSupportEntries(pinnedSupportEntries, supportSearch).map((entry) => (
+                        <SupportEntryCard key={`pinned-${entry.id}`} entry={entry} pinned onTogglePin={togglePinnedSupport} compact />
+                      ))}
+                    </Stack>
+                  )}
+                </Stack>
+
+                <Tabs.List grow>
+                  <Tabs.Tab value="conflicts" leftSection={<IconGitMerge size={14} />}>Conflicts</Tabs.Tab>
+                  <Tabs.Tab value="notes" leftSection={<IconNotes size={14} />}>Notes {noteEntries.length ? `(${noteEntries.length})` : ""}</Tabs.Tab>
+                  <Tabs.Tab value="research" leftSection={<IconSearch size={14} />}>Research {researchEntries.length ? `(${researchEntries.length})` : ""}</Tabs.Tab>
+                  <Tabs.Tab value="bible" leftSection={<IconBook size={14} />}>Bible {bibleEntries.length ? `(${bibleEntries.length})` : ""}</Tabs.Tab>
+                </Tabs.List>
+
+                <Tabs.Panel value="conflicts" pt="md">
+                  <Group justify="space-between" mb="md">
+                    <div>
+                      <Text fw={700}>Conflicts</Text>
+                      <Text size="sm" c="dimmed">Ledger-backed review queue</Text>
+                    </div>
+                    <IconGitMerge size={20} />
+                  </Group>
+                  <Stack gap="sm">
+                    {data.conflicts.map((conflict) => (
+                      <Paper key={conflict.id} withBorder radius="sm" p="sm" bg="#fffdf7">
+                        <Stack gap="xs">
+                          <Group justify="space-between">
+                            <Badge color="yellow">{conflict.conflictType}</Badge>
+                            <Text size="xs" c="dimmed">{conflict.entityType}</Text>
+                          </Group>
+                          <Stack gap={4}>
+                            <Text size="xs" fw={700}>Local draft</Text>
+                            <Text size="sm" lineClamp={3}>{formatConflictPayload(conflict.localPayload)}</Text>
+                          </Stack>
+                          <Stack gap={4}>
+                            <Text size="xs" fw={700}>Cloud version</Text>
+                            <Text size="sm" lineClamp={3}>{formatConflictPayload(conflict.cloudPayload)}</Text>
+                          </Stack>
+                          <Textarea
+                            aria-label={`Manual merge for ${conflict.id}`}
+                            minRows={4}
+                            value={conflictDrafts[conflict.id] ?? getConflictEditableText(conflict.localPayload)}
+                            onChange={(event) => {
+                              const value = event.currentTarget.value;
+                              setConflictDrafts((current) => ({
+                                ...current,
+                                [conflict.id]: value,
+                              }));
+                            }}
+                          />
+                          <Group grow>
+                            <Button size="xs" variant="light" color="dark" loading={isPending} onClick={() => resolveConflict(conflict, "resolved_cloud")}>Keep Cloud</Button>
+                            <Button size="xs" variant="light" color="grape" loading={isPending} onClick={() => resolveConflict(conflict, "resolved_local")}>Use Local</Button>
+                            <Button size="xs" color="teal" loading={isPending} onClick={() => resolveConflict(conflict, "resolved_manual")}>Apply Merge</Button>
+                          </Group>
+                        </Stack>
+                      </Paper>
+                    ))}
+                    {!data.conflicts.length && (
+                      <Alert color="teal" variant="light">No unresolved CreativeWriter conflicts for this book.</Alert>
+                    )}
+                  </Stack>
+                </Tabs.Panel>
+
+                <Tabs.Panel value="notes" pt="md">
+                  <Stack gap="sm">
+                    <Text fw={700}>Author Notes</Text>
+                    <SupportEntryList entries={noteEntries.filter((entry) => entry.kind === "note")} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No author notes match this search." : "No author notes saved for this book."} />
+                    <Divider />
+                    <Text fw={700}>Timeline Notes</Text>
+                    <SupportEntryList entries={noteEntries.filter((entry) => entry.kind === "timeline")} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No timeline notes match this search." : "No timeline notes saved for this book."} />
+                  </Stack>
+                </Tabs.Panel>
+
+                <Tabs.Panel value="research" pt="md">
+                  <Stack gap="sm">
+                    <Text fw={700}>Research</Text>
+                    <SupportEntryList entries={researchEntries} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No research materials match this search." : "No research materials saved for this book."} />
+                  </Stack>
+                </Tabs.Panel>
+
+                <Tabs.Panel value="bible" pt="md">
+                  <Stack gap="sm">
+                    <Group justify="space-between">
+                      <Text fw={700}>Book Bible</Text>
+                      <Text size="xs" c="dimmed">{formatUpdatedAt(data.support.bible.updatedAt)}</Text>
+                    </Group>
+                    <SupportEntryList entries={bibleEntries.filter((entry) => entry.kind === "bible")} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No book bible summary matches this search." : "No book bible summary saved for this book."} />
+                    <Divider />
+                    <Text fw={700}>Characters</Text>
+                    <SupportEntryList entries={bibleEntries.filter((entry) => entry.kind === "character")} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No character profiles match this search." : "No character profiles saved for this book."} />
+                    <Text fw={700}>Locations</Text>
+                    <SupportEntryList entries={bibleEntries.filter((entry) => entry.kind === "location")} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No locations match this search." : "No locations saved for this book."} />
+                    <Text fw={700}>Themes</Text>
+                    <SupportEntryList entries={bibleEntries.filter((entry) => entry.kind === "theme")} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No themes match this search." : "No themes saved for this book."} />
+                    <Text fw={700}>Motifs</Text>
+                    <SupportEntryList entries={bibleEntries.filter((entry) => entry.kind === "motif")} pinnedIds={pinnedSupportIds} onTogglePin={togglePinnedSupport} empty={supportSearch ? "No motifs match this search." : "No motifs saved for this book."} />
+                  </Stack>
+                </Tabs.Panel>
+              </Tabs>
+            </Paper>
+          </div>
+        )}
+      </Stack>
+    </Container>
+  );
+}
+
+function countWords(value: string) {
+  return value.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function SupportEntryList({
+  entries,
+  pinnedIds,
+  onTogglePin,
+  empty,
+}: {
+  entries: SupportEntry[];
+  pinnedIds: string[];
+  onTogglePin: (entryId: string) => void;
+  empty: string;
+}) {
+  if (!entries.length) return <Alert color="gray" variant="light">{empty}</Alert>;
+  return (
+    <Stack gap="xs">
+      {entries.map((entry) => (
+        <SupportEntryCard key={entry.id} entry={entry} pinned={pinnedIds.includes(entry.id)} onTogglePin={onTogglePin} />
+      ))}
+    </Stack>
+  );
+}
+
+function SupportEntryCard({
+  entry,
+  pinned,
+  onTogglePin,
+  compact = false,
+}: {
+  entry: SupportEntry;
+  pinned: boolean;
+  onTogglePin: (entryId: string) => void;
+  compact?: boolean;
+}) {
+  return (
+    <Paper withBorder radius="sm" p="sm" bg={pinned ? "#f8fff9" : undefined}>
+      <Stack gap={4}>
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <div>
+            <Group gap={6}>
+              <Text size="sm" fw={700}>{entry.title}</Text>
+              {entry.badge && <Badge size="xs" color="teal">{entry.badge}</Badge>}
+            </Group>
+            <Text size="xs" c="dimmed">{supportKindLabel(entry.kind)}</Text>
+          </div>
+          <Tooltip label={pinned ? "Unpin context" : "Pin context"}>
+            <ActionIcon
+              aria-label={`${pinned ? "Unpin" : "Pin"} ${entry.title}`}
+              size="sm"
+              variant="subtle"
+              color={pinned ? "teal" : "dark"}
+              onClick={() => onTogglePin(entry.id)}
+            >
+              {pinned ? <IconPinFilled size={15} /> : <IconPin size={15} />}
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+        <Text size="sm" c={entry.text ? undefined : "dimmed"} lineClamp={compact ? 2 : 5}>{entry.text || "Not provided."}</Text>
+        {entry.detail && <Text size="xs" c="dimmed" lineClamp={compact ? 1 : 3}>{entry.detail}</Text>}
+      </Stack>
+    </Paper>
+  );
+}
+
+function buildSupportEntries(data: CreativeWriterWorkspaceData): SupportEntry[] {
+  const entries: SupportEntry[] = [];
+  const notes = data.support.authorNotes;
+  if (notes) {
+    addTextEntry(entries, "note:creative", "note", "Creative instructions", notes.creativeInstructions);
+    addTextEntry(entries, "note:voice", "note", "Voice guidance", notes.voiceGuidance);
+    addTextEntry(entries, "note:worldview", "note", "Contemporary view", notes.worldviewNotes);
+    addTextEntry(entries, "note:alignment", "note", "Alignment", notes.theologicalAlignment);
+    addTextEntry(entries, "note:forbidden", "note", "Forbidden changes", notes.forbiddenChanges);
+  }
+
+  data.support.bible.timeline.forEach((entry) => {
+    addTextEntry(entries, `timeline:${entry.id}`, "timeline", entry.note, entry.detail, entry.sequenceOrder !== null ? `Sequence ${entry.sequenceOrder}` : null);
+  });
+
+  data.support.references.forEach((reference) => {
+    addTextEntry(
+      entries,
+      `reference:${reference.id}`,
+      "research",
+      reference.title,
+      reference.content,
+      reference.materialType || "reference",
+      reference.includeInPrompts ? "Prompted" : null,
+    );
+  });
+
+  addTextEntry(entries, "bible:summary", "bible", "Blueprint summary", summarizeBibleContent(data.support.bible.content));
+  data.support.bible.characters.forEach((entry) => addTextEntry(entries, `character:${entry.id}`, "character", entry.name, entry.description, entry.detail));
+  data.support.bible.locations.forEach((entry) => addTextEntry(entries, `location:${entry.id}`, "location", entry.name, entry.description, entry.detail));
+  data.support.bible.themes.forEach((entry) => addTextEntry(entries, `theme:${entry.id}`, "theme", entry.name, entry.description, entry.detail));
+  data.support.bible.motifs.forEach((entry) => addTextEntry(entries, `motif:${entry.id}`, "motif", entry.name, entry.description, entry.detail));
+  return entries;
+}
+
+function addTextEntry(entries: SupportEntry[], id: string, kind: SupportEntryKind, title: string, text: string | null | undefined, detail?: string | null, badge?: string | null) {
+  if (!text && !detail) return;
+  entries.push({ id, kind, title, text: text || "", detail, badge });
+}
+
+function filterSupportEntries(entries: SupportEntry[], query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return entries;
+  return entries.filter((entry) => [entry.title, entry.text, entry.detail, entry.badge, supportKindLabel(entry.kind)].some((value) => value?.toLowerCase().includes(normalized)));
+}
+
+function supportKindLabel(kind: SupportEntryKind) {
+  const labels: Record<SupportEntryKind, string> = {
+    note: "Author note",
+    timeline: "Timeline",
+    research: "Research",
+    bible: "Book bible",
+    character: "Character",
+    location: "Location",
+    theme: "Theme",
+    motif: "Motif",
+  };
+  return labels[kind];
+}
+
+function pinnedSupportStorageKey(bookId: string) {
+  return `bookforge:creativewriter:pinned-support:${bookId || "no-book"}`;
+}
+
+function loadPinnedSupportIds(bookId: string) {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(pinnedSupportStorageKey(bookId)) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePinnedSupportIds(bookId: string, ids: string[]) {
+  if (typeof window === "undefined" || !bookId) return;
+  window.localStorage.setItem(pinnedSupportStorageKey(bookId), JSON.stringify(ids));
+}
+
+function summarizeBibleContent(content: Record<string, unknown> | null) {
+  if (!content || !Object.keys(content).length) return null;
+  const summary = stringValue(content.summary) || stringValue(content.premise) || stringValue(content.voice) || stringValue(content.genre);
+  if (summary) return summary;
+  const keys = Object.keys(content).slice(0, 8);
+  return keys.length ? `Available sections: ${keys.join(", ")}` : null;
+}
+
+function formatUpdatedAt(value: string | null) {
+  if (!value) return "Not analyzed";
+  return `Updated ${new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+}
+
+function formatConflictPayload(payload: Record<string, unknown>) {
+  const text = getConflictEditableText(payload);
+  if (text) return text;
+  if (typeof payload.cloudVersion === "number") return `Cloud version ${payload.cloudVersion}`;
+  return "No readable conflict text.";
+}
+
+function getConflictEditableText(payload: Record<string, unknown>) {
+  for (const key of ["currentText", "title", "summary", "status"]) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return "";
+}
+
+function buildManualResolutionPayload(conflict: CreativeWriterConflictView, draftValue: string | undefined) {
+  const payload = { ...conflict.localPayload };
+  const key = conflictPayloadTextKey(conflict.localPayload) || conflictPayloadTextKey(conflict.cloudPayload) || "currentText";
+  payload[key] = draftValue ?? getConflictEditableText(conflict.localPayload);
+  return payload;
+}
+
+function conflictPayloadTextKey(payload: Record<string, unknown>) {
+  return ["currentText", "title", "summary", "status"].find((key) => typeof payload[key] === "string");
+}
+
+function mergeCloudChanges(
+  data: CreativeWriterWorkspaceData,
+  changes: CreativeWriterCloudChange[],
+  project: CreativeWriterWorkspaceData["project"],
+): CreativeWriterWorkspaceData {
+  return changes.reduce(
+    (current, change) => {
+      if (change.entityType === "book") {
+        const nextBook = {
+          id: change.entityId,
+          title: stringValue(change.payload.title) || current.selectedBook?.title || "Untitled",
+          authorName: nullableStringValue(change.payload.authorName),
+          status: nullableStringValue(change.payload.status),
+          updatedAt: change.updatedAt,
+        };
+        return {
+          ...current,
+          selectedBook: current.selectedBook?.id === change.entityId ? nextBook : current.selectedBook,
+          books: current.books.map((book) => (book.id === change.entityId ? { ...book, ...nextBook } : book)),
+        };
+      }
+
+      if (change.entityType === "chapter") {
+        return {
+          ...current,
+          chapters: current.chapters.map((chapter) =>
+            chapter.id === change.entityId
+              ? {
+                  ...chapter,
+                  title: nullableStringValue(change.payload.title),
+                  summary: nullableStringValue(change.payload.summary),
+                  currentText: nullableStringValue(change.payload.currentText),
+                  updatedAt: change.updatedAt,
+                }
+              : chapter,
+          ),
+        };
+      }
+
+      if (change.entityType === "paragraph") {
+        return {
+          ...current,
+          paragraphs: current.paragraphs.map((paragraph) =>
+            paragraph.id === change.entityId
+              ? {
+                  ...paragraph,
+                  chapterId: stringValue(change.payload.chapterId) || paragraph.chapterId,
+                  paragraphNumber: numberValue(change.payload.paragraphNumber) || paragraph.paragraphNumber,
+                  currentText: nullableStringValue(change.payload.currentText),
+                  acceptedText: nullableStringValue(change.payload.acceptedText),
+                  updatedAt: change.updatedAt,
+                }
+              : paragraph,
+          ),
+        };
+      }
+
+      return current;
+    },
+    { ...data, project },
+  );
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value : null;
+}
+
+function nullableStringValue(value: unknown) {
+  return typeof value === "string" || value === null ? value : null;
+}
+
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
