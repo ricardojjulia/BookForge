@@ -472,12 +472,27 @@ function isPlaceholderText(text: string) {
 }
 
 function parseChapterCompletion(rawContent: string, title: string) {
-  const parsed = parseModelJsonOrFallback(rawContent, (raw) => ({
-    chapterText: raw,
-    chapterSummary: "",
-    continuityNotes: [],
-    generationNotes: ["The model returned prose instead of JSON; BookForge preserved it as chapter text."],
-  })) as {
+  const parsed = parseModelJsonOrFallback(rawContent, (raw) => {
+    // If the raw fallback text looks like an attempted (but broken or
+    // truncated) JSON object -- rather than genuine free-form prose the
+    // model wrote instead of JSON -- using it verbatim stores the literal
+    // JSON wrapper (braces, "chapterText": prefix, escaped \n sequences
+    // instead of real paragraph breaks) as the chapter's actual manuscript
+    // text. The whole chapter then lands in a single giant paragraph (no
+    // real blank-line breaks exist inside an escaped JSON string), long
+    // enough to sail past the word-count floor below despite being
+    // completely wrong. See the matching fix in rewrite-execute's
+    // parseRewriteResponse for the same failure mode at paragraph scale.
+    const looksLikeBrokenJson = /^\s*\{/.test(raw);
+    return {
+      chapterText: looksLikeBrokenJson ? "" : raw,
+      chapterSummary: "",
+      continuityNotes: [],
+      generationNotes: looksLikeBrokenJson
+        ? ["Model returned malformed/truncated JSON; treated as empty so the word-count floor below forces a retry."]
+        : ["The model returned prose instead of JSON; BookForge preserved it as chapter text."],
+    };
+  }) as {
     chapterText?: unknown;
     chapter_text?: unknown;
     text?: unknown;
