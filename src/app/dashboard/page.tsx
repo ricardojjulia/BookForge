@@ -152,6 +152,10 @@ export default async function DashboardPage() {
                   </Group>
                   <Title order={3}>{book.title}</Title>
                   <Text c="dimmed">{getBookAuthorDisplay(book)}</Text>
+                  <Text size="xs" c="dimmed">
+                    Created {new Date(book.created_at).toLocaleDateString()} · Updated{" "}
+                    {new Date(book.updated_at).toLocaleDateString()}
+                  </Text>
                   {isFinished && finishedExport?.signedUrl && (
                     <Button
                       component="a"
