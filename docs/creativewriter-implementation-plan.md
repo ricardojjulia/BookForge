@@ -345,6 +345,8 @@ Phase 4F-R limitations:
 - Approvals.
 - Cloud sync of contributor status.
 
+Phase 5A implemented contributor comment review triage first because existing `reader_annotations` data and annotation update routes already provide a narrow, authenticated workflow surface. Assignments, suggestions, approvals, and contributor status sync remain future Phase 5 slices.
+
 ### Phase 6: Offline/Desktop Shell
 
 - Local DB.
@@ -486,6 +488,16 @@ Phase 4F-R limitations:
 5. Keep runtime structural operations rejected until conflict semantics are service-tested.
 6. Add focused sync contract tests for valid and invalid structural payloads.
 7. Run focused tests, scoped lint, migration application, typecheck, and factory documentation updates.
+
+## Phase 5A Implementation Steps
+
+1. Reuse existing `reader_annotations` workspace data as the first contributor workflow surface.
+2. Convert the CreativeWriter Comments tab from a passive support list into an Open, All, and Resolved review queue.
+3. Add comment-to-paragraph navigation through the existing dirty-draft guard.
+4. Resolve and reopen comments through the existing authenticated annotation API.
+5. Preserve local support-context pin compatibility for comments.
+6. Add focused component coverage for filtering, resolution API payloads, and local state updates.
+7. Run focused tests, broader CreativeWriter tests, scoped lint, browser route check, and factory documentation updates.
 
 ## Phase 2B Implementation Steps
 
