@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ActionIcon, Badge, Button, Group, Paper, Stack, Text, Textarea, Title } from "@mantine/core";
+import { ActionIcon, Badge, Button, Group, Paper, Stack, Text, Textarea, Title, Tooltip } from "@mantine/core";
 import { IconCheck, IconMessage, IconArrowsExchange } from "@tabler/icons-react";
 import { fetchJson } from "@/lib/http/fetch-json";
 
@@ -90,28 +90,31 @@ export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, in
                 <Group align="flex-start" wrap="nowrap" gap="xs">
                   <Text style={{ flex: 1, lineHeight: 1.8 }}>{text}</Text>
                   {hasAlternateVersion && (
+                    <Tooltip label={isComparing ? "Hide original" : "This paragraph was rewritten — compare with original"} withArrow>
+                      <ActionIcon
+                        size="sm"
+                        variant={isComparing ? "filled" : "subtle"}
+                        color="teal"
+                        onClick={() => setComparing((prev) => ({ ...prev, [para.id]: !prev[para.id] }))}
+                      >
+                        <IconArrowsExchange size={14} />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                  <Tooltip label={isAnnotating ? "Cancel note" : "Add a note on this paragraph"} withArrow>
                     <ActionIcon
                       size="sm"
-                      variant={isComparing ? "filled" : "subtle"}
-                      color="teal"
-                      title="Compare with original"
-                      onClick={() => setComparing((prev) => ({ ...prev, [para.id]: !prev[para.id] }))}
+                      variant={isAnnotating ? "filled" : "subtle"}
+                      color="grape"
+                      onClick={() => setDrafts((prev) =>
+                        para.id in prev
+                          ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== para.id))
+                          : { ...prev, [para.id]: "" }
+                      )}
                     >
-                      <IconArrowsExchange size={14} />
+                      <IconMessage size={14} />
                     </ActionIcon>
-                  )}
-                  <ActionIcon
-                    size="sm"
-                    variant={isAnnotating ? "filled" : "subtle"}
-                    color="grape"
-                    onClick={() => setDrafts((prev) =>
-                      para.id in prev
-                        ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== para.id))
-                        : { ...prev, [para.id]: "" }
-                    )}
-                  >
-                    <IconMessage size={14} />
-                  </ActionIcon>
+                  </Tooltip>
                 </Group>
 
                 {isComparing && hasAlternateVersion && (
