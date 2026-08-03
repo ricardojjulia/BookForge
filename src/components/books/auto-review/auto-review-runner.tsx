@@ -3,9 +3,9 @@
 /**
  * AutoReviewRunner
  *
- * Client-side orchestrator for the Auto-Review Wizard. Runs all 23 stages
+ * Client-side orchestrator for the Auto-Review Wizard. Runs all 25 stages
  * sequentially — analyze → baseline critics → rewrite → post critics → export —
- * and loops the rewrite+critic cycle until all 7 critics score ≥ 70 (max 3 loops).
+ * and loops the rewrite+critic cycle until all 8 critics score ≥ 70 (max 3 loops).
  *
  * Telemetry: every stage completion is persisted to auto_review_jobs.log as a
  * structured TelemetryEntry (see type below). The analytics page reads these to

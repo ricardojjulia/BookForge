@@ -1179,6 +1179,30 @@ export function BookActions({
         </Alert>
       )}
 
+      {plannedChapterCount > 0 && (
+        <Paper withBorder radius="md" p="lg" bg="#fff3e0">
+          <Stack>
+            <div>
+              <Title order={3}>Write Your Chapters</Title>
+              <Text size="sm" c="dimmed">
+                Turn the planned chapter shells from your architecture into actual manuscript prose. Do this first — the tools below (critic, rewrite, export) all need drafted chapters to work with.
+              </Text>
+            </div>
+            <Button
+              fullWidth
+              color="orange"
+              loading={loading === "preflight:generate-draft" || loading === `/api/books/${bookId}/generate-draft`}
+              onClick={() => openPreflight("generate-draft")}
+            >
+              Generate Planned Draft ({Math.min(plannedChapterCount, 3)} of {plannedChapterCount})
+            </Button>
+            <Text size="xs" c="dimmed">
+              This opens AI Task Preflight. Click Proceed in that dialog to start chapter generation.
+            </Text>
+          </Stack>
+        </Paper>
+      )}
+
       <SimpleGrid cols={{ base: 1, lg: 3 }}>
         <ActionPanel
           title="Prepare Context"
@@ -1240,23 +1264,8 @@ export function BookActions({
 
         <ActionPanel
           title="Rewrite & Export"
-          description="Move from architecture to reviewable drafts and final files."
+          description="Revise drafted chapters and build reviewable/final files."
         >
-          {plannedChapterCount > 0 && (
-            <>
-              <Button
-                fullWidth
-                color="orange"
-                loading={loading === "preflight:generate-draft" || loading === `/api/books/${bookId}/generate-draft`}
-                onClick={() => openPreflight("generate-draft")}
-              >
-                Generate Planned Draft ({Math.min(plannedChapterCount, 3)} of {plannedChapterCount})
-              </Button>
-              <Text size="xs" c="dimmed">
-                This opens AI Task Preflight. Click Proceed in that dialog to start chapter generation.
-              </Text>
-            </>
-          )}
           <Button component={Link} href={`/books/${bookId}/rewrite-plan`} color="dark" variant="light" fullWidth>
             Rewrite Architect
           </Button>

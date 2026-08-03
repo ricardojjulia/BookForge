@@ -18,6 +18,7 @@ const CRITIC_LENSES = [
   "market_fit",
   "contemporary_view",
   "revision_priorities",
+  "dialogue_density",
 ] as const;
 
 const STRATEGY_BY_MODE: Record<"full_review" | "make_shorter" | "make_longer", { strategyId: string; strategySettings: Record<string, unknown> }> = {
