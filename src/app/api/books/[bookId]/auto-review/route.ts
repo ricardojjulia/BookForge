@@ -165,7 +165,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ bookId: st
 
     const { data: job } = await supabase
       .from("auto_review_jobs")
-      .select("id,mode,status,current_stage,stages_completed,iteration,config,log,error,export_id,created_at,completed_at")
+      .select("id,book_id,mode,status,current_stage,stages_completed,iteration,config,log,error,export_id,created_at,completed_at")
       .eq("book_id", bookId)
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
