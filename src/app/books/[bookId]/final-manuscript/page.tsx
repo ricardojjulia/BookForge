@@ -140,7 +140,7 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
     );
   }
 
-  const exportRows = await addSignedUrls(supabase, (exports || []) as ExportRow[]);
+  const exportRows = (exports || []) as ExportRow[];
   const latestExportDefaults = ((exports || [])[0]?.metadata || null) as ExportDefaults | null;
   const chapterReadiness = buildChapterReadiness(
     (chapters || []) as ChapterRow[],
@@ -273,8 +273,15 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
                     </td>
                     <td>{new Date(row.created_at).toLocaleString()}</td>
                     <td>
-                      {row.signedUrl ? (
-                        <Button component="a" href={row.signedUrl} target="_blank" rel="noreferrer" size="xs" variant="light">
+                      {row.storage_path && row.status === "completed" ? (
+                        <Button
+                          component="a"
+                          href={`/api/books/${bookId}/exports/${row.id}/download`}
+                          target="_blank"
+                          rel="noreferrer"
+                          size="xs"
+                          variant="light"
+                        >
                           Download
                         </Button>
                       ) : (
@@ -515,16 +522,4 @@ function stringValue(value: unknown) {
 
 function numberValue(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-async function addSignedUrls(supabase: Awaited<ReturnType<typeof createClient>>, rows: ExportRow[]) {
-  return Promise.all(
-    rows.map(async (row) => {
-      if (!row.storage_path || row.status !== "completed") {
-        return { ...row, signedUrl: null };
-      }
-      const { data } = await supabase.storage.from("exports").createSignedUrl(row.storage_path, 60 * 10);
-      return { ...row, signedUrl: data?.signedUrl || null };
-    }),
-  );
 }
