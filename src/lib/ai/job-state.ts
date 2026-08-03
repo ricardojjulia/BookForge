@@ -141,15 +141,26 @@ export function summarizeRevisionJobs(
   return summary;
 }
 
-type StaleHealJobRow = { id: string; mode: string; status: string | null; settings: unknown };
+type StaleHealJobRow = { id: string; mode: string; status: string | null; settings: unknown; created_at: string };
 
-// A dead server-side request leaves a job stuck at status="running" forever
-// -- its heartbeat just stops, with nothing to notice or act on it (the
-// existing isStaleRunningJob check only labels this "possibly interrupted"
-// for whoever happens to be looking at the Jobs History page). This sweep
-// runs opportunistically whenever the jobs list is fetched (no cron
-// infrastructure required) and auto-fails anything stale well past that
-// display threshold, logging the incident for trust/reliability stats.
+// Two distinct ways a job can go silently dead, both invisible to a user
+// until they happen to look:
+// (1) A dead server-side request leaves a job stuck at status="running"
+//     forever -- its heartbeat just stops.
+// (2) The "serverManaged: true" dispatch-then-poll pattern (queue the job,
+//     then fire a second request that does the real work) never gets its
+//     second request delivered -- e.g. a dropped connection between the
+//     two calls -- leaving the job at status="queued" with no heartbeat to
+//     even judge staleness by, since it never started. This is a genuinely
+//     different failure mode from (1): isStaleRunningJob only ever looks at
+//     status="running" jobs, so a job stuck in "queued" was invisible to
+//     the original sweep even though it's just as dead. Found live: a
+//     drift-check dispatch silently dropped and sat "queued" for 11+
+//     minutes with zero heartbeat.
+// This sweep runs opportunistically whenever the jobs list is fetched (no
+// cron infrastructure required) and auto-fails anything stale well past
+// the UI's own "possibly interrupted" display threshold, logging the
+// incident for trust/reliability stats.
 export async function detectAndHealStaleJobs(
   supabase: SupabaseClient,
   userId: string,
@@ -159,9 +170,16 @@ export async function detectAndHealStaleJobs(
   const healedJobIds: string[] = [];
   for (const job of jobs) {
     const progress = extractJobProgress(job.settings);
-    if (!isStaleRunningJob(job.status, progress, staleAfterSeconds)) continue;
+    const staleRunning = isStaleRunningJob(job.status, progress, staleAfterSeconds);
+    const queuedAgeMs = job.status === "queued" ? Date.now() - new Date(job.created_at).getTime() : 0;
+    const staleQueued = job.status === "queued" && queuedAgeMs > staleAfterSeconds * 1000;
+    if (!staleRunning && !staleQueued) continue;
 
-    const staleSinceMs = progress?.lastHeartbeatAt ? Date.now() - new Date(progress.lastHeartbeatAt).getTime() : null;
+    const staleSinceMs = staleQueued
+      ? queuedAgeMs
+      : progress?.lastHeartbeatAt
+        ? Date.now() - new Date(progress.lastHeartbeatAt).getTime()
+        : null;
     const staleMinutes = staleSinceMs ? Math.round(staleSinceMs / 60000) : null;
 
     const { data: updated, error: updateError } = await supabase
@@ -169,10 +187,12 @@ export async function detectAndHealStaleJobs(
       .update({
         status: "failed",
         completed_at: new Date().toISOString(),
-        error_message: `Auto-detected as stalled: no heartbeat for over ${staleMinutes ?? "several"} minute(s). The server-side process likely died mid-run without reaching its own failure handler.`,
+        error_message: staleQueued
+          ? `Auto-detected as stalled: queued for over ${staleMinutes ?? "several"} minute(s) without ever starting. The dispatch request that was supposed to begin the real work likely never reached the server (e.g. a dropped connection).`
+          : `Auto-detected as stalled: no heartbeat for over ${staleMinutes ?? "several"} minute(s). The server-side process likely died mid-run without reaching its own failure handler.`,
       })
       .eq("id", job.id)
-      .eq("status", "running")
+      .eq("status", staleQueued ? "queued" : "running")
       .select("id");
     if (updateError || !updated?.length) continue;
 
@@ -183,7 +203,7 @@ export async function detectAndHealStaleJobs(
       task: job.mode,
       context_length: 0,
       outcome: "error",
-      error_signature: "job_stale_auto_detected",
+      error_signature: staleQueued ? "job_queued_never_started" : "job_stale_auto_detected",
       duration_ms: staleSinceMs,
       event_type: "job_stale_detected",
     });
