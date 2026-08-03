@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
+import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 
 const schema = z.object({
   jobId: z.string().uuid(),
@@ -101,6 +102,7 @@ function getError(e: unknown) {
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
   let parsedBody: z.infer<typeof schema> | null = null;
   let currentStage = "analyze";
+  let currentUserId: string | null = null;
   try {
     const { bookId } = await context.params;
     parsedBody = schema.parse(await request.json());
@@ -109,6 +111,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    currentUserId = user.id;
 
     const { data: job, error: jobError } = await supabase
       .from("auto_review_jobs")
@@ -207,6 +210,28 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       });
     }
 
+    const JOB_POLL_INTERVAL_MS = 8000;
+    const JOB_POLL_MAX_WAIT_MS = 45 * 60 * 1000;
+
+    const pollJobUntilTerminal = async (targetJobId: string): Promise<void> => {
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < JOB_POLL_MAX_WAIT_MS) {
+        await wait(JOB_POLL_INTERVAL_MS);
+        const jobsRes = await fetch(new URL(`/api/books/${bookId}/jobs`, baseUrl).toString(), {
+          headers: { cookie },
+        });
+        const jobsData = await jobsRes.json().catch(() => ({}));
+        const jobs = (jobsData.content?.jobs || []) as Array<{ id: string; status: string; error_message?: string | null }>;
+        const target = jobs.find((j) => j.id === targetJobId);
+        if (!target) continue;
+        if (target.status === "completed") return;
+        if (target.status === "failed" || target.status === "cancelled") {
+          throw new Error(target.error_message || `Stage job ${targetJobId} did not complete successfully.`);
+        }
+      }
+      throw new Error(`Timed out waiting for stage job ${targetJobId} to finish after ${Math.round(JOB_POLL_MAX_WAIT_MS / 60000)} minutes.`);
+    };
+
     const callStage = async (path: string, payload?: unknown) => {
       const bodyPayload = payload as Record<string, unknown> | undefined;
       const isAutoRevisionPreview =
@@ -239,7 +264,20 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           throw new Error(`Stage queue handoff missing job id: ${path}`);
         }
 
-        const runRes = await fetch(new URL(path, baseUrl).toString(), {
+        // The "run" call processes the entire stage synchronously within its
+        // own HTTP response (e.g. a full-book rewrite across hundreds of
+        // paragraphs) -- awaiting it directly can run well past Node's
+        // default fetch timeout on this self-referential call, surfacing as
+        // "fetch failed" and getting misread as an OpenRouter/provider
+        // outage when the stage was actually still working. The manual
+        // Studio Actions UI already solves this for the exact same
+        // queue-then-run dispatch by firing the run request with `void` and
+        // polling job status separately (see book-actions.tsx's
+        // runQueuedGenerateDraft etc.) instead of awaiting one giant
+        // response -- mirror that here. Give it a short window to respond
+        // directly first so genuinely fast stages and real validation
+        // errors still surface immediately.
+        const runPromise = fetch(new URL(path, baseUrl).toString(), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -252,12 +290,30 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             metadataBranchName: selection.metadataBranchName || undefined,
             metadataSelectionSource: selection.metadataSelectionSource || undefined,
           }),
+        }).then(async (runRes) => {
+          const runData = await runRes.json().catch(() => ({}));
+          if (!runRes.ok || runData.error) {
+            throw new Error(String(runData.error || `Stage request failed: ${path}`));
+          }
+          return runData as Record<string, unknown>;
         });
-        const runData = await runRes.json().catch(() => ({}));
-        if (!runRes.ok || runData.error) {
-          throw new Error(String(runData.error || `Stage request failed: ${path}`));
-        }
-        return runData as Record<string, unknown>;
+
+        const QUICK_RESPONSE_WINDOW_MS = 15000;
+        const quick = await Promise.race([
+          runPromise.then((data) => ({ settled: true as const, data })),
+          wait(QUICK_RESPONSE_WINDOW_MS).then(() => ({ settled: false as const, data: undefined })),
+        ]);
+
+        if (quick.settled) return quick.data;
+
+        // Didn't respond quickly -- this is a genuinely long-running stage.
+        // Stop waiting on this specific HTTP call (still processing
+        // server-side regardless) and poll the job row instead. Swallow the
+        // eventual settlement of runPromise either way so it never becomes
+        // an unhandled rejection.
+        runPromise.catch(() => {});
+        await pollJobUntilTerminal(stageJobId);
+        return {};
       }
 
       const res = await fetch(new URL(path, baseUrl).toString(), {
@@ -354,6 +410,14 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       if (stageStatus.has(stage)) continue;
       currentStage = stage;
 
+      // Mark the stage as actively in progress the moment it starts, not
+      // just once it finishes. Long stages like rewrite_execute can now run
+      // for many minutes (see the polling fix above) -- without this, the
+      // wizard's UI has no way to tell a stage is running versus stalled,
+      // since current_stage otherwise still points at the previous
+      // (already-completed) stage for the entire duration.
+      await supabase.from("auto_review_jobs").update({ current_stage: stage }).eq("id", body.jobId);
+
       if (stage === "analyze") {
         await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/analyze`, {}));
         await addStage(stage, "Manuscript analysis completed.");
@@ -448,7 +512,12 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     return NextResponse.json({ ok: true, jobId: body.jobId, exportId });
   } catch (error) {
     console.error("Auto-review worker failed", error);
-    const normalizedError = getLmStudioErrorMessage(error, getError(error), { task: currentStage });
+    const modelSource = currentUserId
+      ? await getUserLmStudioSettings(currentUserId)
+          .then((settings) => settings.standardSettings?.provider)
+          .catch(() => undefined)
+      : undefined;
+    const normalizedError = getLmStudioErrorMessage(error, getError(error), { task: currentStage, modelSource });
     const resumableError = `${normalizedError} Resume from Auto-Review Wizard and completed stages will be skipped.`;
     try {
       const { bookId } = await context.params;
