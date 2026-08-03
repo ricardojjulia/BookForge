@@ -1,3 +1,10 @@
+const CLOUD_PROVIDER_LABELS: Record<string, string> = {
+  openrouter: "OpenRouter",
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  google: "Google Gemini",
+};
+
 export function getLmStudioErrorMessage(
   error: unknown,
   fallback: string,
@@ -37,6 +44,10 @@ export function getLmStudioErrorMessage(
   }
 
   if (/ECONNREFUSED|fetch failed|connection refused|Failed to fetch/i.test(message)) {
+    const cloudLabel = context.modelSource ? CLOUD_PROVIDER_LABELS[context.modelSource] : undefined;
+    if (cloudLabel) {
+      return `BookForge could not reach ${cloudLabel}. This is usually a brief network or provider outage — wait a moment and retry.`;
+    }
     return "BookForge could not reach LM Studio. Start the LM Studio local server and retry.";
   }
 
