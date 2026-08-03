@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Divider, Group, Modal, Paper, Select, SimpleGrid, Stack, Switch, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -130,10 +130,22 @@ export function BookActions({
   const [pendingTask, setPendingTask] = useState<PendingTask | null>(null);
   const [pendingGuardTask, setPendingGuardTask] = useState<AiDashboardTask | null>(null);
   const [latestAutoReviewJob, setLatestAutoReviewJob] = useState<AutoReviewJobSummary | null>(null);
-  const [alwaysShowDetailedQueue, setAlwaysShowDetailedQueue] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem("bookforge.alwaysShowDetailedQueue") === "1";
-  });
+  // Starts false on both server and the client's first render -- reading
+  // localStorage inside the useState initializer runs on the client's
+  // initial render too (not just the server), and if the user had
+  // previously toggled this on, that first client render would return true
+  // while the server-rendered HTML was built with false, diverging the
+  // entire "AI Job Queue" subtree (Alert vs Paper) and the Switch's checked
+  // state -- a hydration mismatch. Deferring the real value to a
+  // post-mount effect keeps the first client render identical to the SSR
+  // output.
+  const [alwaysShowDetailedQueue, setAlwaysShowDetailedQueue] = useState(false);
+  const detailedQueuePrefHydrated = useRef(false);
+
+  useEffect(() => {
+    setAlwaysShowDetailedQueue(window.localStorage.getItem("bookforge.alwaysShowDetailedQueue") === "1");
+    detailedQueuePrefHydrated.current = true;
+  }, []);
   const [queue, setQueue] = useState<AiJobQueueState>({
     currentTask: "",
     currentUnit: "",
@@ -146,6 +158,7 @@ export function BookActions({
   });
 
   useEffect(() => {
+    if (!detailedQueuePrefHydrated.current) return;
     window.localStorage.setItem("bookforge.alwaysShowDetailedQueue", alwaysShowDetailedQueue ? "1" : "0");
   }, [alwaysShowDetailedQueue]);
 
