@@ -214,6 +214,7 @@ export async function detectAndHealStaleJobs(
 
 type StaleHealAutoReviewJobRow = {
   id: string;
+  book_id: string;
   mode: string;
   status: string | null;
   current_stage: string | null;
@@ -230,6 +231,15 @@ type StaleHealAutoReviewJobRow = {
 // status. Runs wherever a user's auto_review_jobs list is fetched (the
 // Analytics page, the wizard's own status poll) the same way the
 // revision_jobs sweep runs wherever /jobs is polled.
+//
+// Critical: current_stage/log only advance when a STAGE finishes, not while
+// one is in progress -- a legitimate multi-hour rewrite_execute pass looks
+// identical, from the log alone, to a genuinely dead job. Found live within
+// minutes of shipping the first version of this function: it marked an
+// actively-progressing rewrite (fresh revision_jobs heartbeat, climbing
+// attempted count) as stalled after 10 minutes simply because the stage
+// hadn't finished yet. Must check the underlying revision_jobs heartbeat
+// before ever declaring a "running" auto-review job dead.
 export async function detectAndHealStaleAutoReviewJobs(
   supabase: SupabaseClient,
   userId: string,
@@ -244,6 +254,18 @@ export async function detectAndHealStaleAutoReviewJobs(
     const referenceTime = lastEntry?.ts ? new Date(lastEntry.ts).getTime() : new Date(job.created_at).getTime();
     const staleMs = Date.now() - referenceTime;
     if (staleMs <= staleAfterSeconds * 1000) continue;
+
+    const { data: activeUnderlyingJobs } = await supabase
+      .from("revision_jobs")
+      .select("settings")
+      .eq("book_id", job.book_id)
+      .eq("status", "running");
+    const stillAlive = (activeUnderlyingJobs || []).some((row) => {
+      const heartbeatAt = (row.settings as { progress?: { lastHeartbeatAt?: string } } | null)?.progress?.lastHeartbeatAt;
+      if (!heartbeatAt) return false;
+      return Date.now() - new Date(heartbeatAt).getTime() < staleAfterSeconds * 1000;
+    });
+    if (stillAlive) continue;
 
     const staleMinutes = Math.round(staleMs / 60000);
     const neverStarted = log.length === 0;
