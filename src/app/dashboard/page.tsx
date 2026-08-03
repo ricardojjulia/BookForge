@@ -56,9 +56,8 @@ export default async function DashboardPage() {
     ? await Promise.all(
         finishedExportIds.map(async (exportId) => {
           const { data } = await supabase.from("exports").select("id,format,storage_path,book_id").eq("id", exportId).single();
-          if (!data?.storage_path) return { exportId, format: data?.format || "", signedUrl: null, bookId: data?.book_id || "" };
-          const { data: signed } = await supabase.storage.from("exports").createSignedUrl(data.storage_path, 60 * 10);
-          return { exportId, format: data.format, signedUrl: signed?.signedUrl || null, bookId: data.book_id };
+          if (!data?.storage_path) return { exportId, format: data?.format || "", bookId: data?.book_id || "" };
+          return { exportId, format: data.format, bookId: data.book_id };
         }),
       )
     : [];
@@ -142,10 +141,10 @@ export default async function DashboardPage() {
                     Created {new Date(book.created_at).toLocaleDateString()} · Updated{" "}
                     {new Date(book.updated_at).toLocaleDateString()}
                   </Text>
-                  {isFinished && finishedExport?.signedUrl && (
+                  {isFinished && finishedExport && (
                     <Button
                       component="a"
-                      href={finishedExport.signedUrl}
+                      href={`/api/books/${book.id}/exports/${finishedExport.exportId}/download`}
                       target="_blank"
                       rel="noreferrer"
                       color="green"
