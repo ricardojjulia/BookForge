@@ -251,6 +251,34 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       if (existingJob.status === "failed") return NextResponse.json({ ok: true, message: "Rewrite job already failed." });
       jobStatus = String(existingJob.status || "running");
     } else {
+      // Guard against launching a second full-book rewrite while one is
+      // already actively working through this book's paragraphs. Nothing
+      // previously stopped this: each Auto-Review "resume" (or a duplicate
+      // manual click) queued a brand-new job regardless of whether an
+      // earlier one was still running, and once the self-timeout on the
+      // orchestrator's dispatch call was fixed (jobs no longer silently
+      // die after ~10 minutes), duplicates kept running indefinitely in
+      // true parallel instead of dying off on their own. Found live: 13
+      // concurrent full_book_rewrite jobs on the same book, all with fresh
+      // heartbeats, all independently calling the model for roughly two
+      // hours before being caught and cancelled.
+      const { data: activeJob } = await supabase
+        .from("revision_jobs")
+        .select("id")
+        .eq("book_id", bookId)
+        .eq("mode", "full_book_rewrite")
+        .in("status", ["running", "queued"])
+        .limit(1)
+        .maybeSingle();
+      if (activeJob) {
+        return NextResponse.json(
+          {
+            error: `A full-book rewrite is already in progress for this book (job ${activeJob.id}). Wait for it to finish, or cancel it from Jobs History, before starting another.`,
+          },
+          { status: 409 },
+        );
+      }
+
       const status = body.serverManaged ? "queued" : "running";
       const { data: job, error: jobError } = await supabase
         .from("revision_jobs")
