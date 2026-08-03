@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Alert, Badge, Button, Group, Text } from "@mantine/core";
+import { Alert, Badge, Button, Group, Progress, Stack, Text } from "@mantine/core";
 import { useAdaptivePolling } from "@/lib/hooks/use-adaptive-polling";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { getJobProgressDisplay } from "@/lib/ai/job-state";
 
 type PersistedAiJob = {
   id: string;
@@ -12,6 +13,10 @@ type PersistedAiJob = {
   progress?: {
     taskName?: string;
     currentUnit?: string;
+    totalUnits?: number;
+    attempted?: number;
+    successful?: number;
+    failed?: number;
   } | null;
 };
 
@@ -80,33 +85,54 @@ export function LiveProcessBanner({ bookId }: { bookId: string }) {
 
   if (!hasActiveWork) return null;
 
+  const progress = activeJob?.progress;
+  const { percent } = getJobProgressDisplay(
+    {
+      totalUnits: progress?.totalUnits || 0,
+      attempted: progress?.attempted || 0,
+      successful: progress?.successful || 0,
+      failed: progress?.failed || 0,
+    },
+    activeJob?.status,
+  );
+  const hasMeasurableProgress = Boolean(progress?.totalUnits);
+
   return (
     <Alert color={statusColor} variant="light" mb="md" title="Live Processing">
-      <Group justify="space-between" align="center" wrap="wrap">
-        <div>
-          {activeAutoReview ? (
-            <Text size="sm">
-              Auto-review is <b>{activeAutoReview.status || "running"}</b>
-              {activeAutoReview.current_stage ? ` · stage: ${activeAutoReview.current_stage}` : ""}
-            </Text>
-          ) : null}
-          {activeJob ? (
-            <Text size="sm">
-              AI job is <b>{activeJob.status || "running"}</b>
-              {activeJob.progress?.taskName ? ` · ${activeJob.progress.taskName}` : ""}
-              {activeJob.progress?.currentUnit ? ` · ${activeJob.progress.currentUnit}` : ""}
-            </Text>
-          ) : null}
-        </div>
-        <Group gap="xs">
-          <Badge color={statusColor} variant="filled">
-            Running
-          </Badge>
-          <Button component="a" href={`/books/${bookId}/jobs`} size="xs" variant="white" color={statusColor}>
-            Open Jobs
-          </Button>
+      <Stack gap="xs">
+        <Group justify="space-between" align="center" wrap="wrap">
+          <div>
+            {activeAutoReview ? (
+              <Text size="sm">
+                Auto-review is <b>{activeAutoReview.status || "running"}</b>
+                {activeAutoReview.current_stage ? ` · stage: ${activeAutoReview.current_stage}` : ""}
+              </Text>
+            ) : null}
+            {activeJob ? (
+              <Text size="sm">
+                AI job is <b>{activeJob.status || "running"}</b>
+                {activeJob.progress?.taskName ? ` · ${activeJob.progress.taskName}` : ""}
+                {activeJob.progress?.currentUnit ? ` · ${activeJob.progress.currentUnit}` : ""}
+              </Text>
+            ) : null}
+          </div>
+          <Group gap="xs">
+            <Badge color={statusColor} variant="filled">
+              Running
+            </Badge>
+            <Button component="a" href="#persistent-ai-jobs" size="xs" variant="white" color={statusColor}>
+              View Progress
+            </Button>
+          </Group>
         </Group>
-      </Group>
+        {hasMeasurableProgress && (
+          <Progress.Root size="lg">
+            <Progress.Section value={percent} color={statusColor}>
+              <Progress.Label>{percent}%</Progress.Label>
+            </Progress.Section>
+          </Progress.Root>
+        )}
+      </Stack>
     </Alert>
   );
 }
