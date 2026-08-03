@@ -212,6 +212,72 @@ export async function detectAndHealStaleJobs(
   return healedJobIds;
 }
 
+type StaleHealAutoReviewJobRow = {
+  id: string;
+  mode: string;
+  status: string | null;
+  current_stage: string | null;
+  log: Array<Record<string, unknown>> | null;
+  created_at: string;
+};
+
+// auto_review_jobs has no revision_jobs-style heartbeat/progress column, so
+// it needs its own stale-detection logic rather than reusing
+// detectAndHealStaleJobs above. Found live: a full_review job for a real
+// book sat at status="running" for 17+ hours with zero stages_completed and
+// a completely empty log -- the worker launch request that was supposed to
+// start real work never reached the server, and nothing ever corrected the
+// status. Runs wherever a user's auto_review_jobs list is fetched (the
+// Analytics page, the wizard's own status poll) the same way the
+// revision_jobs sweep runs wherever /jobs is polled.
+export async function detectAndHealStaleAutoReviewJobs(
+  supabase: SupabaseClient,
+  userId: string,
+  jobs: StaleHealAutoReviewJobRow[],
+  staleAfterSeconds = 600,
+) {
+  const healedJobIds: string[] = [];
+  for (const job of jobs) {
+    if (job.status !== "running") continue;
+    const log = job.log || [];
+    const lastEntry = log.length ? (log[log.length - 1] as { ts?: string }) : null;
+    const referenceTime = lastEntry?.ts ? new Date(lastEntry.ts).getTime() : new Date(job.created_at).getTime();
+    const staleMs = Date.now() - referenceTime;
+    if (staleMs <= staleAfterSeconds * 1000) continue;
+
+    const staleMinutes = Math.round(staleMs / 60000);
+    const neverStarted = log.length === 0;
+
+    const { data: updated, error: updateError } = await supabase
+      .from("auto_review_jobs")
+      .update({
+        status: "failed",
+        completed_at: new Date().toISOString(),
+        error: neverStarted
+          ? `Auto-detected as stalled: created ${staleMinutes} minute(s) ago but never actually started (no stages completed, no log activity). The worker launch request likely never reached the server.`
+          : `Auto-detected as stalled: no activity for over ${staleMinutes} minute(s) since the last completed stage ("${job.current_stage}"). Resume from Auto-Review Wizard to continue from the next stage.`,
+      })
+      .eq("id", job.id)
+      .eq("status", "running")
+      .select("id");
+    if (updateError || !updated?.length) continue;
+
+    await supabase.from("model_call_events").insert({
+      user_id: userId,
+      job_id: job.id,
+      model: "n/a",
+      task: job.mode,
+      context_length: 0,
+      outcome: "error",
+      error_signature: neverStarted ? "auto_review_never_started" : "auto_review_stale_auto_detected",
+      duration_ms: staleMs,
+      event_type: "job_stale_detected",
+    });
+    healedJobIds.push(job.id);
+  }
+  return healedJobIds;
+}
+
 type CompletionSummaryJobRow = {
   id: string;
   mode: string;

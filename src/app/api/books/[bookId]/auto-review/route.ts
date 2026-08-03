@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { detectAndHealStaleAutoReviewJobs } from "@/lib/ai/job-state";
 
 const schema = z.object({
   mode: z.enum(["full_review", "make_shorter", "make_longer"]),
@@ -145,6 +146,14 @@ export async function GET(_: Request, { params }: { params: Promise<{ bookId: st
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+
+    if (job) {
+      const healedIds = await detectAndHealStaleAutoReviewJobs(supabase, user.id, [job]);
+      if (healedIds.includes(job.id)) {
+        job.status = "failed";
+        job.error = "Auto-detected as stalled. Resume from Auto-Review Wizard to continue from the next unfinished stage.";
+      }
+    }
 
     return NextResponse.json({ job });
   } catch (e) {

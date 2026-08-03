@@ -24,7 +24,9 @@ import { FreshnessTelemetryPanel } from "@/components/analytics/freshness-teleme
 import { WorkflowCoverageTable } from "@/components/analytics/workflow-coverage-table";
 import { ManualRunsTable } from "@/components/analytics/manual-runs-table";
 import { EstimationAccuracyTable, StaleIncidentsPanel, type StaleIncidentRow } from "@/components/analytics/job-health-panel";
+import { DailyCallStatsTable, ModelCallBreakdownTable, type DailyCallStatsRow, type ModelCallStatsRow } from "@/components/analytics/model-call-stats-panel";
 import { createClient } from "@/lib/supabase/server";
+import { detectAndHealStaleAutoReviewJobs } from "@/lib/ai/job-state";
 import type { RunRecord, StageDuration, ScoreSnapshot } from "@/app/api/analytics/route";
 
 // ── Telemetry parsing (duplicated from the API route so the server component
@@ -147,10 +149,17 @@ export default async function AnalyticsPage() {
 
   const { data: jobs } = await supabase
     .from("auto_review_jobs")
-    .select("id, book_id, mode, status, iteration, created_at, completed_at, error, book_stats, log, config, metadata_snapshot_id, books(title)")
+    .select("id, book_id, mode, status, current_stage, iteration, created_at, completed_at, error, book_stats, log, config, metadata_snapshot_id, books(title)")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
     .limit(200);
+
+  const healedAutoReviewJobIds = jobs
+    ? await detectAndHealStaleAutoReviewJobs(supabase, user.id, jobs)
+    : [];
+  for (const job of jobs ?? []) {
+    if (healedAutoReviewJobIds.includes(job.id)) job.status = "failed";
+  }
 
   const { data: revisionJobs } = await supabase
     .from("revision_jobs")
@@ -172,6 +181,21 @@ export default async function AnalyticsPage() {
     .select("task, outcome, duration_ms, estimated_duration_ms")
     .eq("user_id", user.id)
     .eq("event_type", "job_completed_summary");
+
+  // Raw model_call volume/latency/success trend -- computed in SQL (see
+  // model_call_daily_stats/model_call_stats_by_model) rather than pulling
+  // thousands of raw rows per day into the page, since a single busy day can
+  // already exceed 3,000 calls.
+  const { data: dailyCallStatsRaw } = await supabase.rpc("model_call_daily_stats", {
+    p_user_id: user.id,
+    p_days: 14,
+  });
+  const { data: callStatsByModelRaw } = await supabase.rpc("model_call_stats_by_model", {
+    p_user_id: user.id,
+    p_days: 14,
+  });
+  const dailyCallStats = (dailyCallStatsRaw ?? []) as DailyCallStatsRow[];
+  const callStatsByModel = (callStatsByModelRaw ?? []) as ModelCallStatsRow[];
 
   // Build typed RunRecord[] with derived telemetry metrics
   const runs: RunRecord[] = (jobs ?? []).map((job) => {
@@ -307,6 +331,21 @@ export default async function AnalyticsPage() {
       avgEstimatedMs: bucket.estimates.length ? avg(bucket.estimates) : null,
     }))
     .sort((a, b) => b.jobCount - a.jobCount);
+
+  // ── Model call volume & performance summary ─────────────────────────────────
+  const todayCallStats = dailyCallStats[0] ?? null;
+  const priorDayStats = dailyCallStats.slice(1, 8);
+  const priorAvgCalls = priorDayStats.length
+    ? Math.round(priorDayStats.reduce((sum, row) => sum + row.call_count, 0) / priorDayStats.length)
+    : null;
+  const todayVsAvgPct =
+    todayCallStats && priorAvgCalls
+      ? Math.round(((todayCallStats.call_count - priorAvgCalls) / priorAvgCalls) * 100)
+      : null;
+  const todaySuccessRate =
+    todayCallStats && todayCallStats.call_count
+      ? Math.round((todayCallStats.success_count / todayCallStats.call_count) * 100)
+      : null;
 
   const explicitRuns = provenanceRuns.filter((run) => run.source === "explicit_snapshot").length;
   const branchRuns = provenanceRuns.filter((run) => run.source === "branch_active").length;
@@ -448,6 +487,45 @@ export default async function AnalyticsPage() {
               <StaleIncidentsPanel incidents={(staleIncidents ?? []) as StaleIncidentRow[]} />
               <EstimationAccuracyTable rows={estimationAccuracy} />
             </Stack>
+          </div>
+
+          {/* Model call volume & performance -- every actual LLM call
+              (any provider), not just Auto-Review or manual workflow runs.
+              Answers "are we just testing hard today, or is something
+              actually degrading?" directly from real telemetry instead of
+              guesswork. */}
+          <div>
+            <Title order={2}>Model Call Volume &amp; Performance</Title>
+            <Text c="dimmed" mb="sm">
+              Every model call across every provider and workflow, last 14 days. Use this to tell heavy usage apart
+              from real latency or reliability regressions.
+            </Text>
+            <SimpleGrid cols={{ base: 2, sm: 4 }} mb="sm">
+              <MetricCard label="Calls Today" value={todayCallStats ? String(todayCallStats.call_count) : "—"} sub="model_call events" />
+              <MetricCard
+                label="vs 7-Day Avg"
+                value={todayVsAvgPct !== null ? `${todayVsAvgPct > 0 ? "+" : ""}${todayVsAvgPct}%` : "—"}
+                sub={priorAvgCalls !== null ? `avg ${priorAvgCalls}/day` : "not enough history"}
+              />
+              <MetricCard
+                label="Success Rate Today"
+                value={todaySuccessRate !== null ? `${todaySuccessRate}%` : "—"}
+                sub="of today's calls"
+              />
+              <MetricCard
+                label="p95 Latency Today"
+                value={todayCallStats?.p95_duration_ms ? `${(todayCallStats.p95_duration_ms / 1000).toFixed(1)}s` : "—"}
+                sub="slowest 5% of calls"
+              />
+            </SimpleGrid>
+            <Paper withBorder radius="md" p="sm" bg="white" mb="sm">
+              <Text fw={600} size="sm" mb="xs">Daily trend</Text>
+              <DailyCallStatsTable rows={dailyCallStats} />
+            </Paper>
+            <Paper withBorder radius="md" p="sm" bg="white">
+              <Text fw={600} size="sm" mb="xs">By model</Text>
+              <ModelCallBreakdownTable rows={callStatsByModel} />
+            </Paper>
           </div>
         </Stack>
       </Container>
