@@ -182,6 +182,7 @@ describe("book contributor suggestion status route", () => {
       target_suggestion_id: "suggestion-1",
       target_reviewer_id: "editor-1",
       target_review_note: "Applied cleanly.",
+      target_manual_text: null,
     });
     expect(supabase.updatePayload).toBeNull();
   });
@@ -189,9 +190,22 @@ describe("book contributor suggestion status route", () => {
   it("returns a stale-text conflict when the apply RPC detects a changed paragraph", async () => {
     const supabase = createSuggestionStatusSupabase({
       user: { id: "editor-1" },
-      suggestion: { id: "suggestion-1", proposer_id: "reader-1", status: "accepted" },
+      suggestion: {
+        id: "suggestion-1",
+        proposer_id: "reader-1",
+        status: "accepted",
+        paragraph_id: "paragraph-1",
+        original_text_snapshot: "Original paragraph.",
+        suggested_text: "Suggested paragraph.",
+      },
       canEdit: true,
       applyError: { message: "Suggestion cannot be applied because the paragraph changed after it was proposed." },
+      paragraph: {
+        id: "paragraph-1",
+        current_text: "Current changed paragraph.",
+        accepted_text: null,
+        updated_at: "2026-08-02T12:40:00.000Z",
+      },
     });
     mockCreateClient.mockResolvedValue(supabase);
 
@@ -200,7 +214,48 @@ describe("book contributor suggestion status route", () => {
 
     expect(response.status).toBe(409);
     expect(payload.error).toBe("Suggestion cannot be applied because the paragraph changed after it was proposed.");
+    expect(payload.staleSuggestion).toEqual({
+      suggestionId: "suggestion-1",
+      paragraphId: "paragraph-1",
+      originalTextSnapshot: "Original paragraph.",
+      currentText: "Current changed paragraph.",
+      suggestedText: "Suggested paragraph.",
+      paragraphUpdatedAt: "2026-08-02T12:40:00.000Z",
+    });
     expect(supabase.appliedRpcPayload).toMatchObject({ target_suggestion_id: "suggestion-1" });
+  });
+
+  it("applies manual merged text for an accepted stale suggestion", async () => {
+    const supabase = createSuggestionStatusSupabase({
+      user: { id: "editor-1" },
+      suggestion: { id: "suggestion-1", proposer_id: "reader-1", status: "accepted" },
+      canEdit: true,
+      appliedSuggestion: {
+        id: "suggestion-1",
+        status: "applied",
+        reviewer_id: "editor-1",
+        review_note: null,
+        suggestion_updated_at: "2026-08-02T12:45:00.000Z",
+        reviewed_at: "2026-08-02T12:20:00.000Z",
+        applied_at: "2026-08-02T12:45:00.000Z",
+        withdrawn_at: null,
+        paragraph_id: "paragraph-1",
+        current_text: "Manual merged paragraph.",
+        accepted_text: "Manual merged paragraph.",
+        paragraph_updated_at: "2026-08-02T12:45:00.000Z",
+      },
+    });
+    mockCreateClient.mockResolvedValue(supabase);
+
+    const response = await PATCH(suggestionRequest({ status: "applied", mergedText: "Manual merged paragraph." }), routeParams());
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.paragraph.currentText).toBe("Manual merged paragraph.");
+    expect(supabase.appliedRpcPayload).toMatchObject({
+      target_suggestion_id: "suggestion-1",
+      target_manual_text: "Manual merged paragraph.",
+    });
   });
 
   it("returns not found for suggestions outside the scoped book", async () => {
@@ -229,7 +284,8 @@ function routeParams() {
 
 function createSuggestionStatusSupabase(options: {
   user?: { id: string } | null;
-  suggestion?: { id: string; proposer_id: string; status: string } | null;
+  suggestion?: { id: string; proposer_id: string; status: string; paragraph_id?: string | null; original_text_snapshot?: string | null; suggested_text?: string } | null;
+  paragraph?: { id: string; current_text: string | null; accepted_text: string | null; updated_at: string | null } | null;
   canEdit?: boolean;
   updatedSuggestion?: unknown;
   appliedSuggestion?: unknown;
@@ -257,6 +313,20 @@ function createSuggestionStatusSupabase(options: {
       return { data: null, error: new Error(`Unexpected rpc ${name}`) };
     }),
     from: vi.fn((table: string) => {
+      if (table === "paragraphs") {
+        return {
+          select: vi.fn(() => {
+            const paragraphQuery = {
+              eq: vi.fn(() => paragraphQuery),
+              maybeSingle: vi.fn(async () => ({
+                data: options.paragraph === undefined ? { id: "paragraph-1", current_text: "Current paragraph.", accepted_text: null, updated_at: "2026-08-02T12:00:00.000Z" } : options.paragraph,
+                error: null,
+              })),
+            };
+            return paragraphQuery;
+          }),
+        };
+      }
       if (table !== "creativewriter_contributor_suggestions") throw new Error(`Unexpected table ${table}`);
       return {
         select: vi.fn(() => {
@@ -266,7 +336,7 @@ function createSuggestionStatusSupabase(options: {
               return lookupQuery;
             }),
             maybeSingle: vi.fn(async () => ({
-              data: options.suggestion === undefined ? { id: "suggestion-1", proposer_id: "user-1", status: "proposed" } : options.suggestion,
+              data: options.suggestion === undefined ? { id: "suggestion-1", proposer_id: "user-1", status: "proposed", paragraph_id: "paragraph-1", original_text_snapshot: "Original paragraph.", suggested_text: "Suggested paragraph." } : options.suggestion,
               error: null,
             })),
           };

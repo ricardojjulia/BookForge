@@ -32,6 +32,38 @@ type WorkspaceLayout = {
 
 type CommentReviewFilter = "open" | "all" | "resolved";
 type SuggestionReviewFilter = "proposed" | "all" | "closed";
+type SuggestionScopeFilter = "all" | "mine" | "reviewed";
+type StaleSuggestionContext = {
+  suggestionId: string;
+  paragraphId: string;
+  originalTextSnapshot: string | null;
+  currentText: string;
+  suggestedText: string;
+  paragraphUpdatedAt: string | null;
+};
+
+type SuggestionActivityEntry = {
+  id: string;
+  title: string;
+  actor: string;
+  timestamp: string | null;
+  paragraphLabel: string;
+  detail: string | null;
+  color: string;
+};
+
+type ContributorWorkloadEntry = {
+  userId: string;
+  label: string;
+  role: string;
+  activeAssignments: number;
+  completedAssignments: number;
+  openComments: number;
+  proposedSuggestions: number;
+  reviewedSuggestions: number;
+  appliedSuggestions: number;
+  lastActivityAt: string | null;
+};
 
 const DEFAULT_WORKSPACE_LAYOUT: WorkspaceLayout = { left: 280, right: 320 };
 const MIN_LEFT_WIDTH = 220;
@@ -61,8 +93,12 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
   const [supportSearch, setSupportSearch] = useState("");
   const [commentReviewFilter, setCommentReviewFilter] = useState<CommentReviewFilter>("open");
   const [suggestionReviewFilter, setSuggestionReviewFilter] = useState<SuggestionReviewFilter>("proposed");
+  const [suggestionScopeFilter, setSuggestionScopeFilter] = useState<SuggestionScopeFilter>("all");
   const [suggestionDraftText, setSuggestionDraftText] = useState("");
   const [suggestionRationale, setSuggestionRationale] = useState("");
+  const [staleSuggestionContexts, setStaleSuggestionContexts] = useState<Record<string, StaleSuggestionContext>>({});
+  const [manualSuggestionMerges, setManualSuggestionMerges] = useState<Record<string, string>>({});
+  const [suggestionReviewNotes, setSuggestionReviewNotes] = useState<Record<string, string>>({});
   const [pinnedSupportIds, setPinnedSupportIds] = useState<string[]>(() => loadPinnedSupportIds(initialData.selectedBook?.id || ""));
   const [message, setMessage] = useState<SyncMessage | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -75,9 +111,16 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
   const commentParagraphNumbers = useMemo(() => new Map(data.paragraphs.map((paragraph) => [paragraph.id, paragraph.paragraphNumber])), [data.paragraphs]);
   const openCommentCount = useMemo(() => data.readerComments.filter((comment) => !comment.resolved).length, [data.readerComments]);
   const resolvedCommentCount = data.readerComments.length - openCommentCount;
+  const chapterNumberById = useMemo(() => new Map(data.chapters.map((chapter) => [chapter.id, chapter.chapterNumber])), [data.chapters]);
   const suggestionParagraphNumbers = useMemo(() => new Map(data.paragraphs.map((paragraph) => [paragraph.id, paragraph.paragraphNumber])), [data.paragraphs]);
   const proposedSuggestionCount = useMemo(() => data.contributorSuggestions.filter((suggestion) => suggestion.status === "proposed").length, [data.contributorSuggestions]);
   const closedSuggestionCount = data.contributorSuggestions.length - proposedSuggestionCount;
+  const suggestionStatusCounts = useMemo(() => summarizeContributorSuggestions(data.contributorSuggestions, staleSuggestionContexts), [data.contributorSuggestions, staleSuggestionContexts]);
+  const suggestionActivityEntries = useMemo(
+    () => buildSuggestionActivityEntries(data.contributorSuggestions, staleSuggestionContexts, suggestionParagraphNumbers, data.accountId),
+    [data.accountId, data.contributorSuggestions, staleSuggestionContexts, suggestionParagraphNumbers],
+  );
+  const contributorWorkloadEntries = useMemo(() => buildContributorWorkloadEntries(data), [data]);
   const supportEntries = useMemo(() => buildSupportEntries(data), [data]);
   const pinnedSupportEntries = useMemo(
     () => pinnedSupportIds.flatMap((id) => supportEntries.find((entry) => entry.id === id) || []),
@@ -96,8 +139,8 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
     [commentParagraphNumbers, commentReviewFilter, data.readerComments, supportSearch],
   );
   const reviewSuggestions = useMemo(
-    () => filterContributorSuggestions(data.contributorSuggestions, supportSearch, suggestionReviewFilter, suggestionParagraphNumbers),
-    [data.contributorSuggestions, suggestionParagraphNumbers, suggestionReviewFilter, supportSearch],
+    () => filterContributorSuggestions(data.contributorSuggestions, supportSearch, suggestionReviewFilter, suggestionScopeFilter, suggestionParagraphNumbers, data.accountId),
+    [data.accountId, data.contributorSuggestions, suggestionParagraphNumbers, suggestionReviewFilter, suggestionScopeFilter, supportSearch],
   );
 
   useEffect(() => {
@@ -388,10 +431,18 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
     });
   }
 
-  function updateContributorSuggestionStatus(suggestionId: string, status: "accepted" | "rejected" | "withdrawn" | "applied") {
+  function updateContributorSuggestionStatus(
+    suggestionId: string,
+    status: "accepted" | "rejected" | "withdrawn" | "applied",
+    options: { mergedText?: string; reviewNote?: string } = {},
+  ) {
     if (!data.selectedBook) return;
     if (status === "applied" && dirty) {
       setMessage({ tone: "yellow", text: "Push or discard the current draft before applying a suggestion." });
+      return;
+    }
+    if (status === "applied" && options.mergedText !== undefined && !options.mergedText.trim()) {
+      setMessage({ tone: "yellow", text: "Add merged paragraph text before applying a stale suggestion." });
       return;
     }
     const bookId = data.selectedBook.id;
@@ -400,10 +451,19 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
       const response = await fetch(`/api/books/${bookId}/suggestions/${suggestionId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          ...(options.mergedText !== undefined ? { mergedText: options.mergedText } : {}),
+          ...(options.reviewNote?.trim() ? { reviewNote: options.reviewNote.trim() } : {}),
+        }),
       });
       const payload = await response.json();
       if (!response.ok || payload.error) {
+        if (payload.staleSuggestion) {
+          const staleContext = toStaleSuggestionContext(payload.staleSuggestion);
+          setStaleSuggestionContexts((current) => ({ ...current, [suggestionId]: staleContext }));
+          setManualSuggestionMerges((current) => ({ ...current, [suggestionId]: current[suggestionId] ?? staleContext.currentText }));
+        }
         setMessage({ tone: "red", text: payload.error || "Suggestion update failed." });
         return;
       }
@@ -428,7 +488,50 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
       if (payload.paragraph?.id === selectedParagraphId) {
         setDraftText(payload.paragraph.currentText || payload.paragraph.acceptedText || "");
       }
+      setStaleSuggestionContexts((current) => {
+        const next = { ...current };
+        delete next[suggestionId];
+        return next;
+      });
+      setManualSuggestionMerges((current) => {
+        const next = { ...current };
+        delete next[suggestionId];
+        return next;
+      });
+      setSuggestionReviewNotes((current) => {
+        const next = { ...current };
+        delete next[suggestionId];
+        return next;
+      });
       setMessage({ tone: "green", text: `Contributor suggestion ${suggestionStatusPastTense(status)}.` });
+    });
+  }
+
+  function updateContributorAssignmentStatus(
+    assignmentId: string,
+    status: CreativeWriterWorkspaceData["contributorAssignments"][number]["status"],
+  ) {
+    if (!data.selectedBook) return;
+    const bookId = data.selectedBook.id;
+    setMessage(null);
+    startTransition(async () => {
+      const response = await fetch(`/api/books/${bookId}/assignments/${assignmentId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.error) {
+        setMessage({ tone: "red", text: payload.error || "Assignment update failed." });
+        return;
+      }
+      setData((current) => ({
+        ...current,
+        contributorAssignments: current.contributorAssignments.map((assignment) =>
+          assignment.id === assignmentId ? { ...assignment, ...toContributorAssignmentView(payload.assignment) } : assignment,
+        ),
+      }));
+      setMessage({ tone: "green", text: `Assignment ${assignmentStatusPastTense(status)}.` });
     });
   }
 
@@ -738,6 +841,17 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                         {proposedSuggestionCount} proposed
                       </Badge>
                     </Group>
+                    <SimpleSuggestionSummary counts={suggestionStatusCounts} />
+                    <ContributorWorkloadList entries={contributorWorkloadEntries} />
+                    <ContributorAssignmentList
+                      assignments={data.contributorAssignments}
+                      contributors={contributorWorkloadEntries}
+                      chapterNumberById={chapterNumberById}
+                      paragraphNumberById={suggestionParagraphNumbers}
+                      onSetStatus={updateContributorAssignmentStatus}
+                      updating={isPending}
+                    />
+                    <SuggestionActivityList entries={suggestionActivityEntries} />
                     <Paper withBorder radius="sm" p="sm" bg="#f8fdff">
                       <Stack gap="xs">
                         <Group justify="space-between" align="flex-start">
@@ -796,11 +910,28 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                       ]}
                       fullWidth
                     />
+                    <SegmentedControl
+                      aria-label="Suggestion ownership filter"
+                      value={suggestionScopeFilter}
+                      onChange={(value) => setSuggestionScopeFilter(value as SuggestionScopeFilter)}
+                      data={[
+                        { label: "All", value: "all" },
+                        { label: "Mine", value: "mine" },
+                        { label: "Reviewed by me", value: "reviewed" },
+                      ]}
+                      fullWidth
+                    />
                     <SuggestionReviewList
                       suggestions={reviewSuggestions}
                       paragraphNumberById={suggestionParagraphNumbers}
+                      staleContexts={staleSuggestionContexts}
+                      manualMerges={manualSuggestionMerges}
+                      reviewNotes={suggestionReviewNotes}
+                      currentUserId={data.accountId}
                       onSelectParagraph={selectSuggestionParagraph}
                       onSetStatus={updateContributorSuggestionStatus}
+                      onManualMergeChange={(suggestionId, value) => setManualSuggestionMerges((current) => ({ ...current, [suggestionId]: value }))}
+                      onReviewNoteChange={(suggestionId, value) => setSuggestionReviewNotes((current) => ({ ...current, [suggestionId]: value }))}
                       updating={isPending}
                       empty={supportSearch ? "No contributor suggestions match this review filter." : "No contributor suggestions in this review queue."}
                     />
@@ -1045,18 +1176,181 @@ function CommentReviewCard({
   );
 }
 
+function SimpleSuggestionSummary({ counts }: { counts: ReturnType<typeof summarizeContributorSuggestions> }) {
+  return (
+    <Group gap="xs">
+      <Badge color="cyan" variant="light">Proposed {counts.proposed}</Badge>
+      <Badge color="teal" variant="light">Accepted {counts.accepted}</Badge>
+      <Badge color="orange" variant="light">Needs merge {counts.needsMerge}</Badge>
+      <Badge color="grape" variant="light">Applied {counts.applied}</Badge>
+      <Badge color="red" variant="light">Rejected {counts.rejected}</Badge>
+      <Badge color="gray" variant="light">Withdrawn {counts.withdrawn}</Badge>
+    </Group>
+  );
+}
+
+function ContributorWorkloadList({ entries }: { entries: ContributorWorkloadEntry[] }) {
+  if (!entries.length) return null;
+  return (
+    <Paper withBorder radius="sm" p="sm" bg="#f8fff9">
+      <Stack gap="xs">
+        <Group justify="space-between">
+          <div>
+            <Text size="sm" fw={700}>Contributors</Text>
+            <Text size="xs" c="dimmed">Role and review workload for this book</Text>
+          </div>
+          <Badge size="xs" color="teal" variant="light">{entries.length} people</Badge>
+        </Group>
+        <Stack gap={6}>
+          {entries.slice(0, 6).map((entry, index) => (
+            <Stack key={entry.userId} gap={4}>
+              {index > 0 && <Divider />}
+              <Group justify="space-between" align="flex-start" wrap="nowrap">
+                <div style={{ minWidth: 0 }}>
+                  <Text size="sm" fw={700} lineClamp={1}>{entry.label}</Text>
+                  <Text size="xs" c="dimmed">{entry.role}</Text>
+                </div>
+                <Text size="xs" c="dimmed">{formatDateTime(entry.lastActivityAt)}</Text>
+              </Group>
+              <Group gap={6}>
+                <Badge size="xs" color="blue" variant="light">Active assignments {entry.activeAssignments}</Badge>
+                <Badge size="xs" color="orange" variant="light">Open comments {entry.openComments}</Badge>
+                <Badge size="xs" color="cyan" variant="light">Proposed {entry.proposedSuggestions}</Badge>
+                <Badge size="xs" color="teal" variant="light">Reviewed {entry.reviewedSuggestions}</Badge>
+                <Badge size="xs" color="grape" variant="light">Applied {entry.appliedSuggestions}</Badge>
+              </Group>
+            </Stack>
+          ))}
+        </Stack>
+      </Stack>
+    </Paper>
+  );
+}
+
+function ContributorAssignmentList({
+  assignments,
+  contributors,
+  chapterNumberById,
+  paragraphNumberById,
+  onSetStatus,
+  updating,
+}: {
+  assignments: CreativeWriterWorkspaceData["contributorAssignments"];
+  contributors: ContributorWorkloadEntry[];
+  chapterNumberById: Map<string, number>;
+  paragraphNumberById: Map<string, number>;
+  onSetStatus: (assignmentId: string, status: CreativeWriterWorkspaceData["contributorAssignments"][number]["status"]) => void;
+  updating: boolean;
+}) {
+  if (!assignments.length) return null;
+  const contributorById = new Map(contributors.map((contributor) => [contributor.userId, contributor]));
+  return (
+    <Paper withBorder radius="sm" p="sm" bg="#f8fbff">
+      <Stack gap="xs">
+        <Group justify="space-between">
+          <div>
+            <Text size="sm" fw={700}>Assignments</Text>
+            <Text size="xs" c="dimmed">Durable contributor assignment queue</Text>
+          </div>
+          <Badge size="xs" color="blue" variant="light">{assignments.length} assigned</Badge>
+        </Group>
+        <Stack gap={6}>
+          {assignments.slice(0, 6).map((assignment, index) => (
+            <Stack key={assignment.id} gap={4}>
+              {index > 0 && <Divider />}
+              <Group justify="space-between" align="flex-start" wrap="nowrap">
+                <div style={{ minWidth: 0 }}>
+                  <Group gap={6}>
+                    <Text size="sm" fw={700} lineClamp={1}>{assignment.title}</Text>
+                    <Badge size="xs" color={assignmentStatusColor(assignment.status)}>{assignmentStatusLabel(assignment.status)}</Badge>
+                  </Group>
+                  <Text size="xs" c="dimmed">{contributorById.get(assignment.assigneeId)?.label || participantLabel(assignment.assigneeId, "")} - {assignmentTargetLabel(assignment, chapterNumberById, paragraphNumberById)}</Text>
+                </div>
+                <Text size="xs" c="dimmed">{assignment.dueAt ? `Due ${formatDateTime(assignment.dueAt)}` : formatDateTime(assignment.createdAt)}</Text>
+              </Group>
+              {assignment.note && <Text size="xs" c="dimmed" lineClamp={2}>{assignment.note}</Text>}
+              <Group gap={6}>
+                {assignment.status === "assigned" && (
+                  <Button size="xs" variant="light" color="cyan" loading={updating} onClick={() => onSetStatus(assignment.id, "in_progress")}>
+                    Start
+                  </Button>
+                )}
+                {assignment.status !== "completed" && assignment.status !== "cancelled" && (
+                  <Button size="xs" variant="light" color="teal" loading={updating} onClick={() => onSetStatus(assignment.id, "completed")}>
+                    Complete
+                  </Button>
+                )}
+                {(assignment.status === "completed" || assignment.status === "cancelled") && (
+                  <Button size="xs" variant="light" color="blue" loading={updating} onClick={() => onSetStatus(assignment.id, "assigned")}>
+                    Reopen
+                  </Button>
+                )}
+                {assignment.status !== "cancelled" && (
+                  <Button size="xs" variant="subtle" color="red" loading={updating} onClick={() => onSetStatus(assignment.id, "cancelled")}>
+                    Cancel
+                  </Button>
+                )}
+              </Group>
+            </Stack>
+          ))}
+        </Stack>
+      </Stack>
+    </Paper>
+  );
+}
+
+function SuggestionActivityList({ entries }: { entries: SuggestionActivityEntry[] }) {
+  if (!entries.length) return null;
+  return (
+    <Paper withBorder radius="sm" p="sm" bg="#fbfbff">
+      <Stack gap="xs">
+        <Group justify="space-between">
+          <Text size="sm" fw={700}>Recent Activity</Text>
+          <Badge size="xs" color="gray" variant="light">{entries.length} events</Badge>
+        </Group>
+        <Stack gap={6}>
+          {entries.slice(0, 5).map((entry) => (
+            <Group key={entry.id} gap="xs" align="flex-start" wrap="nowrap">
+              <Badge size="xs" color={entry.color} variant="dot" mt={3}>{entry.title}</Badge>
+              <div style={{ minWidth: 0 }}>
+                <Text size="xs" fw={700}>{entry.paragraphLabel}</Text>
+                <Text size="xs" c="dimmed">
+                  {entry.actor} - {formatDateTime(entry.timestamp)}
+                </Text>
+                {entry.detail && <Text size="xs" c="dimmed" lineClamp={2}>{entry.detail}</Text>}
+              </div>
+            </Group>
+          ))}
+        </Stack>
+      </Stack>
+    </Paper>
+  );
+}
+
 function SuggestionReviewList({
   suggestions,
   paragraphNumberById,
+  staleContexts,
+  manualMerges,
+  reviewNotes,
+  currentUserId,
   onSelectParagraph,
   onSetStatus,
+  onManualMergeChange,
+  onReviewNoteChange,
   updating,
   empty,
 }: {
   suggestions: CreativeWriterWorkspaceData["contributorSuggestions"];
   paragraphNumberById: Map<string, number>;
+  staleContexts: Record<string, StaleSuggestionContext>;
+  manualMerges: Record<string, string>;
+  reviewNotes: Record<string, string>;
+  currentUserId: string;
   onSelectParagraph: (paragraphId: string | null) => void;
-  onSetStatus: (suggestionId: string, status: "accepted" | "rejected" | "withdrawn" | "applied") => void;
+  onSetStatus: (suggestionId: string, status: "accepted" | "rejected" | "withdrawn" | "applied", options?: { mergedText?: string; reviewNote?: string }) => void;
+  onManualMergeChange: (suggestionId: string, value: string) => void;
+  onReviewNoteChange: (suggestionId: string, value: string) => void;
   updating: boolean;
   empty: string;
 }) {
@@ -1068,8 +1362,14 @@ function SuggestionReviewList({
           key={suggestion.id}
           suggestion={suggestion}
           paragraphNumber={suggestion.paragraphId ? paragraphNumberById.get(suggestion.paragraphId) || null : null}
+          staleContext={staleContexts[suggestion.id] || null}
+          manualMergeText={manualMerges[suggestion.id] || ""}
+          reviewNoteText={reviewNotes[suggestion.id] || ""}
+          currentUserId={currentUserId}
           onSelectParagraph={onSelectParagraph}
           onSetStatus={onSetStatus}
+          onManualMergeChange={onManualMergeChange}
+          onReviewNoteChange={onReviewNoteChange}
           updating={updating}
         />
       ))}
@@ -1080,14 +1380,26 @@ function SuggestionReviewList({
 function SuggestionReviewCard({
   suggestion,
   paragraphNumber,
+  staleContext,
+  manualMergeText,
+  reviewNoteText,
+  currentUserId,
   onSelectParagraph,
   onSetStatus,
+  onManualMergeChange,
+  onReviewNoteChange,
   updating,
 }: {
   suggestion: CreativeWriterWorkspaceData["contributorSuggestions"][number];
   paragraphNumber: number | null;
+  staleContext: StaleSuggestionContext | null;
+  manualMergeText: string;
+  reviewNoteText: string;
+  currentUserId: string;
   onSelectParagraph: (paragraphId: string | null) => void;
-  onSetStatus: (suggestionId: string, status: "accepted" | "rejected" | "withdrawn" | "applied") => void;
+  onSetStatus: (suggestionId: string, status: "accepted" | "rejected" | "withdrawn" | "applied", options?: { mergedText?: string; reviewNote?: string }) => void;
+  onManualMergeChange: (suggestionId: string, value: string) => void;
+  onReviewNoteChange: (suggestionId: string, value: string) => void;
   updating: boolean;
 }) {
   const title = paragraphNumber ? `Paragraph ${paragraphNumber}` : "General book suggestion";
@@ -1104,7 +1416,7 @@ function SuggestionReviewCard({
             </Group>
             <Text size="xs" c="dimmed">{formatDateTime(suggestion.createdAt)}</Text>
           </div>
-          <Text size="xs" c="dimmed">{suggestion.proposerId}</Text>
+          <Text size="xs" c="dimmed">{participantLabel(suggestion.proposerId, currentUserId)}</Text>
         </Group>
         {suggestion.originalTextSnapshot && (
           <Stack gap={2}>
@@ -1128,6 +1440,51 @@ function SuggestionReviewCard({
             <Text size="sm" c="dimmed">{suggestion.reviewNote}</Text>
           </Stack>
         )}
+        {(isProposed || isAccepted) && (
+          <Textarea
+            aria-label={`Review note for ${suggestion.id}`}
+            minRows={2}
+            autosize
+            value={reviewNoteText}
+            onChange={(event) => onReviewNoteChange(suggestion.id, event.currentTarget.value)}
+            placeholder="Reviewer note"
+          />
+        )}
+        {staleContext && (
+          <Paper withBorder radius="sm" p="sm" bg="#fff7ed">
+            <Stack gap="xs">
+              <Group justify="space-between">
+                <Text size="sm" fw={700}>Stale suggestion merge</Text>
+                <Badge size="xs" color="orange">Needs merge</Badge>
+              </Group>
+              <Stack gap={2}>
+                <Text size="xs" fw={700}>Original at proposal</Text>
+                <Text size="sm" c="dimmed" lineClamp={4}>{staleContext.originalTextSnapshot || "No original snapshot saved."}</Text>
+              </Stack>
+              <Stack gap={2}>
+                <Text size="xs" fw={700}>Current paragraph</Text>
+                <Text size="sm" lineClamp={4}>{staleContext.currentText || "Blank paragraph."}</Text>
+              </Stack>
+              <Stack gap={2}>
+                <Text size="xs" fw={700}>Suggested replacement</Text>
+                <Text size="sm" lineClamp={4}>{staleContext.suggestedText}</Text>
+              </Stack>
+              <Textarea
+                aria-label={`Manual stale merge for ${suggestion.id}`}
+                minRows={4}
+                autosize
+                value={manualMergeText}
+                onChange={(event) => onManualMergeChange(suggestion.id, event.currentTarget.value)}
+                placeholder="Write the merged paragraph text"
+              />
+              <Group justify="flex-end">
+                <Button size="xs" color="grape" leftSection={<IconCloudUp size={13} />} loading={updating} onClick={() => onSetStatus(suggestion.id, "applied", { mergedText: manualMergeText, reviewNote: reviewNoteText })}>
+                  Apply Manual Merge
+                </Button>
+              </Group>
+            </Stack>
+          </Paper>
+        )}
         <Group gap="xs">
           <Button
             size="xs"
@@ -1140,19 +1497,19 @@ function SuggestionReviewCard({
           </Button>
           {isProposed && (
             <>
-              <Button size="xs" color="teal" leftSection={<IconCheck size={13} />} loading={updating} onClick={() => onSetStatus(suggestion.id, "accepted")}>
+              <Button size="xs" color="teal" leftSection={<IconCheck size={13} />} loading={updating} onClick={() => onSetStatus(suggestion.id, "accepted", { reviewNote: reviewNoteText })}>
                 Accept
               </Button>
-              <Button size="xs" color="red" variant="light" leftSection={<IconX size={13} />} loading={updating} onClick={() => onSetStatus(suggestion.id, "rejected")}>
+              <Button size="xs" color="red" variant="light" leftSection={<IconX size={13} />} loading={updating} onClick={() => onSetStatus(suggestion.id, "rejected", { reviewNote: reviewNoteText })}>
                 Reject
               </Button>
-              <Button size="xs" color="dark" variant="subtle" loading={updating} onClick={() => onSetStatus(suggestion.id, "withdrawn")}>
+              <Button size="xs" color="dark" variant="subtle" loading={updating} onClick={() => onSetStatus(suggestion.id, "withdrawn", { reviewNote: reviewNoteText })}>
                 Withdraw
               </Button>
             </>
           )}
           {isAccepted && (
-            <Button size="xs" color="grape" leftSection={<IconCloudUp size={13} />} loading={updating} disabled={!suggestion.paragraphId} onClick={() => onSetStatus(suggestion.id, "applied")}>
+            <Button size="xs" color="grape" leftSection={<IconCloudUp size={13} />} loading={updating} disabled={!suggestion.paragraphId} onClick={() => onSetStatus(suggestion.id, "applied", { reviewNote: reviewNoteText })}>
               Apply
             </Button>
           )}
@@ -1160,6 +1517,17 @@ function SuggestionReviewCard({
       </Stack>
     </Paper>
   );
+}
+
+function toStaleSuggestionContext(row: Record<string, unknown>): StaleSuggestionContext {
+  return {
+    suggestionId: stringValue(row.suggestionId) || "",
+    paragraphId: stringValue(row.paragraphId) || "",
+    originalTextSnapshot: nullableStringValue(row.originalTextSnapshot),
+    currentText: stringValue(row.currentText) || "",
+    suggestedText: stringValue(row.suggestedText) || "",
+    paragraphUpdatedAt: nullableStringValue(row.paragraphUpdatedAt),
+  };
 }
 
 function SupportEntryCard({
@@ -1269,16 +1637,192 @@ function filterReaderComments(
   });
 }
 
+function buildContributorWorkloadEntries(data: CreativeWriterWorkspaceData): ContributorWorkloadEntry[] {
+  const entries = new Map<string, ContributorWorkloadEntry>();
+  const participantProfileById = new Map(data.participantProfiles.map((profile) => [profile.userId, profile]));
+
+  function ensure(userId: string | null, fallbackRole = "activity-only") {
+    if (!userId) return null;
+    const existing = entries.get(userId);
+    if (existing) return existing;
+    const contributor = data.contributors.find((candidate) => candidate.userId === userId);
+    const profile = participantProfileById.get(userId);
+    const entry: ContributorWorkloadEntry = {
+      userId,
+      label: contributor?.displayName || contributor?.email || profile?.displayName || participantLabel(userId, data.accountId),
+      role: contributor ? contributorRoleLabel(contributor.role) : "Activity only",
+      activeAssignments: 0,
+      completedAssignments: 0,
+      openComments: 0,
+      proposedSuggestions: 0,
+      reviewedSuggestions: 0,
+      appliedSuggestions: 0,
+      lastActivityAt: contributor?.joinedAt || null,
+    };
+    if (!contributor && fallbackRole !== "activity-only") entry.role = fallbackRole;
+    entries.set(userId, entry);
+    return entry;
+  }
+
+  data.contributors.forEach((contributor) => ensure(contributor.userId));
+  data.contributorAssignments.forEach((assignment) => {
+    const entry = ensure(assignment.assigneeId);
+    if (!entry) return;
+    if (assignment.status === "completed") entry.completedAssignments += 1;
+    if (assignment.status !== "completed" && assignment.status !== "cancelled") entry.activeAssignments += 1;
+    entry.lastActivityAt = newestTimestamp(entry.lastActivityAt, assignment.updatedAt || assignment.createdAt);
+  });
+  data.readerComments.forEach((comment) => {
+    const entry = ensure(comment.annotatorId);
+    if (!entry) return;
+    if (!comment.resolved) entry.openComments += 1;
+    entry.lastActivityAt = newestTimestamp(entry.lastActivityAt, comment.createdAt);
+  });
+  data.contributorSuggestions.forEach((suggestion) => {
+    const proposer = ensure(suggestion.proposerId);
+    if (proposer) {
+      if (suggestion.status === "proposed") proposer.proposedSuggestions += 1;
+      proposer.lastActivityAt = newestTimestamp(proposer.lastActivityAt, suggestion.createdAt);
+    }
+    const reviewer = ensure(suggestion.reviewerId, "Reviewer");
+    if (reviewer) {
+      if (suggestion.status !== "proposed") reviewer.reviewedSuggestions += 1;
+      if (suggestion.status === "applied") reviewer.appliedSuggestions += 1;
+      reviewer.lastActivityAt = newestTimestamp(reviewer.lastActivityAt, suggestionActivityTimestamp(suggestion));
+    }
+  });
+
+  return Array.from(entries.values()).sort((left, right) => timestampValue(right.lastActivityAt) - timestampValue(left.lastActivityAt) || left.label.localeCompare(right.label));
+}
+
+function contributorRoleLabel(role: CreativeWriterWorkspaceData["contributors"][number]["role"]) {
+  const labels: Record<CreativeWriterWorkspaceData["contributors"][number]["role"], string> = {
+    viewer: "Viewer",
+    editor: "Editor",
+    admin: "Admin",
+  };
+  return labels[role];
+}
+
+function assignmentStatusLabel(status: CreativeWriterWorkspaceData["contributorAssignments"][number]["status"]) {
+  const labels: Record<CreativeWriterWorkspaceData["contributorAssignments"][number]["status"], string> = {
+    assigned: "Assigned",
+    in_progress: "In progress",
+    completed: "Completed",
+    cancelled: "Cancelled",
+  };
+  return labels[status];
+}
+
+function assignmentStatusColor(status: CreativeWriterWorkspaceData["contributorAssignments"][number]["status"]) {
+  const colors: Record<CreativeWriterWorkspaceData["contributorAssignments"][number]["status"], string> = {
+    assigned: "blue",
+    in_progress: "cyan",
+    completed: "teal",
+    cancelled: "gray",
+  };
+  return colors[status];
+}
+
+function assignmentTargetLabel(
+  assignment: CreativeWriterWorkspaceData["contributorAssignments"][number],
+  chapterNumberById: Map<string, number>,
+  paragraphNumberById: Map<string, number>,
+) {
+  if (assignment.paragraphId) {
+    const paragraphNumber = paragraphNumberById.get(assignment.paragraphId);
+    return paragraphNumber ? `Paragraph ${paragraphNumber}` : "Paragraph assignment";
+  }
+  if (assignment.chapterId) {
+    const chapterNumber = chapterNumberById.get(assignment.chapterId);
+    return chapterNumber ? `Chapter ${chapterNumber}` : "Chapter assignment";
+  }
+  return "Book assignment";
+}
+
+function buildSuggestionActivityEntries(
+  suggestions: CreativeWriterWorkspaceData["contributorSuggestions"],
+  staleContexts: Record<string, StaleSuggestionContext>,
+  paragraphNumberById: Map<string, number>,
+  currentUserId: string,
+) {
+  const entries = suggestions.flatMap<SuggestionActivityEntry>((suggestion) => {
+    const paragraphNumber = suggestion.paragraphId ? paragraphNumberById.get(suggestion.paragraphId) : null;
+    const paragraphLabel = paragraphNumber ? `Paragraph ${paragraphNumber}` : "General book suggestion";
+    const suggestionEntries: SuggestionActivityEntry[] = [
+      {
+        id: `${suggestion.id}:proposed`,
+        title: "Proposed suggestion",
+        actor: participantLabel(suggestion.proposerId, currentUserId),
+        timestamp: suggestion.createdAt,
+        paragraphLabel,
+        detail: suggestion.rationale || suggestion.suggestedText || null,
+        color: "cyan",
+      },
+    ];
+
+    const staleContext = staleContexts[suggestion.id];
+    if (staleContext) {
+      suggestionEntries.push({
+        id: `${suggestion.id}:stale`,
+        title: "Needs manual merge",
+        actor: "System",
+        timestamp: staleContext.paragraphUpdatedAt || suggestion.updatedAt,
+        paragraphLabel,
+        detail: "Paragraph changed after this suggestion was proposed.",
+        color: "orange",
+      });
+    }
+
+    if (suggestion.status !== "proposed") {
+      const actorId = suggestion.status === "withdrawn" ? suggestion.proposerId : suggestion.reviewerId;
+      suggestionEntries.push({
+        id: `${suggestion.id}:${suggestion.status}`,
+        title: `${suggestionStatusLabel(suggestion.status)} suggestion`,
+        actor: participantLabel(actorId, currentUserId),
+        timestamp: suggestionActivityTimestamp(suggestion),
+        paragraphLabel,
+        detail: suggestion.reviewNote || null,
+        color: suggestionStatusColor(suggestion.status),
+      });
+    }
+
+    return suggestionEntries;
+  });
+
+  return entries.sort((left, right) => timestampValue(right.timestamp) - timestampValue(left.timestamp));
+}
+
+function suggestionActivityTimestamp(suggestion: CreativeWriterWorkspaceData["contributorSuggestions"][number]) {
+  if (suggestion.status === "applied") return suggestion.appliedAt || suggestion.reviewedAt || suggestion.updatedAt;
+  if (suggestion.status === "withdrawn") return suggestion.withdrawnAt || suggestion.updatedAt;
+  return suggestion.reviewedAt || suggestion.updatedAt;
+}
+
+function timestampValue(value: string | null) {
+  if (!value) return 0;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function newestTimestamp(left: string | null, right: string | null) {
+  return timestampValue(right) > timestampValue(left) ? right : left;
+}
+
 function filterContributorSuggestions(
   suggestions: CreativeWriterWorkspaceData["contributorSuggestions"],
   query: string,
   status: SuggestionReviewFilter,
+  scope: SuggestionScopeFilter,
   paragraphNumberById: Map<string, number>,
+  currentUserId: string,
 ) {
   const normalized = query.trim().toLowerCase();
   return suggestions.filter((suggestion) => {
     if (status === "proposed" && suggestion.status !== "proposed") return false;
     if (status === "closed" && suggestion.status === "proposed") return false;
+    if (scope === "mine" && suggestion.proposerId !== currentUserId) return false;
+    if (scope === "reviewed" && suggestion.reviewerId !== currentUserId) return false;
     if (!normalized) return true;
     const paragraphNumber = suggestion.paragraphId ? paragraphNumberById.get(suggestion.paragraphId) : null;
     const paragraphLabel = paragraphNumber ? `Paragraph ${paragraphNumber}` : "General book suggestion";
@@ -1294,6 +1838,34 @@ function filterContributorSuggestions(
       formatDateTime(suggestion.createdAt),
     ].some((value) => value?.toLowerCase().includes(normalized));
   });
+}
+
+function summarizeContributorSuggestions(
+  suggestions: CreativeWriterWorkspaceData["contributorSuggestions"],
+  staleContexts: Record<string, StaleSuggestionContext>,
+) {
+  return suggestions.reduce(
+    (counts, suggestion) => {
+      counts[suggestion.status] += 1;
+      if (staleContexts[suggestion.id]) counts.needsMerge += 1;
+      return counts;
+    },
+    {
+      proposed: 0,
+      accepted: 0,
+      rejected: 0,
+      withdrawn: 0,
+      applied: 0,
+      superseded: 0,
+      needsMerge: 0,
+    } as Record<CreativeWriterWorkspaceData["contributorSuggestions"][number]["status"] | "needsMerge", number>,
+  );
+}
+
+function participantLabel(userId: string | null, currentUserId: string) {
+  if (!userId) return "Unassigned";
+  if (userId === currentUserId) return "You";
+  return `Contributor ${userId.slice(0, 8)}`;
 }
 
 function toContributorSuggestionView(row: Record<string, unknown>): CreativeWriterWorkspaceData["contributorSuggestions"][number] {
@@ -1328,9 +1900,37 @@ function toContributorSuggestionPatch(row: Record<string, unknown>): Partial<Cre
   return next;
 }
 
+function toContributorAssignmentView(row: Record<string, unknown>): CreativeWriterWorkspaceData["contributorAssignments"][number] {
+  return {
+    id: stringValue(row.id) || `assignment-${Date.now()}`,
+    chapterId: nullableStringValue(row.chapter_id) ?? nullableStringValue(row.chapterId),
+    paragraphId: nullableStringValue(row.paragraph_id) ?? nullableStringValue(row.paragraphId),
+    assigneeId: stringValue(row.assignee_id) || stringValue(row.assigneeId) || "unknown",
+    assignerId: stringValue(row.assigner_id) || stringValue(row.assignerId) || "unknown",
+    scope: assignmentScopeValue(row.scope),
+    status: assignmentStatusValue(row.status),
+    title: stringValue(row.title) || "Assignment",
+    note: nullableStringValue(row.note),
+    dueAt: nullableStringValue(row.due_at) ?? nullableStringValue(row.dueAt),
+    createdAt: nullableStringValue(row.created_at) ?? nullableStringValue(row.createdAt),
+    updatedAt: nullableStringValue(row.updated_at) ?? nullableStringValue(row.updatedAt),
+    completedAt: nullableStringValue(row.completed_at) ?? nullableStringValue(row.completedAt),
+  };
+}
+
 function suggestionStatusValue(value: unknown): CreativeWriterWorkspaceData["contributorSuggestions"][number]["status"] {
   if (value === "accepted" || value === "rejected" || value === "withdrawn" || value === "applied" || value === "superseded") return value;
   return "proposed";
+}
+
+function assignmentScopeValue(value: unknown): CreativeWriterWorkspaceData["contributorAssignments"][number]["scope"] {
+  if (value === "chapter" || value === "paragraph") return value;
+  return "book";
+}
+
+function assignmentStatusValue(value: unknown): CreativeWriterWorkspaceData["contributorAssignments"][number]["status"] {
+  if (value === "in_progress" || value === "completed" || value === "cancelled") return value;
+  return "assigned";
 }
 
 function suggestionStatusLabel(status: CreativeWriterWorkspaceData["contributorSuggestions"][number]["status"]) {
@@ -1363,6 +1963,16 @@ function suggestionStatusPastTense(status: "accepted" | "rejected" | "withdrawn"
     rejected: "rejected",
     withdrawn: "withdrawn",
     applied: "applied",
+  };
+  return labels[status];
+}
+
+function assignmentStatusPastTense(status: CreativeWriterWorkspaceData["contributorAssignments"][number]["status"]) {
+  const labels: Record<CreativeWriterWorkspaceData["contributorAssignments"][number]["status"], string> = {
+    assigned: "reopened",
+    in_progress: "started",
+    completed: "completed",
+    cancelled: "cancelled",
   };
   return labels[status];
 }

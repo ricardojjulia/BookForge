@@ -455,6 +455,202 @@ describe("CreativeWriterWorkspace", () => {
     expect(screen.getByText("Applied")).toBeInTheDocument();
   });
 
+  it("shows stale suggestion context and applies a manual merge", async () => {
+    stubBrowserLayoutApis();
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          suggestion: {
+            id: "suggestion-1",
+            status: "accepted",
+            reviewer_id: "editor-1",
+            review_note: null,
+            updated_at: "2026-08-02T12:25:00.000Z",
+            reviewed_at: "2026-08-02T12:25:00.000Z",
+            applied_at: null,
+            withdrawn_at: null,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    ).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: "Suggestion cannot be applied because the paragraph changed after it was proposed.",
+          staleSuggestion: {
+            suggestionId: "suggestion-1",
+            paragraphId: "paragraph-1",
+            originalTextSnapshot: "Original paragraph.",
+            currentText: "Current changed paragraph.",
+            suggestedText: "Try a more tactile sentence.",
+            paragraphUpdatedAt: "2026-08-02T12:40:00.000Z",
+          },
+        }),
+        { status: 409, headers: { "content-type": "application/json" } },
+      ),
+    ).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          suggestion: {
+            id: "suggestion-1",
+            status: "applied",
+            reviewer_id: "editor-1",
+            review_note: null,
+            updated_at: "2026-08-02T12:45:00.000Z",
+            reviewed_at: "2026-08-02T12:25:00.000Z",
+            applied_at: "2026-08-02T12:45:00.000Z",
+            withdrawn_at: null,
+          },
+          paragraph: {
+            id: "paragraph-1",
+            currentText: "Manual merged paragraph.",
+            acceptedText: "Manual merged paragraph.",
+            updatedAt: "2026-08-02T12:45:00.000Z",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderWorkspace(workspaceData({ conflicts: [] }));
+
+    await user.click(screen.getByRole("tab", { name: /Suggestions/i }));
+    await user.click(screen.getByRole("button", { name: "Accept" }));
+    await screen.findByText("Contributor suggestion accepted.");
+    await user.click(screen.getByRole("radio", { name: "Closed (1)" }));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(await screen.findByText("Stale suggestion merge")).toBeInTheDocument();
+    expect(screen.getAllByText("Needs manual merge").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Current changed paragraph.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Original paragraph.").length).toBeGreaterThan(0);
+
+    await user.clear(screen.getByLabelText("Manual stale merge for suggestion-1"));
+    await user.type(screen.getByLabelText("Manual stale merge for suggestion-1"), "Manual merged paragraph.");
+    await user.click(screen.getByRole("button", { name: "Apply Manual Merge" }));
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+    expect(JSON.parse(String(mockFetch.mock.calls[2]?.[1]?.body))).toEqual({
+      status: "applied",
+      mergedText: "Manual merged paragraph.",
+    });
+    expect(await screen.findByText("Contributor suggestion applied.")).toBeInTheDocument();
+    expect(screen.getByLabelText("CreativeWriter manuscript editor")).toHaveValue("Manual merged paragraph.");
+  });
+
+  it("filters contributor suggestion queues and sends reviewer notes", async () => {
+    stubBrowserLayoutApis();
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          suggestion: {
+            id: "suggestion-1",
+            status: "accepted",
+            reviewer_id: "user-1",
+            review_note: "Use this in the next pass.",
+            updated_at: "2026-08-02T12:25:00.000Z",
+            reviewed_at: "2026-08-02T12:25:00.000Z",
+            applied_at: null,
+            withdrawn_at: null,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderWorkspace(workspaceData({ conflicts: [], includeOwnSuggestion: true, includeReviewedSuggestion: true }));
+
+    await user.click(screen.getByRole("tab", { name: /Suggestions/i }));
+
+    expect(screen.getByText("Proposed 2")).toBeInTheDocument();
+    expect(screen.getByText("Accepted 1")).toBeInTheDocument();
+    expect(screen.getAllByText("Applied 1").length).toBeGreaterThan(0);
+    expect(screen.getByText("Contributors")).toBeInTheDocument();
+    expect(screen.getByText("Rae Reader")).toBeInTheDocument();
+    expect(screen.getByText("Viewer")).toBeInTheDocument();
+    expect(screen.getByText("Author One")).toBeInTheDocument();
+    expect(screen.getByText("Editor")).toBeInTheDocument();
+    expect(screen.getByText("Active assignments 1")).toBeInTheDocument();
+    expect(screen.getByText("Open comments 1")).toBeInTheDocument();
+    expect(screen.getByText("Assignments")).toBeInTheDocument();
+    expect(screen.getByText("Review the opening.")).toBeInTheDocument();
+    expect(screen.getByText("Assigned")).toBeInTheDocument();
+    expect(screen.getByText("Watch continuity.")).toBeInTheDocument();
+    expect(screen.getByText("Recent Activity")).toBeInTheDocument();
+    expect(screen.getByText("Applied suggestion")).toBeInTheDocument();
+    expect(screen.getByText("Accepted suggestion")).toBeInTheDocument();
+    expect(screen.getAllByText("Proposed suggestion").length).toBeGreaterThan(0);
+    expect(screen.getByText("Approved earlier.")).toBeInTheDocument();
+    expect(screen.getByText("You")).toBeInTheDocument();
+    expect(screen.getByText("Try a more tactile sentence.")).toBeInTheDocument();
+    expect(screen.getAllByText("My own suggestion.").length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("radio", { name: "Mine" }));
+
+    expect(screen.queryByText("Try a more tactile sentence.")).not.toBeInTheDocument();
+    expect(screen.getAllByText("My own suggestion.").length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("radio", { name: "Reviewed by me" }));
+    await user.click(screen.getByRole("radio", { name: "Closed (2)" }));
+
+    expect(screen.getAllByText("Already reviewed by me.").length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText("Review note for suggestion-own")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "All" }));
+    await user.click(screen.getByRole("radio", { name: "Proposed (2)" }));
+    await user.type(screen.getAllByLabelText(/Review note for suggestion-1/)[0], "Use this in the next pass.");
+    await user.click(screen.getAllByRole("button", { name: "Accept" })[0]);
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String(mockFetch.mock.calls[0]?.[1]?.body))).toEqual({
+      status: "accepted",
+      reviewNote: "Use this in the next pass.",
+    });
+  });
+
+  it("updates contributor assignment status from the assignment queue", async () => {
+    stubBrowserLayoutApis();
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          assignment: {
+            id: "assignment-1",
+            chapter_id: "chapter-1",
+            paragraph_id: null,
+            assignee_id: "reader-1",
+            assigner_id: "user-1",
+            scope: "chapter",
+            status: "in_progress",
+            title: "Review the opening.",
+            note: "Watch continuity.",
+            due_at: "2026-08-10T12:00:00.000Z",
+            created_at: "2026-08-02T12:15:00.000Z",
+            updated_at: "2026-08-02T12:20:00.000Z",
+            completed_at: null,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderWorkspace(workspaceData({ conflicts: [] }));
+
+    await user.click(screen.getByRole("tab", { name: /Suggestions/i }));
+    await user.click(screen.getByRole("button", { name: "Start" }));
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    expect(String(mockFetch.mock.calls[0]?.[0])).toBe("/api/books/book-1/assignments/assignment-1");
+    expect(JSON.parse(String(mockFetch.mock.calls[0]?.[1]?.body))).toEqual({ status: "in_progress" });
+    expect(await screen.findByText("Assignment started.")).toBeInTheDocument();
+    expect(screen.getByText("In progress")).toBeInTheDocument();
+  });
+
   it("filters support context and pins selected entries per book", async () => {
     stubBrowserLayoutApis();
     const user = userEvent.setup();
@@ -502,7 +698,13 @@ function stubBrowserLayoutApis() {
 }
 
 function workspaceData(
-  options: { includeSecondParagraph?: boolean; conflicts?: CreativeWriterWorkspaceData["conflicts"]; selectedBookId?: "book-1" | "book-2" } = {},
+  options: {
+    includeSecondParagraph?: boolean;
+    conflicts?: CreativeWriterWorkspaceData["conflicts"];
+    selectedBookId?: "book-1" | "book-2";
+    includeOwnSuggestion?: boolean;
+    includeReviewedSuggestion?: boolean;
+  } = {},
 ): CreativeWriterWorkspaceData {
   if (options.selectedBookId === "book-2") {
     return {
@@ -555,6 +757,9 @@ function workspaceData(
       ],
       readerComments: [],
       contributorSuggestions: [],
+      contributors: [],
+      participantProfiles: [],
+      contributorAssignments: [],
       conflicts: options.conflicts ?? [],
       support: emptySupport(),
       project: {
@@ -593,6 +798,83 @@ function workspaceData(
       acceptedText: null,
       updatedAt: "2026-08-02T12:00:00.000Z",
     });
+  }
+
+  const contributorSuggestions: CreativeWriterWorkspaceData["contributorSuggestions"] = [
+    {
+      id: "suggestion-1",
+      chapterId: "chapter-1",
+      paragraphId: "paragraph-1",
+      proposerId: "reader-1",
+      reviewerId: null,
+      status: "proposed",
+      originalTextSnapshot: "Original paragraph.",
+      suggestedText: "Try a more tactile sentence.",
+      rationale: "It better matches the book voice.",
+      reviewNote: null,
+      createdAt: "2026-08-02T12:10:00.000Z",
+      updatedAt: "2026-08-02T12:10:00.000Z",
+      reviewedAt: null,
+      appliedAt: null,
+      withdrawnAt: null,
+    },
+  ];
+  if (options.includeOwnSuggestion) {
+    contributorSuggestions.push({
+      id: "suggestion-own",
+      chapterId: "chapter-1",
+      paragraphId: "paragraph-1",
+      proposerId: "user-1",
+      reviewerId: null,
+      status: "proposed",
+      originalTextSnapshot: "Original paragraph.",
+      suggestedText: "My own suggestion.",
+      rationale: null,
+      reviewNote: null,
+      createdAt: "2026-08-02T12:12:00.000Z",
+      updatedAt: "2026-08-02T12:12:00.000Z",
+      reviewedAt: null,
+      appliedAt: null,
+      withdrawnAt: null,
+    });
+  }
+  if (options.includeReviewedSuggestion) {
+    contributorSuggestions.push(
+      {
+        id: "suggestion-reviewed",
+        chapterId: "chapter-1",
+        paragraphId: "paragraph-1",
+        proposerId: "reader-2",
+        reviewerId: "user-1",
+        status: "accepted",
+        originalTextSnapshot: "Original paragraph.",
+        suggestedText: "Already reviewed by me.",
+        rationale: null,
+        reviewNote: "Approved earlier.",
+        createdAt: "2026-08-02T12:13:00.000Z",
+        updatedAt: "2026-08-02T12:14:00.000Z",
+        reviewedAt: "2026-08-02T12:14:00.000Z",
+        appliedAt: null,
+        withdrawnAt: null,
+      },
+      {
+        id: "suggestion-applied",
+        chapterId: "chapter-1",
+        paragraphId: "paragraph-1",
+        proposerId: "reader-3",
+        reviewerId: "user-1",
+        status: "applied",
+        originalTextSnapshot: "Original paragraph.",
+        suggestedText: "Already applied by me.",
+        rationale: null,
+        reviewNote: null,
+        createdAt: "2026-08-02T12:15:00.000Z",
+        updatedAt: "2026-08-02T12:16:00.000Z",
+        reviewedAt: "2026-08-02T12:16:00.000Z",
+        appliedAt: "2026-08-02T12:16:00.000Z",
+        withdrawnAt: null,
+      },
+    );
   }
 
   return {
@@ -642,23 +924,48 @@ function workspaceData(
         createdAt: "2026-08-02T12:05:00.000Z",
       },
     ],
-    contributorSuggestions: [
+    contributorSuggestions,
+    contributors: [
       {
-        id: "suggestion-1",
+        userId: "reader-1",
+        role: "viewer",
+        displayName: "Rae Reader",
+        email: "rae@example.com",
+        joinedAt: "2026-08-02T11:55:00.000Z",
+      },
+      {
+        userId: "user-1",
+        role: "editor",
+        displayName: "Author One",
+        email: "author@example.com",
+        joinedAt: "2026-08-02T11:50:00.000Z",
+      },
+    ],
+    participantProfiles: [
+      {
+        userId: "reader-1",
+        displayName: "Rae Reader",
+      },
+      {
+        userId: "user-1",
+        displayName: "Author One",
+      },
+    ],
+    contributorAssignments: [
+      {
+        id: "assignment-1",
         chapterId: "chapter-1",
-        paragraphId: "paragraph-1",
-        proposerId: "reader-1",
-        reviewerId: null,
-        status: "proposed",
-        originalTextSnapshot: "Original paragraph.",
-        suggestedText: "Try a more tactile sentence.",
-        rationale: "It better matches the book voice.",
-        reviewNote: null,
-        createdAt: "2026-08-02T12:10:00.000Z",
-        updatedAt: "2026-08-02T12:10:00.000Z",
-        reviewedAt: null,
-        appliedAt: null,
-        withdrawnAt: null,
+        paragraphId: null,
+        assigneeId: "reader-1",
+        assignerId: "user-1",
+        scope: "chapter",
+        status: "assigned",
+        title: "Review the opening.",
+        note: "Watch continuity.",
+        dueAt: "2026-08-10T12:00:00.000Z",
+        createdAt: "2026-08-02T12:15:00.000Z",
+        updatedAt: "2026-08-02T12:15:00.000Z",
+        completedAt: null,
       },
     ],
     conflicts: options.conflicts ?? [

@@ -7,6 +7,7 @@ const suggestionStatuses = ["accepted", "rejected", "withdrawn", "applied", "sup
 const updateSuggestionSchema = z.object({
   status: z.enum(suggestionStatuses),
   reviewNote: z.string().trim().max(4000).optional(),
+  mergedText: z.string().trim().max(30000).optional(),
 });
 
 type ApplySuggestionRpcRow = {
@@ -22,6 +23,15 @@ type ApplySuggestionRpcRow = {
   current_text: string | null;
   accepted_text: string | null;
   paragraph_updated_at: string | null;
+};
+
+type SuggestionLookupRow = {
+  id: string;
+  proposer_id: string;
+  status: string;
+  paragraph_id: string | null;
+  original_text_snapshot: string | null;
+  suggested_text: string;
 };
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ bookId: string; suggestionId: string }> }) {
@@ -41,7 +51,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ bo
       }
       const canEditBook = await canEditBookForUser(supabase, bookId);
       if (!canEditBook) return NextResponse.json({ error: "You do not have permission to apply this suggestion." }, { status: 403 });
-      return await applyAcceptedSuggestion(supabase, { bookId, suggestionId, reviewerId: user.id, reviewNote: body.reviewNote });
+      return await applyAcceptedSuggestion(supabase, { bookId, suggestionId, reviewerId: user.id, reviewNote: body.reviewNote, mergedText: body.mergedText, suggestion });
     }
 
     if (suggestion.status !== "proposed") {
@@ -80,7 +90,7 @@ async function getSuggestion(
 ) {
   const { data: suggestion, error } = await supabase
     .from("creativewriter_contributor_suggestions")
-    .select("id,proposer_id,status")
+    .select("id,proposer_id,status,paragraph_id,original_text_snapshot,suggested_text")
     .eq("id", suggestionId)
     .eq("book_id", bookId)
     .maybeSingle();
@@ -108,7 +118,7 @@ function buildStatusUpdatePayload(status: (typeof suggestionStatuses)[number], u
 
 async function applyAcceptedSuggestion(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  input: { bookId: string; suggestionId: string; reviewerId: string; reviewNote?: string },
+  input: { bookId: string; suggestionId: string; reviewerId: string; reviewNote?: string; mergedText?: string; suggestion: SuggestionLookupRow },
 ) {
   const { data, error } = await supabase
     .rpc("apply_creativewriter_contributor_suggestion", {
@@ -116,9 +126,10 @@ async function applyAcceptedSuggestion(
       target_suggestion_id: input.suggestionId,
       target_reviewer_id: input.reviewerId,
       target_review_note: input.reviewNote || null,
+      target_manual_text: input.mergedText || null,
     })
     .single();
-  if (error) return applySuggestionErrorResponse(error);
+  if (error) return await applySuggestionErrorResponse(supabase, input, error);
   const applied = data as ApplySuggestionRpcRow;
 
   return NextResponse.json({
@@ -141,14 +152,42 @@ async function applyAcceptedSuggestion(
   });
 }
 
-function applySuggestionErrorResponse(error: unknown) {
+async function applySuggestionErrorResponse(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  input: { bookId: string; suggestion: SuggestionLookupRow },
+  error: unknown,
+) {
   const message = errorMessage(error);
   if (message.includes("permission")) return NextResponse.json({ error: message }, { status: 403 });
   if (message.includes("changed after it was proposed") || message.includes("must be accepted") || message.includes("paragraph-scoped")) {
-    return NextResponse.json({ error: message }, { status: 409 });
+    const staleSuggestion = message.includes("changed after it was proposed") ? await getStaleSuggestionContext(supabase, input.bookId, input.suggestion) : undefined;
+    return NextResponse.json({ error: message, ...(staleSuggestion ? { staleSuggestion } : {}) }, { status: 409 });
   }
   if (message.includes("not found")) return NextResponse.json({ error: message }, { status: 404 });
   return NextResponse.json({ error: message }, { status: 500 });
+}
+
+async function getStaleSuggestionContext(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  bookId: string,
+  suggestion: SuggestionLookupRow,
+) {
+  if (!suggestion.paragraph_id) return null;
+  const { data: paragraph, error } = await supabase
+    .from("paragraphs")
+    .select("id,current_text,accepted_text,updated_at")
+    .eq("id", suggestion.paragraph_id)
+    .eq("book_id", bookId)
+    .maybeSingle();
+  if (error || !paragraph) return null;
+  return {
+    suggestionId: suggestion.id,
+    paragraphId: paragraph.id,
+    originalTextSnapshot: suggestion.original_text_snapshot,
+    currentText: paragraph.current_text || paragraph.accepted_text || "",
+    suggestedText: suggestion.suggested_text,
+    paragraphUpdatedAt: paragraph.updated_at,
+  };
 }
 
 function errorMessage(error: unknown) {

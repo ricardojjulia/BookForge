@@ -1,7 +1,7 @@
 # CreativeWriter Release Readiness Checklist
 
-Date: 2026-08-02
-Phase: 5E Safe Suggestion Apply
+Date: 2026-08-03
+Phase: 5L Contributor Assignment Status Updates
 Status: Not ready for broad release
 
 ## Current Readiness
@@ -34,10 +34,25 @@ Status: Not ready for broad release
 - [x] Accepting a suggestion remains non-mutating; applying an accepted suggestion is the explicit manuscript mutation step.
 - [x] Accepted paragraph-scoped suggestions can be explicitly applied through an atomic database function.
 - [x] Suggestion apply fails closed when the paragraph has changed after proposal.
+- [x] Stale suggestion apply shows original, current, and suggested text in CreativeWriter.
+- [x] Stale suggestion apply can be recovered with explicit manual merged text.
+- [x] Contributor suggestion queues show lifecycle summary counts.
+- [x] Contributor suggestion queues support All, Mine, and Reviewed by me filters.
+- [x] Reviewer notes can be submitted with suggestion review and apply actions.
+- [x] Contributor suggestion activity history is visible in CreativeWriter from existing lifecycle metadata.
+- [x] Local stale suggestion apply failures are surfaced as Needs manual merge activity events.
+- [x] Existing book collaborators load into CreativeWriter as contributor roster context.
+- [x] Contributor workload counts are derived from reader comments and suggestion lifecycle data.
+- [x] Contributor display labels use a separate best-effort profile lookup instead of embedded Supabase relationships.
+- [x] Durable contributor assignment persistence and book-scoped RLS policies exist.
+- [x] Contributor assignments can be listed and created through authenticated BookForge APIs.
+- [x] CreativeWriter shows read-only assignment queue and active assignment counts.
+- [x] Contributor assignment status can be updated through an authenticated BookForge API.
+- [x] CreativeWriter assignment controls can start, complete, reopen, and cancel assignments.
 - [ ] Desktop executable exists.
 - [ ] Local CreativeWriter database exists.
 - [x] Accepted/applied suggestions can safely mutate manuscript text with stale-text conflict handling.
-- [ ] Contributor assignments, approvals, and contributor status sync are implemented.
+- [ ] Contributor assignment creation, reassignment, edit, and delete controls are implemented.
 - [ ] Notes/research/bible edits sync through a designed non-manuscript contract.
 - [ ] Pinned context syncs across devices or has explicit local-only product language.
 - [ ] Visual order conflict review exists.
