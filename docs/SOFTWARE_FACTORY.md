@@ -1024,6 +1024,79 @@ Out of scope:
 - `docs/creativewriter-release-readiness-checklist.md`
 - `docs/SOFTWARE_FACTORY.md`
 
+## CreativeWriter Factory Slice — Phase 5B Comment Route Hardening And Permission Audit
+
+Date: 2026-08-02
+Status: Implemented, focused verification passed
+Owner: Product + Engineering
+
+### Scope Lock
+
+This slice hardens the reader-comment route contract before CreativeWriter adds suggestions, assignments, approvals, or contributor status sync.
+
+In scope:
+
+- Explicit book visibility checks for reader-comment list/create.
+- Paragraph ownership checks before paragraph-scoped comment create.
+- PATCH payload validation for resolved/reopened comments.
+- Comment ownership or book editor/admin/owner checks before resolve, reopen, or delete.
+- Supabase RLS update policy matching the owner-or-editor route rule.
+- Focused route tests for auth, validation, book scoping, paragraph scoping, mutation permissions, and mutation query scoping.
+
+Out of scope:
+
+- Contributor assignments.
+- Suggested edit workflows.
+- Approval routing.
+- Contributor role management beyond existing book roles.
+- Contributor status sync ledger.
+- Cloud Supabase migration execution.
+
+### Approval Gates
+
+- Scope approval: route and RLS hardening only.
+- API approval: CreativeWriter continues to use the existing BookForge annotation routes.
+- Data approval: `reader_annotations.resolved` remains the comment state field.
+- Security approval: route checks and RLS enforce the same owner-or-editor mutation rule.
+- Verification approval: focused route tests, scoped lint, local migration application, policy proof, broader CreativeWriter tests, diff check, and typecheck status are recorded.
+
+### Decisions
+
+- Users who can view a book can list and create reader comments for that book.
+- Paragraph-scoped comments must target a paragraph in the same book.
+- Comment owners can resolve, reopen, or delete their own comments.
+- Book editors, admins, and owners can resolve, reopen, or delete any comment on the book through `can_edit_book`.
+- Users without book visibility receive `Book not found.` rather than comment-level existence detail.
+
+### Verification Evidence
+
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/annotations/route.test.ts' 'src/app/api/books/[bookId]/annotations/[annotationId]/route.test.ts'`
+- Result: 2 test files passed, 13 tests passed.
+- Passed: scoped ESLint for annotation route and annotation route test files.
+- Passed: `supabase migration up --local`
+- Policy proof: `pg_policies` shows `annotations update own or editor` with owner-or-`can_edit_book(book_id)` `using` and `with check` expressions.
+- Migration history proof: `202608020005|reader_annotation_update_policy` exists in `supabase_migrations.schema_migrations`.
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/annotations/route.test.ts' 'src/app/api/books/[bookId]/annotations/[annotationId]/route.test.ts' src/components/creativewriter/creativewriter-workspace.test.tsx src/lib/creativewriter-ui/dashboard.test.ts src/lib/creativewriter-sync.test.ts src/app/api/creativewriter/sync/push/route.test.ts src/app/api/creativewriter/sync/pull/route.test.ts src/app/api/creativewriter/sync/resolve-conflict/route.test.ts`
+- Result: 7 test files passed, 35 tests passed.
+- Passed: full scoped ESLint for annotation routes/tests plus CreativeWriter workspace/dashboard files.
+- Passed: `git diff --check`
+- Passed: `curl -I http://localhost:4747/creativewriter` returned 200 from the running local dev server.
+- Passed: unauthenticated API smoke for `GET /api/books/book-1/annotations` returned 401 `Authentication required.`
+- Browser smoke: `npx --yes agent-browser open http://localhost:4747/creativewriter` loaded without a Next.js error overlay, but the automation browser session was signed out and only exposed the public nav/sign-in state.
+- Blocked by unrelated existing generated route and route-test typing errors: `npx tsc --noEmit`
+
+### Phase 5B Deliverables
+
+- `src/app/api/books/[bookId]/annotations/route.ts`
+- `src/app/api/books/[bookId]/annotations/[annotationId]/route.ts`
+- `src/app/api/books/[bookId]/annotations/route.test.ts`
+- `src/app/api/books/[bookId]/annotations/[annotationId]/route.test.ts`
+- `supabase/migrations/202608020005_reader_annotation_update_policy.sql`
+- `docs/creativewriter-phase-5b-evaluation.md`
+- `docs/creativewriter-implementation-plan.md`
+- `docs/creativewriter-release-readiness-checklist.md`
+- `docs/SOFTWARE_FACTORY.md`
+
 ## Scope
 
 - Lock the v0.3.0 release slice.
@@ -1119,6 +1192,7 @@ Acceptance:
 - 2026-08-02: Made Reader View caller-aware with safe return links from CreativeWriter and the book workspace, including an explicit back button on the Reader View page.
 - 2026-08-02: Added resizable CreativeWriter workspace columns with draggable and keyboard-accessible handles between the Books, Editor, and Support panels, persisted in browser local storage.
 - 2026-08-02: Completed CreativeWriter Phase 5A contributor comment review triage with Open/All/Resolved filters, comment-to-paragraph navigation, resolved/reopened API updates, local state refresh, focused coverage, and readiness documentation.
+- 2026-08-02: Completed CreativeWriter Phase 5B comment route hardening with explicit book/paragraph scoping, owner-or-editor mutation permissions, PATCH validation, reader annotation update RLS policy, focused route tests, and local migration proof.
 - 2026-06-02: Added auto-review wizard resume success-path regression coverage to verify launch-token reuse and consistent job-id propagation across handshake and worker-launch calls.
 - 2026-06-02: Added auto-review wizard success-path regression coverage that verifies launch-token reuse between `launchOnly` handshake and worker-launch calls, and stabilized wizard tests by mocking the runner dependency.
 - 2026-06-02: Added auto-review wizard regression coverage for resume-path launch-handshake failure, verifying inline error surfacing and single process-launch attempt semantics.

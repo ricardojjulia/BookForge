@@ -347,6 +347,8 @@ Phase 4F-R limitations:
 
 Phase 5A implemented contributor comment review triage first because existing `reader_annotations` data and annotation update routes already provide a narrow, authenticated workflow surface. Assignments, suggestions, approvals, and contributor status sync remain future Phase 5 slices.
 
+Phase 5B hardened the comment route and permission contract before adding broader contributor workflow. The route contract now validates payloads, verifies book visibility, validates paragraph targets, and requires comment ownership or book edit permission for resolve, reopen, and delete actions.
+
 ### Phase 6: Offline/Desktop Shell
 
 - Local DB.
@@ -498,6 +500,16 @@ Phase 5A implemented contributor comment review triage first because existing `r
 5. Preserve local support-context pin compatibility for comments.
 6. Add focused component coverage for filtering, resolution API payloads, and local state updates.
 7. Run focused tests, broader CreativeWriter tests, scoped lint, browser route check, and factory documentation updates.
+
+## Phase 5B Implementation Steps
+
+1. Audit current annotation routes and `reader_annotations` RLS policies.
+2. Define comment permissions for book viewers, comment owners, and book editors/admins/owners.
+3. Harden annotation list/create routes with explicit book visibility and paragraph scoping checks.
+4. Harden annotation update/delete routes with Zod validation and owner-or-editor permission checks.
+5. Add a Supabase migration for owner-or-editor annotation update policy.
+6. Add focused route tests for auth, invalid payloads, book scoping, paragraph scoping, mutation permissions, and mutation query scoping.
+7. Run focused route tests, broader CreativeWriter tests, scoped lint, local migration application, policy proof, typecheck status, and factory documentation updates.
 
 ## Phase 2B Implementation Steps
 
