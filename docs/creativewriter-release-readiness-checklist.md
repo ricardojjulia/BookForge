@@ -1,7 +1,7 @@
 # CreativeWriter Release Readiness Checklist
 
 Date: 2026-08-02
-Phase: 5A Contributor Comment Review Triage
+Phase: 5B Comment Route Hardening And Permission Audit
 Status: Not ready for broad release
 
 ## Current Readiness
@@ -27,6 +27,8 @@ Status: Not ready for broad release
 - [x] Structure versioning and tombstone strategy are implemented.
 - [x] Contributor comments can be triaged in CreativeWriter with Open, All, and Resolved review filters.
 - [x] Reader comments can be marked resolved or reopened from CreativeWriter through the existing authenticated annotation API.
+- [x] Reader comment routes validate payloads, book visibility, paragraph scoping, and owner-or-editor mutation permissions.
+- [x] Reader annotation update RLS allows comment owners or book editors/admins/owners to resolve or reopen comments.
 - [ ] Desktop executable exists.
 - [ ] Local CreativeWriter database exists.
 - [ ] Contributor assignments, suggestions, approvals, and contributor status sync are implemented.
@@ -36,6 +38,7 @@ Status: Not ready for broad release
 - [ ] Import jobs run outside request/response lifecycle.
 - [ ] Full cloud browser/API/data verification exists.
 - [ ] Cloud Supabase deployment evidence exists.
+- [ ] Live cross-account RLS proof exists for reader comments in cloud Supabase.
 - [ ] Subscription entitlements are enforced against CreativeWriter capabilities.
 
 ## Controlled Pilot Gate
