@@ -11,7 +11,7 @@ Execute the v0.3.0 software-factory cycle with traceable phases, explicit accept
 ## World Bible Factory Slice — AI Discovery
 
 Date: 2026-08-02
-Status: Implemented, focused verification passed
+Status: Implemented, verification passed with unrelated typecheck blockers
 Owner: Product + Engineering
 
 ### Scope Lock
@@ -1321,6 +1321,413 @@ Out of scope:
 - `docs/creativewriter-release-readiness-checklist.md`
 - `docs/SOFTWARE_FACTORY.md`
 
+## CreativeWriter Factory Slice — Phase 5F Stale Suggestion Resolution UX
+
+Date: 2026-08-02
+Status: Implemented, focused verification passed
+Owner: Product + Engineering
+
+### Scope Lock
+
+This slice adds the recovery path for stale suggestion apply failures. Normal Apply still fails closed when the paragraph changed after proposal; manual merge is the explicit editor override.
+
+In scope:
+
+- Stale apply response context with original text snapshot, current paragraph text, and suggested replacement text.
+- Manual merged text support in the atomic apply function.
+- Legacy apply function overload cleanup to avoid RPC ambiguity.
+- CreativeWriter stale merge panel for accepted suggestions that fail apply.
+- Manual merge textarea prefilled from current paragraph text.
+- Manual apply action that sends `mergedText`.
+- Local paragraph and draft state refresh after successful manual merge apply.
+- Focused route and component tests.
+- Local migration application and database catalog proof.
+
+Out of scope:
+
+- AI-assisted merge generation.
+- Bulk stale suggestion resolution.
+- Book-level or chapter-level suggestion application.
+- Notifications or assignment workflow.
+- Offline/local DB suggestion queue.
+- Cloud Supabase migration execution.
+- Live cross-account RLS proof.
+
+### Approval Gates
+
+- Conflict approval: stale apply still fails closed.
+- Data approval: manual merge apply uses the same atomic mutation path.
+- UI approval: original/current/suggested text are visible before manual apply.
+- Safety approval: blank manual merge text is rejected in CreativeWriter.
+- Verification approval: focused tests, scoped lint, local migration application, function proof, broader CreativeWriter tests, route/API smoke, diff check, and typecheck status are recorded.
+
+### Decisions
+
+- Manual merge is an explicit editor-authored paragraph replacement.
+- Stale apply response includes enough context for the client to render recovery without another pull.
+- The manual merge pathway sends `mergedText`; normal Apply never sends it.
+- The old four-argument apply function is dropped after the five-argument function is installed.
+
+### Verification Evidence
+
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts' src/components/creativewriter/creativewriter-workspace.test.tsx`
+- Result: 2 test files passed, 27 tests passed.
+- Passed: scoped ESLint for suggestion status route, route tests, CreativeWriter workspace, and workspace tests.
+- Passed: `supabase migration up --local`
+- Function proof: only `public.apply_creativewriter_contributor_suggestion(target_book_id uuid, target_suggestion_id uuid, target_reviewer_id uuid, target_review_note text default null, target_manual_text text default null)` exists in the active local database.
+- Migration history proof: `202608020008` and `202608020009` exist in `supabase_migrations.schema_migrations`.
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/suggestions/route.test.ts' 'src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts' 'src/app/api/books/[bookId]/annotations/route.test.ts' 'src/app/api/books/[bookId]/annotations/[annotationId]/route.test.ts' src/components/creativewriter/creativewriter-workspace.test.tsx src/lib/creativewriter-ui/dashboard.test.ts src/lib/creativewriter-sync.test.ts src/app/api/creativewriter/sync/push/route.test.ts src/app/api/creativewriter/sync/pull/route.test.ts src/app/api/creativewriter/sync/resolve-conflict/route.test.ts`
+- Result: 9 test files passed, 55 tests passed.
+- Passed: full scoped ESLint for suggestion routes/tests, annotation routes/tests, CreativeWriter workspace, and dashboard files.
+- Passed: `git diff --check`
+- Passed: `curl -I http://localhost:4747/creativewriter` returned 200 from the running local dev server.
+- Passed: unauthenticated API smoke for `GET /api/books/book-1/suggestions` returned 401 `Authentication required.`
+- Browser smoke: `npx --yes agent-browser open http://localhost:4747/creativewriter && npx --yes agent-browser wait --load networkidle && npx --yes agent-browser snapshot -i` loaded without a Next.js error overlay, but the automation browser session was signed out and only exposed public nav/sign-in state.
+- Blocked by unrelated existing generated route and route-test typing errors: `npx tsc --noEmit`
+
+### Phase 5F Deliverables
+
+- `supabase/migrations/202608020008_creativewriter_manual_apply_contributor_suggestion.sql`
+- `supabase/migrations/202608020009_creativewriter_drop_legacy_apply_suggestion.sql`
+- `src/app/api/books/[bookId]/suggestions/[suggestionId]/route.ts`
+- `src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts`
+- `src/components/creativewriter/creativewriter-workspace.tsx`
+- `src/components/creativewriter/creativewriter-workspace.test.tsx`
+- `docs/creativewriter-phase-5f-evaluation.md`
+- `docs/creativewriter-implementation-plan.md`
+- `docs/creativewriter-release-readiness-checklist.md`
+- `docs/SOFTWARE_FACTORY.md`
+
+## CreativeWriter Factory Slice — Phase 5G Contributor Workflow Management
+
+Date: 2026-08-03
+Status: Implemented, verification passed with unrelated typecheck blockers
+Owner: Product + Engineering
+
+### Scope Lock
+
+This slice improves suggestion triage and reviewer workflow without adding new persistence.
+
+In scope:
+
+- Suggestion lifecycle summary badges for proposed, accepted, needs merge, applied, rejected, and withdrawn.
+- All, Mine, and Reviewed by me queue filters.
+- Reviewer note fields for proposed and accepted suggestions.
+- Review note submission for accept, reject, withdraw, apply, and manual merge apply actions.
+- Participant labels that show the current user as `You` and shorten other contributor IDs.
+- Focused component coverage for queue filtering and review note payloads.
+
+Out of scope:
+
+- Contributor profile display names.
+- Dedicated assignments table.
+- Notifications or activity feed.
+- Cloud Supabase migration execution.
+- Live cross-account RLS proof.
+
+### Approval Gates
+
+- Product approval: suggestion queues can be triaged by ownership and review responsibility.
+- Data approval: existing reviewer and review note fields remain sufficient for this slice.
+- UI approval: notes are entered at the review point and omitted when blank.
+- Verification approval: focused tests, scoped lint, broader CreativeWriter tests, route/API smoke, diff check, and typecheck status are recorded.
+
+### Decisions
+
+- Keep queue filters local to CreativeWriter until a larger contributor assignment model exists.
+- Treat `Mine` as suggestions proposed by the current account.
+- Treat `Reviewed by me` as suggestions where `reviewer_id` matches the current account.
+- Avoid profile joins in this slice; use `You` for the current account and shortened contributor IDs for others.
+
+### Verification Evidence
+
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts' src/components/creativewriter/creativewriter-workspace.test.tsx`
+- Result: 2 test files passed, 28 tests passed.
+- Passed: scoped ESLint for suggestion status route, route tests, CreativeWriter workspace, and workspace tests.
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/suggestions/route.test.ts' 'src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts' 'src/app/api/books/[bookId]/annotations/route.test.ts' 'src/app/api/books/[bookId]/annotations/[annotationId]/route.test.ts' src/components/creativewriter/creativewriter-workspace.test.tsx src/lib/creativewriter-ui/dashboard.test.ts src/lib/creativewriter-sync.test.ts src/app/api/creativewriter/sync/push/route.test.ts src/app/api/creativewriter/sync/pull/route.test.ts src/app/api/creativewriter/sync/resolve-conflict/route.test.ts`
+- Result: 9 test files passed, 56 tests passed.
+- Passed: full scoped ESLint for suggestion routes/tests, annotation routes/tests, CreativeWriter workspace, and dashboard files.
+- Passed: `git diff --check`
+- Passed: `curl -I http://localhost:4747/creativewriter` returned 200 from the running local dev server.
+- Passed: unauthenticated API smoke for `GET /api/books/book-1/suggestions` returned 401 `Authentication required.`
+- Browser smoke: `npx --yes agent-browser open http://localhost:4747/creativewriter && npx --yes agent-browser wait --load networkidle && npx --yes agent-browser snapshot -i` loaded without a Next.js error overlay, but the automation browser session was signed out and only exposed public nav/sign-in state.
+- Blocked by unrelated existing generated route and route-test typing errors: `npx tsc --noEmit`
+
+### Phase 5G Deliverables
+
+- `src/components/creativewriter/creativewriter-workspace.tsx`
+- `src/components/creativewriter/creativewriter-workspace.test.tsx`
+- `docs/creativewriter-phase-5g-evaluation.md`
+- `docs/creativewriter-implementation-plan.md`
+- `docs/creativewriter-release-readiness-checklist.md`
+- `docs/SOFTWARE_FACTORY.md`
+
+## CreativeWriter Factory Slice — Phase 5H Contributor Activity History
+
+Date: 2026-08-03
+Status: Implemented, verification passed with unrelated typecheck blockers
+Owner: Product + Engineering
+
+### Scope Lock
+
+This slice adds contributor activity visibility without creating a new audit-log contract.
+
+In scope:
+
+- A Recent Activity panel inside the Suggestions tab.
+- Derived proposal, review, apply, withdraw, superseded, and local stale-merge events.
+- Actor labels using the current-user labeling rules from Phase 5G.
+- Paragraph targets, lifecycle timestamps, and available reviewer note/rationale detail.
+- Focused component coverage for activity rendering and stale merge activity.
+
+Out of scope:
+
+- Durable audit-log persistence.
+- Activity export.
+- Notifications.
+- Contributor profile joins.
+- Cloud Supabase migration execution.
+- Live cross-account RLS proof.
+
+### Approval Gates
+
+- Product approval: reviewers can see recent contributor movement without leaving CreativeWriter.
+- Data approval: the slice uses existing suggestion lifecycle fields and local stale context only.
+- UI approval: activity supports scanning and does not replace the actionable review cards.
+- Verification approval: focused tests, broader CreativeWriter tests, scoped lint, browser/API smoke, diff check, and typecheck status are recorded.
+
+### Decisions
+
+- Use derived activity before introducing a durable audit ledger.
+- Represent stale apply failures as local Needs manual merge events because the stale context is created by an attempted apply.
+- Keep history compact at five visible entries to preserve the right rail's review ergonomics.
+
+### Verification Evidence
+
+- Passed: `npx vitest run src/components/creativewriter/creativewriter-workspace.test.tsx`
+- Result: 1 test file passed, 17 tests passed.
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/suggestions/route.test.ts' 'src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts' 'src/app/api/books/[bookId]/annotations/route.test.ts' 'src/app/api/books/[bookId]/annotations/[annotationId]/route.test.ts' src/components/creativewriter/creativewriter-workspace.test.tsx src/lib/creativewriter-ui/dashboard.test.ts src/lib/creativewriter-sync/cloud-sync.test.ts src/app/api/creativewriter/sync/push/route.test.ts src/app/api/creativewriter/sync/pull/route.test.ts src/app/api/creativewriter/sync/resolve-conflict/route.test.ts`
+- Result: 10 test files passed, 63 tests passed.
+- Passed: scoped ESLint for CreativeWriter workspace and suggestion status route/test files.
+- Passed: `git diff --check`
+- Passed: `curl -I http://localhost:4747/creativewriter` returned 200 from the running local dev server.
+- Passed: unauthenticated API smoke for `GET /api/books/book-1/suggestions` returned 401 `Authentication required.`
+- Browser smoke: `npx --yes agent-browser open http://localhost:4747/creativewriter && npx --yes agent-browser wait --load networkidle && npx --yes agent-browser snapshot -i` loaded signed-out public nav and Sign In with no Next.js error overlay.
+- Blocked by unrelated existing generated route and route-test typing errors: `npx tsc --noEmit`
+
+### Phase 5H Deliverables
+
+- `src/components/creativewriter/creativewriter-workspace.tsx`
+- `src/components/creativewriter/creativewriter-workspace.test.tsx`
+- `docs/creativewriter-phase-5h-evaluation.md`
+- `docs/creativewriter-implementation-plan.md`
+- `docs/creativewriter-release-readiness-checklist.md`
+- `docs/SOFTWARE_FACTORY.md`
+
+## CreativeWriter Factory Slice — Phase 5I Contributor Roster and Workload Visibility
+
+Date: 2026-08-03
+Status: Implemented, verification passed with unrelated typecheck blockers
+Owner: Product + Engineering
+
+### Scope Lock
+
+This slice makes existing contributor membership and workload visible inside CreativeWriter without creating durable assignment state.
+
+In scope:
+
+- Load existing `book_collaborators` into CreativeWriter workspace data.
+- Include role, nullable display/email labels, and joined timestamp in the contributor view contract.
+- Derive contributor workload from reader comments and contributor suggestions already loaded for the selected book.
+- Show open comments, proposed suggestions, reviewed suggestions, applied suggestions, and latest activity in the Suggestions tab.
+- Include activity-only participants referenced by comments or suggestions even when they are not current collaborators.
+- Focused mapper and component coverage.
+
+Out of scope:
+
+- Dedicated assignment table.
+- Chapter or paragraph assignment actions.
+- Due dates, acceptance gates, or contributor status mutations.
+- Notifications.
+- Cloud Supabase migration execution.
+- Live cross-account RLS proof.
+
+### Approval Gates
+
+- Product approval: reviewers can see who is involved and where workload sits.
+- Data approval: membership comes from the existing collaborator contract.
+- UI approval: contributor workload remains read-only and compact in the Suggestions tab.
+- Verification approval: focused tests, broader CreativeWriter tests, scoped lint, browser/API smoke, diff check, and typecheck status are recorded.
+
+### Decisions
+
+- Treat collaborator roster visibility as the next step before assignment workflows.
+- Use derived workload counts rather than persisting rollups.
+- Label non-roster participants as activity-only so historical or edge-case activity does not disappear.
+- Avoid embedded `profiles` selection in the CreativeWriter workspace query until the relationship is schema-safe for this route.
+
+### Verification Evidence
+
+- Passed: `npx vitest run src/lib/creativewriter-ui/dashboard.test.ts src/components/creativewriter/creativewriter-workspace.test.tsx`
+- Result: 2 test files passed, 20 tests passed.
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/suggestions/route.test.ts' 'src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts' 'src/app/api/books/[bookId]/annotations/route.test.ts' 'src/app/api/books/[bookId]/annotations/[annotationId]/route.test.ts' src/components/creativewriter/creativewriter-workspace.test.tsx src/lib/creativewriter-ui/dashboard.test.ts src/lib/creativewriter-sync/cloud-sync.test.ts src/app/api/creativewriter/sync/push/route.test.ts src/app/api/creativewriter/sync/pull/route.test.ts src/app/api/creativewriter/sync/resolve-conflict/route.test.ts`
+- Result: 10 test files passed, 63 tests passed.
+- Passed: scoped ESLint for CreativeWriter workspace, workspace tests, dashboard mapper, dashboard tests, and suggestion status route/test files.
+- Passed: `git diff --check`
+- Passed: `curl -I http://localhost:4747/creativewriter` returned 200 from the running local dev server.
+- Passed: unauthenticated API smoke for `GET /api/books/book-1/suggestions` returned 401 `Authentication required.`
+- Browser smoke: `npx --yes agent-browser open http://localhost:4747/creativewriter && npx --yes agent-browser wait --load networkidle && npx --yes agent-browser snapshot -i` loaded signed-out public nav and Sign In with no Next.js error overlay.
+- Blocked by unrelated existing generated route and route-test typing errors: `npx tsc --noEmit`
+
+### Phase 5I Deliverables
+
+- `src/lib/creativewriter-ui/dashboard.ts`
+- `src/lib/creativewriter-ui/dashboard.test.ts`
+- `src/components/creativewriter/creativewriter-workspace.tsx`
+- `src/components/creativewriter/creativewriter-workspace.test.tsx`
+- `docs/creativewriter-phase-5i-evaluation.md`
+- `docs/creativewriter-implementation-plan.md`
+- `docs/creativewriter-release-readiness-checklist.md`
+- `docs/SOFTWARE_FACTORY.md`
+
+## CreativeWriter Factory Slice — Phase 5J Profile-Safe Contributor Labels
+
+Date: 2026-08-03
+Status: Implemented, verification passed with unrelated typecheck blockers
+Owner: Product + Engineering
+
+### Scope Lock
+
+This slice restores contributor display labels without depending on embedded Supabase relationships from the collaborator query.
+
+In scope:
+
+- Keep `book_collaborators` loading limited to `user_id`, `role`, and `created_at`.
+- Add a `participantProfiles` workspace payload.
+- Collect participant IDs from collaborators, comments, suggestions, reviewers, and the current account.
+- Query `profiles` separately for `id,display_name`.
+- Ignore profile lookup errors so labels never block CreativeWriter loading.
+- Use visible display names in the contributor workload panel with current `You` and shortened-ID fallbacks.
+- Focused mapper and component fixture coverage.
+
+Out of scope:
+
+- Profile RLS policy changes.
+- Email exposure.
+- Service-role profile joins.
+- Contributor invitation management.
+- Durable assignments or contributor status mutations.
+- Cloud Supabase policy proof.
+
+### Approval Gates
+
+- Runtime approval: CreativeWriter does not rely on an embedded `profiles(...)` relationship.
+- Security approval: profile visibility remains governed by existing RLS.
+- UX approval: visible profile display names improve contributor scanning while fallbacks remain clear.
+- Verification approval: focused tests, broader CreativeWriter tests, scoped lint, browser/API smoke, diff check, and typecheck status are recorded.
+
+### Decisions
+
+- Keep participant profile lookup best-effort and non-blocking.
+- Preserve nullable email fields but do not select email from `profiles`.
+- Defer broader collaborator profile visibility to a future RLS/API design.
+
+### Verification Evidence
+
+- Passed: `npx vitest run src/lib/creativewriter-ui/dashboard.test.ts src/components/creativewriter/creativewriter-workspace.test.tsx`
+- Result: 2 test files passed, 20 tests passed.
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/suggestions/route.test.ts' 'src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts' 'src/app/api/books/[bookId]/annotations/route.test.ts' 'src/app/api/books/[bookId]/annotations/[annotationId]/route.test.ts' src/components/creativewriter/creativewriter-workspace.test.tsx src/lib/creativewriter-ui/dashboard.test.ts src/lib/creativewriter-sync/cloud-sync.test.ts src/app/api/creativewriter/sync/push/route.test.ts src/app/api/creativewriter/sync/pull/route.test.ts src/app/api/creativewriter/sync/resolve-conflict/route.test.ts`
+- Result: 10 test files passed, 63 tests passed.
+- Passed: scoped ESLint for CreativeWriter workspace, workspace tests, dashboard mapper, dashboard tests, and suggestion status route/test files.
+- Passed: `git diff --check`
+- Passed: `curl -I http://localhost:4747/creativewriter` returned 200 from the running local dev server.
+- Passed: unauthenticated API smoke for `GET /api/books/book-1/suggestions` returned 401 `Authentication required.`
+- Browser smoke: `npx --yes agent-browser open http://localhost:4747/creativewriter && npx --yes agent-browser wait --load networkidle && npx --yes agent-browser snapshot -i` loaded signed-out public nav and Sign In with no Next.js error overlay.
+- Blocked by unrelated existing generated route and route-test typing errors: `npx tsc --noEmit`
+
+### Phase 5J Deliverables
+
+- `src/lib/creativewriter-ui/dashboard.ts`
+- `src/lib/creativewriter-ui/dashboard.test.ts`
+- `src/components/creativewriter/creativewriter-workspace.tsx`
+- `src/components/creativewriter/creativewriter-workspace.test.tsx`
+- `docs/creativewriter-phase-5j-evaluation.md`
+- `docs/creativewriter-implementation-plan.md`
+- `docs/creativewriter-release-readiness-checklist.md`
+- `docs/SOFTWARE_FACTORY.md`
+
+## CreativeWriter Factory Slice — Phase 5K Durable Contributor Assignment Contract
+
+Date: 2026-08-03
+Status: Implemented, focused verification passed
+Owner: Product + Engineering
+
+### Scope Lock
+
+This slice adds durable assignment persistence, API contract, workspace loading, and read-only CreativeWriter visibility. It does not add assignment editing controls yet.
+
+In scope:
+
+- `creativewriter_contributor_assignments` table.
+- Book/chapter/paragraph assignment scope.
+- Assignee, assigner, status, title, note, due date, and lifecycle timestamps.
+- Book-scoped RLS policies.
+- Authenticated list/create route.
+- Assignee membership and chapter/paragraph scoping validation.
+- CreativeWriter workspace assignment loading with missing-table fallback.
+- Read-only Assignments panel and active assignment counts in contributor workload.
+- Focused route, mapper, and component coverage.
+
+Out of scope:
+
+- Assignment creation UI.
+- Assignee status update UI.
+- Assignment notification workflow.
+- Assignment sync into offline local DB.
+- Cross-account cloud Supabase RLS proof.
+
+### Approval Gates
+
+- Data approval: assignments persist separately from comments and suggestions.
+- Permission approval: route validates edit access, assignee membership, and scoped targets.
+- UI approval: CreativeWriter exposes assignment context read-only before editing controls ship.
+- Verification approval: focused tests, broader CreativeWriter tests, scoped lint, migration application, browser/API smoke, diff check, and typecheck status are recorded.
+
+### Decisions
+
+- Start with read-only assignment visibility to validate the contract before adding editing flows.
+- Allow assignee status updates in RLS for a future status-sync API without granting broad book edit access.
+- Use mapper missing-table fallback during rollout.
+
+### Verification Evidence
+
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/assignments/route.test.ts' src/lib/creativewriter-ui/dashboard.test.ts src/components/creativewriter/creativewriter-workspace.test.tsx`
+- Result: 3 test files passed, 28 tests passed.
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/assignments/route.test.ts' 'src/app/api/books/[bookId]/suggestions/route.test.ts' 'src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts' 'src/app/api/books/[bookId]/annotations/route.test.ts' 'src/app/api/books/[bookId]/annotations/[annotationId]/route.test.ts' src/components/creativewriter/creativewriter-workspace.test.tsx src/lib/creativewriter-ui/dashboard.test.ts src/lib/creativewriter-sync/cloud-sync.test.ts src/app/api/creativewriter/sync/push/route.test.ts src/app/api/creativewriter/sync/pull/route.test.ts src/app/api/creativewriter/sync/resolve-conflict/route.test.ts`
+- Result: 11 test files passed, 71 tests passed.
+- Passed: scoped ESLint for assignments route/test, CreativeWriter workspace/test, and dashboard mapper/test files.
+- Passed: `git diff --check`
+- Passed: `supabase migration up --local --include-all`
+- Local database proof: `public.creativewriter_contributor_assignments` exists and `supabase_migrations.schema_migrations` includes `202608020010`.
+- Passed: `curl -I http://localhost:4747/creativewriter` returned 200 from the running local dev server.
+- Passed: unauthenticated API smoke for `GET /api/books/book-1/assignments` returned 401 `Authentication required.`
+- Browser smoke: `npx --yes agent-browser open http://localhost:4747/creativewriter && npx --yes agent-browser wait --load networkidle && npx --yes agent-browser snapshot -i` loaded signed-out public nav and Sign In with no Next.js error overlay.
+- Blocked by unrelated existing generated route and route-test typing errors: `npx tsc --noEmit`
+
+### Phase 5K Deliverables
+
+- `supabase/migrations/202608020010_creativewriter_contributor_assignments.sql`
+- `src/app/api/books/[bookId]/assignments/route.ts`
+- `src/app/api/books/[bookId]/assignments/route.test.ts`
+- `src/lib/creativewriter-ui/dashboard.ts`
+- `src/lib/creativewriter-ui/dashboard.test.ts`
+- `src/components/creativewriter/creativewriter-workspace.tsx`
+- `src/components/creativewriter/creativewriter-workspace.test.tsx`
+- `docs/creativewriter-phase-5k-evaluation.md`
+- `docs/creativewriter-implementation-plan.md`
+- `docs/creativewriter-release-readiness-checklist.md`
+- `docs/SOFTWARE_FACTORY.md`
+
 ## Scope
 
 - Lock the v0.3.0 release slice.
@@ -1420,6 +1827,13 @@ Acceptance:
 - 2026-08-02: Completed CreativeWriter Phase 5C contributor suggestions contract with dedicated persistence, lifecycle statuses, book/chapter/paragraph scoping, proposer/editor permissions, RLS policies, list/create/status APIs, focused route tests, and local migration proof.
 - 2026-08-02: Completed CreativeWriter Phase 5D contributor suggestion review UI with workspace suggestion loading, Suggestions tab, paragraph-scoped proposal form, accept/reject/withdraw review actions, focused coverage, and non-mutating accepted suggestion guardrail.
 - 2026-08-02: Completed CreativeWriter Phase 5E safe suggestion apply with an atomic Postgres apply function, accepted-only lifecycle, stale-text guard, explicit Apply UI, paragraph/draft state refresh, focused coverage, and local migration proof.
+- 2026-08-02: Completed CreativeWriter Phase 5F stale suggestion resolution UX with stale context responses, original/current/suggested merge panel, manual merged apply, apply function overload cleanup, focused coverage, and local migration proof.
+- 2026-08-03: Completed CreativeWriter Phase 5G contributor workflow management with lifecycle summaries, All/Mine/Reviewed queue filters, review note entry, current-user labels, focused coverage, and factory documentation.
+- 2026-08-03: Completed CreativeWriter Phase 5H contributor activity history with a derived Recent Activity panel for proposal, review, apply, withdraw, superseded, and local stale-merge events, focused coverage, and factory documentation.
+- 2026-08-03: Completed CreativeWriter Phase 5I contributor roster and workload visibility with collaborator loading, derived per-person comment/suggestion workload counts, activity-only participant handling, focused coverage, and factory documentation.
+- 2026-08-03: Completed CreativeWriter Phase 5J profile-safe contributor labels with separate best-effort participant profile lookup, non-blocking label hydration, RLS-preserving fallbacks, focused coverage, and factory documentation.
+- 2026-08-03: Completed CreativeWriter Phase 5K durable contributor assignment contract with dedicated assignment persistence, book-scoped RLS, authenticated list/create API, workspace loading, read-only assignment visibility, focused coverage, and factory documentation.
+- 2026-08-03: Completed CreativeWriter Phase 5L contributor assignment status updates with authenticated assignment PATCH API, editor-or-assignee authorization, Start/Complete/Reopen/Cancel controls, focused coverage, and factory documentation.
 - 2026-06-02: Added auto-review wizard resume success-path regression coverage to verify launch-token reuse and consistent job-id propagation across handshake and worker-launch calls.
 - 2026-06-02: Added auto-review wizard success-path regression coverage that verifies launch-token reuse between `launchOnly` handshake and worker-launch calls, and stabilized wizard tests by mocking the runner dependency.
 - 2026-06-02: Added auto-review wizard regression coverage for resume-path launch-handshake failure, verifying inline error surfacing and single process-launch attempt semantics.

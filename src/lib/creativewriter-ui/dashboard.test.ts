@@ -17,12 +17,34 @@ describe("CreativeWriter workspace data", () => {
     expect(result.chapters).toHaveLength(1);
     expect(result.paragraphs).toHaveLength(1);
     expect(result.readerComments).toHaveLength(1);
+    expect(result.contributors).toMatchObject([
+      {
+        userId: "reader-1",
+        role: "viewer",
+        displayName: "Rae Reader",
+      },
+    ]);
+    expect(result.participantProfiles).toMatchObject([
+      {
+        userId: "reader-1",
+        displayName: "Rae Reader",
+      },
+    ]);
     expect(result.contributorSuggestions).toMatchObject([
       {
         id: "suggestion-1",
         paragraphId: "paragraph-1",
         status: "proposed",
         suggestedText: "Try a stronger closing image.",
+      },
+    ]);
+    expect(result.contributorAssignments).toMatchObject([
+      {
+        id: "assignment-1",
+        assigneeId: "reader-1",
+        scope: "chapter",
+        status: "assigned",
+        title: "Review the opening.",
       },
     ]);
     expect(result.support.references).toHaveLength(1);
@@ -95,6 +117,9 @@ function createDashboardSupabase(options: { conflictError?: unknown; sceneRows?:
         eq() {
           return builder;
         },
+        in() {
+          return builder;
+        },
         order() {
           return builder;
         },
@@ -160,6 +185,51 @@ function createDashboardSupabase(options: { conflictError?: unknown; sceneRows?:
                   reviewed_at: null,
                   applied_at: null,
                   withdrawn_at: null,
+                },
+              ],
+              error: null,
+            });
+          }
+          if (table === "book_collaborators") {
+            return resolve({
+              data: [
+                {
+                  user_id: "reader-1",
+                  role: "viewer",
+                  created_at: "2026-08-02T11:55:00.000Z",
+                },
+              ],
+              error: null,
+            });
+          }
+          if (table === "creativewriter_contributor_assignments") {
+            return resolve({
+              data: [
+                {
+                  id: "assignment-1",
+                  chapter_id: "chapter-1",
+                  paragraph_id: null,
+                  assignee_id: "reader-1",
+                  assigner_id: "user-1",
+                  scope: "chapter",
+                  status: "assigned",
+                  title: "Review the opening.",
+                  note: "Watch continuity.",
+                  due_at: "2026-08-10T12:00:00.000Z",
+                  created_at: "2026-08-02T12:15:00.000Z",
+                  updated_at: "2026-08-02T12:15:00.000Z",
+                  completed_at: null,
+                },
+              ],
+              error: null,
+            });
+          }
+          if (table === "profiles") {
+            return resolve({
+              data: [
+                {
+                  id: "reader-1",
+                  display_name: "Rae Reader",
                 },
               ],
               error: null,

@@ -58,6 +58,37 @@ export type CreativeWriterContributorSuggestionView = {
   withdrawnAt: string | null;
 };
 
+export type CreativeWriterContributorView = {
+  userId: string;
+  role: "viewer" | "editor" | "admin";
+  displayName: string | null;
+  email: string | null;
+  joinedAt: string | null;
+};
+
+export type CreativeWriterParticipantProfileView = {
+  userId: string;
+  displayName: string | null;
+};
+
+export type CreativeWriterAssignmentStatus = "assigned" | "in_progress" | "completed" | "cancelled";
+
+export type CreativeWriterContributorAssignmentView = {
+  id: string;
+  chapterId: string | null;
+  paragraphId: string | null;
+  assigneeId: string;
+  assignerId: string | null;
+  scope: "book" | "chapter" | "paragraph";
+  status: CreativeWriterAssignmentStatus;
+  title: string;
+  note: string | null;
+  dueAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  completedAt: string | null;
+};
+
 export type CreativeWriterConflictView = CreativeWriterConflict & {
   eventId: string;
 };
@@ -118,6 +149,9 @@ export type CreativeWriterWorkspaceData = {
   paragraphs: CreativeWriterParagraphView[];
   readerComments: CreativeWriterReaderCommentView[];
   contributorSuggestions: CreativeWriterContributorSuggestionView[];
+  contributors: CreativeWriterContributorView[];
+  participantProfiles: CreativeWriterParticipantProfileView[];
+  contributorAssignments: CreativeWriterContributorAssignmentView[];
   conflicts: CreativeWriterConflictView[];
   support: CreativeWriterSupportContextView;
   project: {
@@ -137,6 +171,7 @@ export type CreativeWriterDashboardSupabaseLike = {
 type QueryBuilder = {
   select: (columns: string, options?: unknown) => QueryBuilder;
   eq: (column: string, value: unknown) => QueryBuilder;
+  in: (column: string, values: unknown[]) => QueryBuilder;
   order: (column: string, options?: { ascending?: boolean }) => QueryBuilder;
   limit: (count: number) => QueryBuilder;
   maybeSingle?: () => Promise<{ data?: unknown; error?: unknown }>;
@@ -201,6 +236,33 @@ type ContributorSuggestionRow = {
   reviewed_at: string | null;
   applied_at: string | null;
   withdrawn_at: string | null;
+};
+
+type ContributorRow = {
+  user_id: string;
+  role: "viewer" | "editor" | "admin";
+  created_at: string | null;
+};
+
+type ProfileRow = {
+  id: string;
+  display_name: string | null;
+};
+
+type ContributorAssignmentRow = {
+  id: string;
+  chapter_id: string | null;
+  paragraph_id: string | null;
+  assignee_id: string;
+  assigner_id: string | null;
+  scope: "book" | "chapter" | "paragraph";
+  status: CreativeWriterAssignmentStatus;
+  title: string;
+  note: string | null;
+  due_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  completed_at: string | null;
 };
 
 type ConflictEventRow = {
@@ -278,6 +340,9 @@ export async function getCreativeWriterWorkspaceData(input: {
       paragraphs: [],
       readerComments: [],
       contributorSuggestions: [],
+      contributors: [],
+      participantProfiles: [],
+      contributorAssignments: [],
       conflicts: [],
       support: emptySupportContext(),
       project: null,
@@ -290,6 +355,8 @@ export async function getCreativeWriterWorkspaceData(input: {
     { data: paragraphRows, error: paragraphsError },
     { data: readerCommentRows, error: readerCommentsError },
     { data: suggestionRows, error: suggestionsError },
+    { data: contributorRows, error: contributorsError },
+    { data: assignmentRows, error: assignmentsError },
     { data: conflictRows, error: conflictsError },
     { data: authorNotesRow, error: authorNotesError },
     { data: referenceRows, error: referencesError },
@@ -327,6 +394,18 @@ export async function getCreativeWriterWorkspaceData(input: {
       resolveList<ContributorSuggestionRow>(
         table(input.supabase, "creativewriter_contributor_suggestions")
           .select("id,chapter_id,paragraph_id,proposer_id,reviewer_id,status,original_text_snapshot,suggested_text,rationale,review_note,created_at,updated_at,reviewed_at,applied_at,withdrawn_at")
+          .eq("book_id", selectedBook.id)
+          .order("created_at", { ascending: false }),
+      ),
+      resolveList<ContributorRow>(
+        table(input.supabase, "book_collaborators")
+          .select("user_id,role,created_at")
+          .eq("book_id", selectedBook.id)
+          .order("created_at"),
+      ),
+      resolveList<ContributorAssignmentRow>(
+        table(input.supabase, "creativewriter_contributor_assignments")
+          .select("id,chapter_id,paragraph_id,assignee_id,assigner_id,scope,status,title,note,due_at,created_at,updated_at,completed_at")
           .eq("book_id", selectedBook.id)
           .order("created_at", { ascending: false }),
       ),
@@ -393,10 +472,22 @@ export async function getCreativeWriterWorkspaceData(input: {
   if (paragraphsError) throw paragraphsError;
   if (readerCommentsError) throw readerCommentsError;
   if (suggestionsError && !isMissingOptionalCreativeWriterTable(suggestionsError, "creativewriter_contributor_suggestions")) throw suggestionsError;
+  if (contributorsError) throw contributorsError;
+  if (assignmentsError && !isMissingOptionalCreativeWriterTable(assignmentsError, "creativewriter_contributor_assignments")) throw assignmentsError;
   if (conflictsError && !isMissingCreativeWriterLedger(conflictsError)) throw conflictsError;
   const supportErrors = [authorNotesError, referencesError, bookBibleError, charactersError, locationsError, themesError, motifsError, timelineError].filter(Boolean);
   const blockingSupportError = supportErrors.find((error) => !isMissingCreativeWriterLedger(error));
   if (blockingSupportError) throw blockingSupportError;
+
+  const participantProfileRows = await loadVisibleParticipantProfiles(input.supabase, {
+    accountId: input.accountId,
+    contributors: contributorRows || [],
+    readerComments: readerCommentRows || [],
+    suggestions: suggestionRows || [],
+    assignments: assignmentRows || [],
+  });
+  const participantProfiles = participantProfileRows.map(toParticipantProfileView);
+  const participantProfileById = new Map(participantProfiles.map((profile) => [profile.userId, profile]));
 
   const cloudVersion = Math.max(
     versionFromDate(selectedBook.updatedAt),
@@ -412,6 +503,9 @@ export async function getCreativeWriterWorkspaceData(input: {
     paragraphs: toParagraphViews(paragraphRows || [], sceneRows || [], chapterRows || []),
     readerComments: (readerCommentRows || []).map(toReaderCommentView),
     contributorSuggestions: suggestionsError ? [] : (suggestionRows || []).map(toContributorSuggestionView),
+    contributors: (contributorRows || []).map((row) => toContributorView(row, participantProfileById)),
+    participantProfiles,
+    contributorAssignments: assignmentsError ? [] : (assignmentRows || []).map(toContributorAssignmentView),
     conflicts: conflictsError ? [] : (conflictRows || []).flatMap(toConflictView),
     support: {
       authorNotes: authorNotesError ? null : toAuthorNotesView(authorNotesRow),
@@ -536,6 +630,74 @@ function toContributorSuggestionView(row: ContributorSuggestionRow): CreativeWri
     reviewedAt: row.reviewed_at,
     appliedAt: row.applied_at,
     withdrawnAt: row.withdrawn_at,
+  };
+}
+
+async function loadVisibleParticipantProfiles(
+  supabase: CreativeWriterDashboardSupabaseLike,
+  input: {
+    accountId: string;
+    contributors: ContributorRow[];
+    readerComments: ReaderCommentRow[];
+    suggestions: ContributorSuggestionRow[];
+    assignments: ContributorAssignmentRow[];
+  },
+): Promise<ProfileRow[]> {
+  const ids = new Set<string>([input.accountId]);
+  input.contributors.forEach((contributor) => ids.add(contributor.user_id));
+  input.readerComments.forEach((comment) => ids.add(comment.annotator_id));
+  input.suggestions.forEach((suggestion) => {
+    ids.add(suggestion.proposer_id);
+    if (suggestion.reviewer_id) ids.add(suggestion.reviewer_id);
+  });
+  input.assignments.forEach((assignment) => {
+    ids.add(assignment.assignee_id);
+    if (assignment.assigner_id) ids.add(assignment.assigner_id);
+  });
+  const userIds = Array.from(ids).filter(Boolean);
+  if (!userIds.length) return [];
+  const { data, error } = await resolveList<ProfileRow>(
+    table(supabase, "profiles")
+      .select("id,display_name")
+      .in("id", userIds),
+  );
+  if (error) return [];
+  return data || [];
+}
+
+function toContributorView(row: ContributorRow, participantProfileById: Map<string, CreativeWriterParticipantProfileView>): CreativeWriterContributorView {
+  const profile = participantProfileById.get(row.user_id);
+  return {
+    userId: row.user_id,
+    role: row.role,
+    displayName: profile?.displayName || null,
+    email: null,
+    joinedAt: row.created_at,
+  };
+}
+
+function toParticipantProfileView(row: ProfileRow): CreativeWriterParticipantProfileView {
+  return {
+    userId: row.id,
+    displayName: row.display_name,
+  };
+}
+
+function toContributorAssignmentView(row: ContributorAssignmentRow): CreativeWriterContributorAssignmentView {
+  return {
+    id: row.id,
+    chapterId: row.chapter_id,
+    paragraphId: row.paragraph_id,
+    assigneeId: row.assignee_id,
+    assignerId: row.assigner_id,
+    scope: row.scope,
+    status: row.status,
+    title: row.title,
+    note: row.note,
+    dueAt: row.due_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    completedAt: row.completed_at,
   };
 }
 

@@ -1,7 +1,7 @@
 # CreativeWriter Implementation Plan
 
-Last updated: 2026-08-02
-Factory slices: CreativeWriter Phase 1, Phase 2, Phase 2B, Phase 3, Phase 3R, Phase 4A, Phase 4B, Phase 4C, Phase 4D, Phase 4E, Phase 4F, Phase 4G, Phase 4H, Phase 4F-R, Phase 5A, Phase 5B, Phase 5C, Phase 5D, and Phase 5E
+Last updated: 2026-08-03
+Factory slices: CreativeWriter Phase 1, Phase 2, Phase 2B, Phase 3, Phase 3R, Phase 4A, Phase 4B, Phase 4C, Phase 4D, Phase 4E, Phase 4F, Phase 4G, Phase 4H, Phase 4F-R, Phase 5A, Phase 5B, Phase 5C, Phase 5D, Phase 5E, Phase 5F, Phase 5G, Phase 5H, Phase 5I, Phase 5J, and Phase 5K
 
 ## Factory Scope Lock
 
@@ -355,6 +355,18 @@ Phase 5D implemented the first CreativeWriter suggestion review UI. Users can no
 
 Phase 5E implemented safe suggestion application. Accepted paragraph-scoped suggestions can now be explicitly applied through an atomic database function that checks edit permission, verifies the paragraph still matches the original text snapshot, mutates paragraph text, and marks the suggestion applied.
 
+Phase 5F implemented stale suggestion recovery. When apply fails because a paragraph changed, CreativeWriter shows original, current, and suggested text, then lets the editor submit explicit merged paragraph text through the atomic apply function.
+
+Phase 5G implemented contributor workflow management inside the Suggestions tab. Suggestion queues now have lifecycle summaries, All/Mine/Reviewed filters, reviewer note entry, and clearer current-user labels.
+
+Phase 5H implemented contributor activity history as a derived CreativeWriter view. The Suggestions tab now shows recent proposal, review, apply, withdraw, and local stale-merge events using existing suggestion lifecycle timestamps, reviewer notes, paragraph targets, and local stale context. No new persistence or API contract was added in this slice.
+
+Phase 5I implemented contributor roster and workload visibility. CreativeWriter now loads existing book collaborators and shows a contributor workload panel derived from reader comments and contributor suggestion lifecycle data. This is a read-only coordination slice; durable assignment rows and contributor status sync remain future work.
+
+Phase 5J restored profile-safe contributor labels after the embedded profile relationship was removed from Phase 5I. CreativeWriter now performs a separate best-effort `profiles` lookup for participant IDs and uses returned display names where RLS permits them, while keeping collaborator loading non-blocking and relationship-free.
+
+Phase 5K implemented the durable contributor assignment contract. Assignments now have a dedicated table, book-scoped RLS policies, authenticated list/create API, workspace loading, profile participant integration, and read-only CreativeWriter visibility. Assignment creation controls and status editing remain future slices.
+
 ### Phase 6: Offline/Desktop Shell
 
 - Local DB.
@@ -549,6 +561,80 @@ Phase 5E implemented safe suggestion application. Accepted paragraph-scoped sugg
 8. Add focused route and component tests for apply-before-accept rejection, atomic apply success, stale-text conflict, explicit UI apply, and draft-safety guard.
 9. Run focused tests, broader CreativeWriter tests, scoped lint, local migration application, database function proof, browser/API smoke, diff check, typecheck status, and factory documentation updates.
 
+## Phase 5F Implementation Steps
+
+1. Extend stale apply API responses with original, current, and suggested text context.
+2. Extend the atomic apply function with explicit manual merged text.
+3. Drop the legacy four-argument apply function overload to avoid RPC ambiguity.
+4. Store stale suggestion context in CreativeWriter local UI state after a 409 stale apply response.
+5. Render a stale suggestion merge panel with original text, current paragraph text, suggested replacement, and manual merge textarea.
+6. Send `mergedText` only from the manual merge action and reject blank merged text in the client.
+7. Refresh local paragraph and active draft state after successful manual merge apply.
+8. Add focused route and component tests for stale context payloads and manual merge apply.
+9. Run focused tests, broader CreativeWriter tests, scoped lint, local migration application, function proof, browser/API smoke, diff check, typecheck status, and factory documentation updates.
+
+## Phase 5G Implementation Steps
+
+1. Add suggestion lifecycle summary badges for proposed, accepted, needs merge, applied, rejected, and withdrawn.
+2. Add All, Mine, and Reviewed by me filters for the Suggestions review queue.
+3. Add reviewer note fields for proposed and accepted suggestions.
+4. Send review notes with accept, reject, withdraw, apply, and manual merge apply actions when non-empty.
+5. Replace raw current-user IDs with `You` and shorten other contributor IDs in the card surface.
+6. Add focused component tests for queue filtering and review note payloads.
+7. Run focused tests, broader CreativeWriter tests, scoped lint, route/API smoke, diff check, typecheck status, and factory documentation updates.
+
+## Phase 5H Implementation Steps
+
+1. Derive contributor activity entries from existing suggestion lifecycle fields and local stale suggestion contexts.
+2. Show a compact Recent Activity panel in the Suggestions tab with actor, paragraph target, timestamp, status label, and reviewer note/rationale detail.
+3. Include local stale apply failures as Needs manual merge events without persisting extra audit rows.
+4. Keep the review queue filters independent from the activity history so reviewers can retain situational awareness while filtering cards.
+5. Add focused component tests for rendered activity events and stale merge activity.
+6. Run focused tests, broader CreativeWriter tests, scoped lint, browser/API smoke, diff check, typecheck status, and factory documentation updates.
+
+## Phase 5I Implementation Steps
+
+1. Extend the CreativeWriter workspace data mapper to load existing `book_collaborators` for the selected book.
+2. Add a contributor view contract with user ID, role, nullable display/email labels, and joined timestamp.
+3. Derive read-only workload rows from collaborators plus reader comments and contributor suggestions.
+4. Show contributor role, open comment count, proposed suggestion count, reviewed suggestion count, applied suggestion count, and latest activity in the Suggestions tab.
+5. Include activity-only participants when comments or suggestions reference users not present in the collaborator roster.
+6. Add focused mapper and component tests for roster loading and workload rendering.
+7. Run focused tests, broader CreativeWriter tests, scoped lint, browser/API smoke, diff check, typecheck status, and factory documentation updates.
+
+## Phase 5J Implementation Steps
+
+1. Keep the `book_collaborators` query free of embedded `profiles(...)` relationships.
+2. Collect visible participant IDs from collaborators, reader comments, contributor suggestions, reviewers, and the current account.
+3. Perform a separate best-effort `profiles` lookup for `id,display_name`.
+4. Ignore profile lookup errors so display labels never block CreativeWriter workspace loading.
+5. Add `participantProfiles` to the workspace payload and use it for contributor workload labels.
+6. Preserve `You` and shortened contributor ID fallbacks when profile rows are not visible under RLS.
+7. Add focused mapper and component tests for profile-safe labels and run the factory verification sweep.
+
+## Phase 5K Implementation Steps
+
+1. Add `creativewriter_contributor_assignments` persistence with book, chapter, paragraph, assignee, assigner, scope, status, title, note, due, and lifecycle timestamps.
+2. Add RLS policies for book-scoped viewing, editor creation/management, assignee status updates, and editor deletion.
+3. Add authenticated `GET /api/books/[bookId]/assignments` and `POST /api/books/[bookId]/assignments`.
+4. Validate create payloads, book edit access, assignee book membership, and optional chapter/paragraph scoping.
+5. Load assignments into the CreativeWriter workspace data mapper with missing-table fallback during rollout.
+6. Show read-only assignment queue and active assignment counts in the Suggestions tab.
+7. Add focused route, mapper, and component tests.
+8. Run focused tests, broader CreativeWriter tests, scoped lint, local migration application, route/API smoke, browser smoke, diff check, typecheck status, and factory documentation updates.
+
+## Phase 5L Implementation Steps
+
+1. Add authenticated `PATCH /api/books/[bookId]/assignments/[assignmentId]` for status transitions.
+2. Validate status payloads against the durable assignment lifecycle.
+3. Require book edit access or direct assignment ownership before updates.
+4. Scope assignment lookup and update by both assignment ID and book ID.
+5. Maintain `completed_at` consistently when assignments are completed or reopened.
+6. Add CreativeWriter assignment action controls for Start, Complete, Reopen, and Cancel.
+7. Normalize returned Supabase assignment rows before updating local CreativeWriter state.
+8. Add focused route and component tests for permission, status, request payload, and local UI refresh.
+9. Run focused tests, broader CreativeWriter tests, scoped lint, route/API smoke, browser smoke, diff check, typecheck status, and factory documentation updates.
+
 ## Phase 2B Implementation Steps
 
 1. Add CreativeWriter import adapter for direct document files.
@@ -589,3 +675,10 @@ Phase 5E implemented safe suggestion application. Accepted paragraph-scoped sugg
 | Structural foundation approval | Structure version columns, tombstone retention, and typed paragraph structural payloads exist before applying structural edits. |
 | Contributor suggestion UI approval | Suggestions can be created and reviewed in CreativeWriter without mutating manuscript text before stale-text apply semantics exist. |
 | Suggestion apply approval | Accepted paragraph-scoped suggestions apply atomically and fail closed when the paragraph changed after proposal. |
+| Stale suggestion merge approval | Stale apply failures expose original/current/suggested text and require explicit manual merged text before mutation. |
+| Contributor workflow approval | Suggestion queues expose ownership filters, lifecycle summaries, and reviewer notes without adding new persistence. |
+| Contributor activity approval | Suggestion activity is visible from existing lifecycle metadata without adding a new audit-log contract. |
+| Contributor workload approval | Existing collaborators and activity-only participants are visible with derived workload counts before adding durable assignments. |
+| Profile-safe label approval | Contributor labels use a separate best-effort profile lookup and never depend on embedded relationship availability. |
+| Assignment contract approval | Contributor assignments persist behind book-scoped RLS and are visible in CreativeWriter before editing controls ship. |
+| Assignment status approval | Contributors can update assignment lifecycle status through authenticated API and CreativeWriter controls before assignment creation UI ships. |
