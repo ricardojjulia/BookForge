@@ -114,23 +114,6 @@ export default async function DashboardPage() {
           books={bookOptions || []}
         />
 
-        <Paper withBorder radius="md" p="xl" bg="#fbfaf8" mb="xl">
-          <Group justify="space-between" align="flex-start">
-            <div>
-              <Badge color="grape" variant="light" mb="xs">
-                New
-              </Badge>
-              <Title order={2}>Create a Book From an Idea</Title>
-              <Text c="dimmed" maw={760}>
-                Start with a prompt, build the theme, chapter architecture, characters or teaching framework, then generate a bounded first draft with local LM Studio models.
-              </Text>
-            </div>
-            <Button component="a" href="/books/create" color="grape">
-              Start Creation Wizard
-            </Button>
-          </Group>
-        </Paper>
-
         <SimpleGrid id="books" cols={{ base: 1, md: 3 }} style={{ scrollMarginTop: 24 }}>
           {books?.map((book) => {
             const isFinished = book.status === "finished";
