@@ -38,6 +38,26 @@ export type CreativeWriterReaderCommentView = {
   createdAt: string | null;
 };
 
+export type CreativeWriterContributorSuggestionStatus = "proposed" | "accepted" | "rejected" | "withdrawn" | "applied" | "superseded";
+
+export type CreativeWriterContributorSuggestionView = {
+  id: string;
+  chapterId: string | null;
+  paragraphId: string | null;
+  proposerId: string;
+  reviewerId: string | null;
+  status: CreativeWriterContributorSuggestionStatus;
+  originalTextSnapshot: string | null;
+  suggestedText: string;
+  rationale: string | null;
+  reviewNote: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  reviewedAt: string | null;
+  appliedAt: string | null;
+  withdrawnAt: string | null;
+};
+
 export type CreativeWriterConflictView = CreativeWriterConflict & {
   eventId: string;
 };
@@ -97,6 +117,7 @@ export type CreativeWriterWorkspaceData = {
   chapters: CreativeWriterChapterView[];
   paragraphs: CreativeWriterParagraphView[];
   readerComments: CreativeWriterReaderCommentView[];
+  contributorSuggestions: CreativeWriterContributorSuggestionView[];
   conflicts: CreativeWriterConflictView[];
   support: CreativeWriterSupportContextView;
   project: {
@@ -162,6 +183,24 @@ type ReaderCommentRow = {
   note: string;
   resolved: boolean;
   created_at: string | null;
+};
+
+type ContributorSuggestionRow = {
+  id: string;
+  chapter_id: string | null;
+  paragraph_id: string | null;
+  proposer_id: string;
+  reviewer_id: string | null;
+  status: CreativeWriterContributorSuggestionStatus;
+  original_text_snapshot: string | null;
+  suggested_text: string;
+  rationale: string | null;
+  review_note: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  reviewed_at: string | null;
+  applied_at: string | null;
+  withdrawn_at: string | null;
 };
 
 type ConflictEventRow = {
@@ -238,6 +277,7 @@ export async function getCreativeWriterWorkspaceData(input: {
       chapters: [],
       paragraphs: [],
       readerComments: [],
+      contributorSuggestions: [],
       conflicts: [],
       support: emptySupportContext(),
       project: null,
@@ -249,6 +289,7 @@ export async function getCreativeWriterWorkspaceData(input: {
     { data: sceneRows, error: scenesError },
     { data: paragraphRows, error: paragraphsError },
     { data: readerCommentRows, error: readerCommentsError },
+    { data: suggestionRows, error: suggestionsError },
     { data: conflictRows, error: conflictsError },
     { data: authorNotesRow, error: authorNotesError },
     { data: referenceRows, error: referencesError },
@@ -280,6 +321,12 @@ export async function getCreativeWriterWorkspaceData(input: {
       resolveList<ReaderCommentRow>(
         table(input.supabase, "reader_annotations")
           .select("id,paragraph_id,annotator_id,note,resolved,created_at")
+          .eq("book_id", selectedBook.id)
+          .order("created_at", { ascending: false }),
+      ),
+      resolveList<ContributorSuggestionRow>(
+        table(input.supabase, "creativewriter_contributor_suggestions")
+          .select("id,chapter_id,paragraph_id,proposer_id,reviewer_id,status,original_text_snapshot,suggested_text,rationale,review_note,created_at,updated_at,reviewed_at,applied_at,withdrawn_at")
           .eq("book_id", selectedBook.id)
           .order("created_at", { ascending: false }),
       ),
@@ -345,6 +392,7 @@ export async function getCreativeWriterWorkspaceData(input: {
   if (scenesError) throw scenesError;
   if (paragraphsError) throw paragraphsError;
   if (readerCommentsError) throw readerCommentsError;
+  if (suggestionsError && !isMissingOptionalCreativeWriterTable(suggestionsError, "creativewriter_contributor_suggestions")) throw suggestionsError;
   if (conflictsError && !isMissingCreativeWriterLedger(conflictsError)) throw conflictsError;
   const supportErrors = [authorNotesError, referencesError, bookBibleError, charactersError, locationsError, themesError, motifsError, timelineError].filter(Boolean);
   const blockingSupportError = supportErrors.find((error) => !isMissingCreativeWriterLedger(error));
@@ -363,6 +411,7 @@ export async function getCreativeWriterWorkspaceData(input: {
     chapters: (chapterRows || []).map(toChapterView),
     paragraphs: toParagraphViews(paragraphRows || [], sceneRows || [], chapterRows || []),
     readerComments: (readerCommentRows || []).map(toReaderCommentView),
+    contributorSuggestions: suggestionsError ? [] : (suggestionRows || []).map(toContributorSuggestionView),
     conflicts: conflictsError ? [] : (conflictRows || []).flatMap(toConflictView),
     support: {
       authorNotes: authorNotesError ? null : toAuthorNotesView(authorNotesRow),
@@ -389,9 +438,13 @@ export async function getCreativeWriterWorkspaceData(input: {
 }
 
 export function isMissingCreativeWriterLedger(error: unknown): boolean {
+  return isMissingOptionalCreativeWriterTable(error, "creativewriter_sync_events");
+}
+
+function isMissingOptionalCreativeWriterTable(error: unknown, tableName: string): boolean {
   if (!error || typeof error !== "object") return false;
   const maybeError = error as { code?: unknown; message?: unknown };
-  return maybeError.code === "PGRST205" && typeof maybeError.message === "string" && maybeError.message.includes("creativewriter_sync_events");
+  return maybeError.code === "PGRST205" && typeof maybeError.message === "string" && maybeError.message.includes(tableName);
 }
 
 export function versionFromDate(value: string | null | undefined): number {
@@ -463,6 +516,26 @@ function toReaderCommentView(row: ReaderCommentRow): CreativeWriterReaderComment
     note: row.note,
     resolved: row.resolved,
     createdAt: row.created_at,
+  };
+}
+
+function toContributorSuggestionView(row: ContributorSuggestionRow): CreativeWriterContributorSuggestionView {
+  return {
+    id: row.id,
+    chapterId: row.chapter_id,
+    paragraphId: row.paragraph_id,
+    proposerId: row.proposer_id,
+    reviewerId: row.reviewer_id,
+    status: row.status,
+    originalTextSnapshot: row.original_text_snapshot,
+    suggestedText: row.suggested_text,
+    rationale: row.rationale,
+    reviewNote: row.review_note,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    reviewedAt: row.reviewed_at,
+    appliedAt: row.applied_at,
+    withdrawnAt: row.withdrawn_at,
   };
 }
 

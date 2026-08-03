@@ -17,6 +17,14 @@ describe("CreativeWriter workspace data", () => {
     expect(result.chapters).toHaveLength(1);
     expect(result.paragraphs).toHaveLength(1);
     expect(result.readerComments).toHaveLength(1);
+    expect(result.contributorSuggestions).toMatchObject([
+      {
+        id: "suggestion-1",
+        paragraphId: "paragraph-1",
+        status: "proposed",
+        suggestedText: "Try a stronger closing image.",
+      },
+    ]);
     expect(result.support.references).toHaveLength(1);
     expect(result.support.authorNotes?.creativeInstructions).toBe("Keep the forge metaphor tactile.");
     expect(result.support.bible.characters[0]?.name).toBe("Mara Vale");
@@ -128,6 +136,30 @@ function createDashboardSupabase(options: { conflictError?: unknown; sceneRows?:
                   note: "This line landed for me.",
                   resolved: false,
                   created_at: "2026-08-02T12:00:00.000Z",
+                },
+              ],
+              error: null,
+            });
+          }
+          if (table === "creativewriter_contributor_suggestions") {
+            return resolve({
+              data: [
+                {
+                  id: "suggestion-1",
+                  chapter_id: "chapter-1",
+                  paragraph_id: "paragraph-1",
+                  proposer_id: "reader-1",
+                  reviewer_id: null,
+                  status: "proposed",
+                  original_text_snapshot: "Paragraph text.",
+                  suggested_text: "Try a stronger closing image.",
+                  rationale: "More tactile.",
+                  review_note: null,
+                  created_at: "2026-08-02T12:05:00.000Z",
+                  updated_at: "2026-08-02T12:05:00.000Z",
+                  reviewed_at: null,
+                  applied_at: null,
+                  withdrawn_at: null,
                 },
               ],
               error: null,

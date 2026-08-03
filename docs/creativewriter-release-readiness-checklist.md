@@ -1,7 +1,7 @@
 # CreativeWriter Release Readiness Checklist
 
 Date: 2026-08-02
-Phase: 5B Comment Route Hardening And Permission Audit
+Phase: 5E Safe Suggestion Apply
 Status: Not ready for broad release
 
 ## Current Readiness
@@ -29,9 +29,15 @@ Status: Not ready for broad release
 - [x] Reader comments can be marked resolved or reopened from CreativeWriter through the existing authenticated annotation API.
 - [x] Reader comment routes validate payloads, book visibility, paragraph scoping, and owner-or-editor mutation permissions.
 - [x] Reader annotation update RLS allows comment owners or book editors/admins/owners to resolve or reopen comments.
+- [x] Contributor suggestions have a dedicated persistence contract, lifecycle, RLS policy set, and API route surface.
+- [x] Contributor suggestion UI is implemented in CreativeWriter for create, accept, reject, and withdraw review flows.
+- [x] Accepting a suggestion remains non-mutating; applying an accepted suggestion is the explicit manuscript mutation step.
+- [x] Accepted paragraph-scoped suggestions can be explicitly applied through an atomic database function.
+- [x] Suggestion apply fails closed when the paragraph has changed after proposal.
 - [ ] Desktop executable exists.
 - [ ] Local CreativeWriter database exists.
-- [ ] Contributor assignments, suggestions, approvals, and contributor status sync are implemented.
+- [x] Accepted/applied suggestions can safely mutate manuscript text with stale-text conflict handling.
+- [ ] Contributor assignments, approvals, and contributor status sync are implemented.
 - [ ] Notes/research/bible edits sync through a designed non-manuscript contract.
 - [ ] Pinned context syncs across devices or has explicit local-only product language.
 - [ ] Visual order conflict review exists.
@@ -39,6 +45,7 @@ Status: Not ready for broad release
 - [ ] Full cloud browser/API/data verification exists.
 - [ ] Cloud Supabase deployment evidence exists.
 - [ ] Live cross-account RLS proof exists for reader comments in cloud Supabase.
+- [ ] Live cross-account RLS proof exists for contributor suggestions in cloud Supabase.
 - [ ] Subscription entitlements are enforced against CreativeWriter capabilities.
 
 ## Controlled Pilot Gate
