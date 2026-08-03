@@ -31,6 +31,7 @@ type WorkspaceLayout = {
 };
 
 type CommentReviewFilter = "open" | "all" | "resolved";
+type SuggestionReviewFilter = "proposed" | "all" | "closed";
 
 const DEFAULT_WORKSPACE_LAYOUT: WorkspaceLayout = { left: 280, right: 320 };
 const MIN_LEFT_WIDTH = 220;
@@ -59,6 +60,9 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
   const [conflictDrafts, setConflictDrafts] = useState<Record<string, string>>({});
   const [supportSearch, setSupportSearch] = useState("");
   const [commentReviewFilter, setCommentReviewFilter] = useState<CommentReviewFilter>("open");
+  const [suggestionReviewFilter, setSuggestionReviewFilter] = useState<SuggestionReviewFilter>("proposed");
+  const [suggestionDraftText, setSuggestionDraftText] = useState("");
+  const [suggestionRationale, setSuggestionRationale] = useState("");
   const [pinnedSupportIds, setPinnedSupportIds] = useState<string[]>(() => loadPinnedSupportIds(initialData.selectedBook?.id || ""));
   const [message, setMessage] = useState<SyncMessage | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -71,6 +75,9 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
   const commentParagraphNumbers = useMemo(() => new Map(data.paragraphs.map((paragraph) => [paragraph.id, paragraph.paragraphNumber])), [data.paragraphs]);
   const openCommentCount = useMemo(() => data.readerComments.filter((comment) => !comment.resolved).length, [data.readerComments]);
   const resolvedCommentCount = data.readerComments.length - openCommentCount;
+  const suggestionParagraphNumbers = useMemo(() => new Map(data.paragraphs.map((paragraph) => [paragraph.id, paragraph.paragraphNumber])), [data.paragraphs]);
+  const proposedSuggestionCount = useMemo(() => data.contributorSuggestions.filter((suggestion) => suggestion.status === "proposed").length, [data.contributorSuggestions]);
+  const closedSuggestionCount = data.contributorSuggestions.length - proposedSuggestionCount;
   const supportEntries = useMemo(() => buildSupportEntries(data), [data]);
   const pinnedSupportEntries = useMemo(
     () => pinnedSupportIds.flatMap((id) => supportEntries.find((entry) => entry.id === id) || []),
@@ -87,6 +94,10 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
   const reviewComments = useMemo(
     () => filterReaderComments(data.readerComments, supportSearch, commentReviewFilter, commentParagraphNumbers),
     [commentParagraphNumbers, commentReviewFilter, data.readerComments, supportSearch],
+  );
+  const reviewSuggestions = useMemo(
+    () => filterContributorSuggestions(data.contributorSuggestions, supportSearch, suggestionReviewFilter, suggestionParagraphNumbers),
+    [data.contributorSuggestions, suggestionParagraphNumbers, suggestionReviewFilter, supportSearch],
   );
 
   useEffect(() => {
@@ -166,6 +177,19 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
     const paragraph = data.paragraphs.find((item) => item.id === paragraphId) || null;
     if (!paragraph) {
       setMessage({ tone: "yellow", text: "That comment is not attached to an available paragraph." });
+      return;
+    }
+    setSelectedChapterId(paragraph.chapterId);
+    setSelectedParagraphId(paragraph.id);
+    setDraftText(paragraph.currentText || paragraph.acceptedText || "");
+  }
+
+  function selectSuggestionParagraph(paragraphId: string | null) {
+    if (!paragraphId) return;
+    if (!canLeaveDraft()) return;
+    const paragraph = data.paragraphs.find((item) => item.id === paragraphId) || null;
+    if (!paragraph) {
+      setMessage({ tone: "yellow", text: "That suggestion is not attached to an available paragraph." });
       return;
     }
     setSelectedChapterId(paragraph.chapterId);
@@ -323,6 +347,88 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
         readerComments: current.readerComments.map((comment) => (comment.id === commentId ? { ...comment, resolved } : comment)),
       }));
       setMessage({ tone: "green", text: resolved ? "Reader comment marked resolved." : "Reader comment reopened." });
+    });
+  }
+
+  function createContributorSuggestion() {
+    if (!data.selectedBook || !selectedParagraph) return;
+    const suggestedText = suggestionDraftText.trim();
+    if (!suggestedText) {
+      setMessage({ tone: "yellow", text: "Add suggested replacement text before proposing a suggestion." });
+      return;
+    }
+    const bookId = data.selectedBook.id;
+    const originalText = selectedParagraph.currentText || selectedParagraph.acceptedText || "";
+    setMessage(null);
+    startTransition(async () => {
+      const response = await fetch(`/api/books/${bookId}/suggestions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chapterId: selectedParagraph.chapterId,
+          paragraphId: selectedParagraph.id,
+          originalTextSnapshot: originalText,
+          suggestedText,
+          rationale: suggestionRationale.trim() || undefined,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.error) {
+        setMessage({ tone: "red", text: payload.error || "Suggestion proposal failed." });
+        return;
+      }
+      setData((current) => ({
+        ...current,
+        contributorSuggestions: [toContributorSuggestionView(payload.suggestion), ...current.contributorSuggestions],
+      }));
+      setSuggestionDraftText("");
+      setSuggestionRationale("");
+      setSuggestionReviewFilter("proposed");
+      setMessage({ tone: "green", text: "Contributor suggestion proposed." });
+    });
+  }
+
+  function updateContributorSuggestionStatus(suggestionId: string, status: "accepted" | "rejected" | "withdrawn" | "applied") {
+    if (!data.selectedBook) return;
+    if (status === "applied" && dirty) {
+      setMessage({ tone: "yellow", text: "Push or discard the current draft before applying a suggestion." });
+      return;
+    }
+    const bookId = data.selectedBook.id;
+    setMessage(null);
+    startTransition(async () => {
+      const response = await fetch(`/api/books/${bookId}/suggestions/${suggestionId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.error) {
+        setMessage({ tone: "red", text: payload.error || "Suggestion update failed." });
+        return;
+      }
+      setData((current) => ({
+        ...current,
+        contributorSuggestions: current.contributorSuggestions.map((suggestion) =>
+          suggestion.id === suggestionId ? { ...suggestion, ...toContributorSuggestionPatch(payload.suggestion) } : suggestion,
+        ),
+        paragraphs: payload.paragraph
+          ? current.paragraphs.map((paragraph) =>
+              paragraph.id === payload.paragraph.id
+                ? {
+                    ...paragraph,
+                    currentText: payload.paragraph.currentText,
+                    acceptedText: payload.paragraph.acceptedText,
+                    updatedAt: payload.paragraph.updatedAt,
+                  }
+                : paragraph,
+            )
+          : current.paragraphs,
+      }));
+      if (payload.paragraph?.id === selectedParagraphId) {
+        setDraftText(payload.paragraph.currentText || payload.paragraph.acceptedText || "");
+      }
+      setMessage({ tone: "green", text: `Contributor suggestion ${suggestionStatusPastTense(status)}.` });
     });
   }
 
@@ -526,6 +632,7 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                 <Tabs.List style={{ flexWrap: "wrap", gap: 6, overflow: "visible" }}>
                   <Tabs.Tab value="conflicts" leftSection={<IconGitMerge size={14} />} style={SUPPORT_TAB_STYLE}>Conflicts</Tabs.Tab>
                   <Tabs.Tab value="comments" leftSection={<IconMessage size={14} />} style={SUPPORT_TAB_STYLE}>Comments {commentEntries.length ? `(${commentEntries.length})` : ""}</Tabs.Tab>
+                  <Tabs.Tab value="suggestions" leftSection={<IconSparkles size={14} />} style={SUPPORT_TAB_STYLE}>Suggestions {data.contributorSuggestions.length ? `(${data.contributorSuggestions.length})` : ""}</Tabs.Tab>
                   <Tabs.Tab value="notes" leftSection={<IconNotes size={14} />} style={SUPPORT_TAB_STYLE}>Notes {noteEntries.length ? `(${noteEntries.length})` : ""}</Tabs.Tab>
                   <Tabs.Tab value="research" leftSection={<IconSearch size={14} />} style={SUPPORT_TAB_STYLE}>Research {researchEntries.length ? `(${researchEntries.length})` : ""}</Tabs.Tab>
                   <Tabs.Tab value="bible" leftSection={<IconBook size={14} />} style={SUPPORT_TAB_STYLE}>Book Bible {bibleSummaryEntries.length ? `(${bibleSummaryEntries.length})` : ""}</Tabs.Tab>
@@ -616,6 +723,86 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                       onSetResolved={updateReaderCommentResolution}
                       updating={isPending}
                       empty={supportSearch ? "No reader comments match this review filter." : "No reader comments in this review queue."}
+                    />
+                  </Stack>
+                </Tabs.Panel>
+
+                <Tabs.Panel value="suggestions" pt="md">
+                  <Stack gap="sm">
+                    <Group justify="space-between">
+                      <div>
+                        <Text fw={700}>Suggestions</Text>
+                        <Text size="sm" c="dimmed">Contributor proposed manuscript changes</Text>
+                      </div>
+                      <Badge color="cyan" variant="light">
+                        {proposedSuggestionCount} proposed
+                      </Badge>
+                    </Group>
+                    <Paper withBorder radius="sm" p="sm" bg="#f8fdff">
+                      <Stack gap="xs">
+                        <Group justify="space-between" align="flex-start">
+                          <div>
+                            <Text size="sm" fw={700}>{selectedParagraph ? `Propose change for Paragraph ${selectedParagraph.paragraphNumber}` : "Select a paragraph"}</Text>
+                            <Text size="xs" c="dimmed" lineClamp={2}>{selectedParagraph ? selectedParagraph.currentText || selectedParagraph.acceptedText || "Blank paragraph." : "Choose a paragraph before proposing a change."}</Text>
+                          </div>
+                          <Button
+                            size="xs"
+                            variant="subtle"
+                            color="dark"
+                            disabled={!selectedParagraph}
+                            onClick={() => setSuggestionDraftText(draftText)}
+                          >
+                            Use current draft
+                          </Button>
+                        </Group>
+                        <Textarea
+                          aria-label="Suggested replacement text"
+                          minRows={3}
+                          autosize
+                          value={suggestionDraftText}
+                          onChange={(event) => setSuggestionDraftText(event.currentTarget.value)}
+                          placeholder="Suggested replacement text"
+                        />
+                        <Textarea
+                          aria-label="Suggestion rationale"
+                          minRows={2}
+                          autosize
+                          value={suggestionRationale}
+                          onChange={(event) => setSuggestionRationale(event.currentTarget.value)}
+                          placeholder="Why this change helps"
+                        />
+                        <Group justify="flex-end">
+                          <Button
+                            size="xs"
+                            color="cyan"
+                            leftSection={<IconSparkles size={13} />}
+                            loading={isPending}
+                            disabled={!selectedParagraph || !suggestionDraftText.trim()}
+                            onClick={createContributorSuggestion}
+                          >
+                            Propose Suggestion
+                          </Button>
+                        </Group>
+                      </Stack>
+                    </Paper>
+                    <SegmentedControl
+                      aria-label="Suggestion review filter"
+                      value={suggestionReviewFilter}
+                      onChange={(value) => setSuggestionReviewFilter(value as SuggestionReviewFilter)}
+                      data={[
+                        { label: `Proposed (${proposedSuggestionCount})`, value: "proposed" },
+                        { label: `All (${data.contributorSuggestions.length})`, value: "all" },
+                        { label: `Closed (${closedSuggestionCount})`, value: "closed" },
+                      ]}
+                      fullWidth
+                    />
+                    <SuggestionReviewList
+                      suggestions={reviewSuggestions}
+                      paragraphNumberById={suggestionParagraphNumbers}
+                      onSelectParagraph={selectSuggestionParagraph}
+                      onSetStatus={updateContributorSuggestionStatus}
+                      updating={isPending}
+                      empty={supportSearch ? "No contributor suggestions match this review filter." : "No contributor suggestions in this review queue."}
                     />
                   </Stack>
                 </Tabs.Panel>
@@ -858,6 +1045,123 @@ function CommentReviewCard({
   );
 }
 
+function SuggestionReviewList({
+  suggestions,
+  paragraphNumberById,
+  onSelectParagraph,
+  onSetStatus,
+  updating,
+  empty,
+}: {
+  suggestions: CreativeWriterWorkspaceData["contributorSuggestions"];
+  paragraphNumberById: Map<string, number>;
+  onSelectParagraph: (paragraphId: string | null) => void;
+  onSetStatus: (suggestionId: string, status: "accepted" | "rejected" | "withdrawn" | "applied") => void;
+  updating: boolean;
+  empty: string;
+}) {
+  if (!suggestions.length) return <Alert color="gray" variant="light">{empty}</Alert>;
+  return (
+    <Stack gap="xs">
+      {suggestions.map((suggestion) => (
+        <SuggestionReviewCard
+          key={suggestion.id}
+          suggestion={suggestion}
+          paragraphNumber={suggestion.paragraphId ? paragraphNumberById.get(suggestion.paragraphId) || null : null}
+          onSelectParagraph={onSelectParagraph}
+          onSetStatus={onSetStatus}
+          updating={updating}
+        />
+      ))}
+    </Stack>
+  );
+}
+
+function SuggestionReviewCard({
+  suggestion,
+  paragraphNumber,
+  onSelectParagraph,
+  onSetStatus,
+  updating,
+}: {
+  suggestion: CreativeWriterWorkspaceData["contributorSuggestions"][number];
+  paragraphNumber: number | null;
+  onSelectParagraph: (paragraphId: string | null) => void;
+  onSetStatus: (suggestionId: string, status: "accepted" | "rejected" | "withdrawn" | "applied") => void;
+  updating: boolean;
+}) {
+  const title = paragraphNumber ? `Paragraph ${paragraphNumber}` : "General book suggestion";
+  const isProposed = suggestion.status === "proposed";
+  const isAccepted = suggestion.status === "accepted";
+  return (
+    <Paper withBorder radius="sm" p="sm" bg={isProposed ? "#f8fdff" : "#f8f9fa"}>
+      <Stack gap="xs">
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <div>
+            <Group gap={6}>
+              <Text size="sm" fw={700}>{title}</Text>
+              <Badge size="xs" color={suggestionStatusColor(suggestion.status)}>{suggestionStatusLabel(suggestion.status)}</Badge>
+            </Group>
+            <Text size="xs" c="dimmed">{formatDateTime(suggestion.createdAt)}</Text>
+          </div>
+          <Text size="xs" c="dimmed">{suggestion.proposerId}</Text>
+        </Group>
+        {suggestion.originalTextSnapshot && (
+          <Stack gap={2}>
+            <Text size="xs" fw={700}>Original</Text>
+            <Text size="sm" c="dimmed" lineClamp={3}>{suggestion.originalTextSnapshot}</Text>
+          </Stack>
+        )}
+        <Stack gap={2}>
+          <Text size="xs" fw={700}>Suggested</Text>
+          <Text size="sm" lineClamp={5}>{suggestion.suggestedText}</Text>
+        </Stack>
+        {suggestion.rationale && (
+          <Stack gap={2}>
+            <Text size="xs" fw={700}>Rationale</Text>
+            <Text size="sm" c="dimmed" lineClamp={3}>{suggestion.rationale}</Text>
+          </Stack>
+        )}
+        {suggestion.reviewNote && (
+          <Stack gap={2}>
+            <Text size="xs" fw={700}>Review note</Text>
+            <Text size="sm" c="dimmed">{suggestion.reviewNote}</Text>
+          </Stack>
+        )}
+        <Group gap="xs">
+          <Button
+            size="xs"
+            variant="light"
+            color="dark"
+            disabled={!suggestion.paragraphId}
+            onClick={() => onSelectParagraph(suggestion.paragraphId)}
+          >
+            Go to paragraph
+          </Button>
+          {isProposed && (
+            <>
+              <Button size="xs" color="teal" leftSection={<IconCheck size={13} />} loading={updating} onClick={() => onSetStatus(suggestion.id, "accepted")}>
+                Accept
+              </Button>
+              <Button size="xs" color="red" variant="light" leftSection={<IconX size={13} />} loading={updating} onClick={() => onSetStatus(suggestion.id, "rejected")}>
+                Reject
+              </Button>
+              <Button size="xs" color="dark" variant="subtle" loading={updating} onClick={() => onSetStatus(suggestion.id, "withdrawn")}>
+                Withdraw
+              </Button>
+            </>
+          )}
+          {isAccepted && (
+            <Button size="xs" color="grape" leftSection={<IconCloudUp size={13} />} loading={updating} disabled={!suggestion.paragraphId} onClick={() => onSetStatus(suggestion.id, "applied")}>
+              Apply
+            </Button>
+          )}
+        </Group>
+      </Stack>
+    </Paper>
+  );
+}
+
 function SupportEntryCard({
   entry,
   pinned,
@@ -963,6 +1267,104 @@ function filterReaderComments(
     const paragraphLabel = paragraphNumber ? `Paragraph ${paragraphNumber}` : "General book comment";
     return [paragraphLabel, comment.note, comment.resolved ? "Resolved" : "Open", formatDateTime(comment.createdAt)].some((value) => value.toLowerCase().includes(normalized));
   });
+}
+
+function filterContributorSuggestions(
+  suggestions: CreativeWriterWorkspaceData["contributorSuggestions"],
+  query: string,
+  status: SuggestionReviewFilter,
+  paragraphNumberById: Map<string, number>,
+) {
+  const normalized = query.trim().toLowerCase();
+  return suggestions.filter((suggestion) => {
+    if (status === "proposed" && suggestion.status !== "proposed") return false;
+    if (status === "closed" && suggestion.status === "proposed") return false;
+    if (!normalized) return true;
+    const paragraphNumber = suggestion.paragraphId ? paragraphNumberById.get(suggestion.paragraphId) : null;
+    const paragraphLabel = paragraphNumber ? `Paragraph ${paragraphNumber}` : "General book suggestion";
+    return [
+      paragraphLabel,
+      suggestionStatusLabel(suggestion.status),
+      suggestion.suggestedText,
+      suggestion.originalTextSnapshot,
+      suggestion.rationale,
+      suggestion.reviewNote,
+      suggestion.proposerId,
+      suggestion.reviewerId,
+      formatDateTime(suggestion.createdAt),
+    ].some((value) => value?.toLowerCase().includes(normalized));
+  });
+}
+
+function toContributorSuggestionView(row: Record<string, unknown>): CreativeWriterWorkspaceData["contributorSuggestions"][number] {
+  return {
+    id: stringValue(row.id) || `suggestion-${Date.now()}`,
+    chapterId: nullableStringValue(row.chapter_id) ?? nullableStringValue(row.chapterId),
+    paragraphId: nullableStringValue(row.paragraph_id) ?? nullableStringValue(row.paragraphId),
+    proposerId: stringValue(row.proposer_id) || stringValue(row.proposerId) || "unknown",
+    reviewerId: nullableStringValue(row.reviewer_id) ?? nullableStringValue(row.reviewerId),
+    status: suggestionStatusValue(row.status),
+    originalTextSnapshot: nullableStringValue(row.original_text_snapshot) ?? nullableStringValue(row.originalTextSnapshot),
+    suggestedText: stringValue(row.suggested_text) || stringValue(row.suggestedText) || "",
+    rationale: nullableStringValue(row.rationale),
+    reviewNote: nullableStringValue(row.review_note) ?? nullableStringValue(row.reviewNote),
+    createdAt: nullableStringValue(row.created_at) ?? nullableStringValue(row.createdAt),
+    updatedAt: nullableStringValue(row.updated_at) ?? nullableStringValue(row.updatedAt),
+    reviewedAt: nullableStringValue(row.reviewed_at) ?? nullableStringValue(row.reviewedAt),
+    appliedAt: nullableStringValue(row.applied_at) ?? nullableStringValue(row.appliedAt),
+    withdrawnAt: nullableStringValue(row.withdrawn_at) ?? nullableStringValue(row.withdrawnAt),
+  };
+}
+
+function toContributorSuggestionPatch(row: Record<string, unknown>): Partial<CreativeWriterWorkspaceData["contributorSuggestions"][number]> {
+  const next: Partial<CreativeWriterWorkspaceData["contributorSuggestions"][number]> = {};
+  if ("status" in row) next.status = suggestionStatusValue(row.status);
+  if ("reviewer_id" in row || "reviewerId" in row) next.reviewerId = nullableStringValue(row.reviewer_id) ?? nullableStringValue(row.reviewerId);
+  if ("review_note" in row || "reviewNote" in row) next.reviewNote = nullableStringValue(row.review_note) ?? nullableStringValue(row.reviewNote);
+  if ("updated_at" in row || "updatedAt" in row) next.updatedAt = nullableStringValue(row.updated_at) ?? nullableStringValue(row.updatedAt);
+  if ("reviewed_at" in row || "reviewedAt" in row) next.reviewedAt = nullableStringValue(row.reviewed_at) ?? nullableStringValue(row.reviewedAt);
+  if ("applied_at" in row || "appliedAt" in row) next.appliedAt = nullableStringValue(row.applied_at) ?? nullableStringValue(row.appliedAt);
+  if ("withdrawn_at" in row || "withdrawnAt" in row) next.withdrawnAt = nullableStringValue(row.withdrawn_at) ?? nullableStringValue(row.withdrawnAt);
+  return next;
+}
+
+function suggestionStatusValue(value: unknown): CreativeWriterWorkspaceData["contributorSuggestions"][number]["status"] {
+  if (value === "accepted" || value === "rejected" || value === "withdrawn" || value === "applied" || value === "superseded") return value;
+  return "proposed";
+}
+
+function suggestionStatusLabel(status: CreativeWriterWorkspaceData["contributorSuggestions"][number]["status"]) {
+  const labels: Record<CreativeWriterWorkspaceData["contributorSuggestions"][number]["status"], string> = {
+    proposed: "Proposed",
+    accepted: "Accepted",
+    rejected: "Rejected",
+    withdrawn: "Withdrawn",
+    applied: "Applied",
+    superseded: "Superseded",
+  };
+  return labels[status];
+}
+
+function suggestionStatusColor(status: CreativeWriterWorkspaceData["contributorSuggestions"][number]["status"]) {
+  const colors: Record<CreativeWriterWorkspaceData["contributorSuggestions"][number]["status"], string> = {
+    proposed: "cyan",
+    accepted: "teal",
+    rejected: "red",
+    withdrawn: "gray",
+    applied: "grape",
+    superseded: "yellow",
+  };
+  return colors[status];
+}
+
+function suggestionStatusPastTense(status: "accepted" | "rejected" | "withdrawn" | "applied") {
+  const labels: Record<typeof status, string> = {
+    accepted: "accepted",
+    rejected: "rejected",
+    withdrawn: "withdrawn",
+    applied: "applied",
+  };
+  return labels[status];
 }
 
 function commentSupportId(commentId: string) {

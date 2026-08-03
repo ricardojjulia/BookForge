@@ -1,7 +1,7 @@
 # CreativeWriter Implementation Plan
 
 Last updated: 2026-08-02
-Factory slices: CreativeWriter Phase 1, Phase 2, Phase 2B, Phase 3, Phase 3R, Phase 4A, Phase 4B, Phase 4C, Phase 4D, Phase 4E, Phase 4F, Phase 4G, Phase 4H, and Phase 4F-R
+Factory slices: CreativeWriter Phase 1, Phase 2, Phase 2B, Phase 3, Phase 3R, Phase 4A, Phase 4B, Phase 4C, Phase 4D, Phase 4E, Phase 4F, Phase 4G, Phase 4H, Phase 4F-R, Phase 5A, Phase 5B, Phase 5C, Phase 5D, and Phase 5E
 
 ## Factory Scope Lock
 
@@ -349,6 +349,12 @@ Phase 5A implemented contributor comment review triage first because existing `r
 
 Phase 5B hardened the comment route and permission contract before adding broader contributor workflow. The route contract now validates payloads, verifies book visibility, validates paragraph targets, and requires comment ownership or book edit permission for resolve, reopen, and delete actions.
 
+Phase 5C implemented contributor suggestions as a dedicated contract instead of overloading reader comments. Suggestions now have their own persistence, lifecycle, permission model, and API routes, while CreativeWriter suggestion UI and manuscript application remain future slices.
+
+Phase 5D implemented the first CreativeWriter suggestion review UI. Users can now create paragraph-scoped suggestions and reviewers can accept, reject, or withdraw proposed suggestions through the Phase 5C API, while accepted suggestions still do not mutate manuscript text.
+
+Phase 5E implemented safe suggestion application. Accepted paragraph-scoped suggestions can now be explicitly applied through an atomic database function that checks edit permission, verifies the paragraph still matches the original text snapshot, mutates paragraph text, and marks the suggestion applied.
+
 ### Phase 6: Offline/Desktop Shell
 
 - Local DB.
@@ -511,6 +517,38 @@ Phase 5B hardened the comment route and permission contract before adding broade
 6. Add focused route tests for auth, invalid payloads, book scoping, paragraph scoping, mutation permissions, and mutation query scoping.
 7. Run focused route tests, broader CreativeWriter tests, scoped lint, local migration application, policy proof, typecheck status, and factory documentation updates.
 
+## Phase 5C Implementation Steps
+
+1. Define a dedicated contributor suggestion lifecycle separate from reader comments.
+2. Add `creativewriter_contributor_suggestions` persistence with book, chapter, paragraph, proposer, reviewer, status, text evidence, rationale, review note, and lifecycle timestamps.
+3. Add RLS policies for book-scoped viewing, viewer proposal creation, proposer withdrawal, and editor/admin/owner review updates.
+4. Add authenticated suggestion list and create API routes.
+5. Add authenticated suggestion status transition API route.
+6. Add focused route coverage for auth, visibility, target scoping, create payloads, proposer withdrawal, editor review, non-editor denial, immutable non-proposed statuses, and mutation query scoping.
+7. Run focused tests, scoped lint, local migration application, policy proof, broader CreativeWriter route tests, diff check, typecheck status, and factory documentation updates.
+
+## Phase 5D Implementation Steps
+
+1. Extend the CreativeWriter workspace mapper to load contributor suggestions for the selected book.
+2. Add a Suggestions support-rail tab with Proposed, All, and Closed filters.
+3. Add a selected-paragraph proposal form with original-text evidence, suggested replacement text, and rationale.
+4. Wire create, accept, reject, and withdraw actions to the authenticated Phase 5C suggestion APIs.
+5. Preserve the draft-safety guard when navigating from a suggestion to its target paragraph.
+6. Add focused mapper and component tests for suggestion loading, creation, review status updates, and non-mutating accepted suggestions.
+7. Run focused tests, broader CreativeWriter tests, scoped lint, browser/API smoke, diff check, typecheck status, and factory documentation updates.
+
+## Phase 5E Implementation Steps
+
+1. Add an atomic database function for applying accepted paragraph-scoped suggestions.
+2. Require `can_edit_book` inside the apply function.
+3. Require the suggestion lifecycle to be `accepted` before apply.
+4. Compare the paragraph's current text with the suggestion's original text snapshot before mutation.
+5. Update paragraph `current_text`, `accepted_text`, and `updated_at` plus suggestion `applied` lifecycle fields in the same function.
+6. Extend the authenticated suggestion status route to call the apply function for `applied` transitions.
+7. Add a CreativeWriter Apply button only for accepted suggestions and refresh local paragraph state after success.
+8. Add focused route and component tests for apply-before-accept rejection, atomic apply success, stale-text conflict, explicit UI apply, and draft-safety guard.
+9. Run focused tests, broader CreativeWriter tests, scoped lint, local migration application, database function proof, browser/API smoke, diff check, typecheck status, and factory documentation updates.
+
 ## Phase 2B Implementation Steps
 
 1. Add CreativeWriter import adapter for direct document files.
@@ -549,3 +587,5 @@ Phase 5B hardened the comment route and permission contract before adding broade
 | Editor ergonomics approval | Pull merge and dirty-draft protections work before expanding editing features. |
 | Conflict ergonomics approval | Conflict review exposes both sides and sends explicit edited merge payloads before wider writing surfaces. |
 | Structural foundation approval | Structure version columns, tombstone retention, and typed paragraph structural payloads exist before applying structural edits. |
+| Contributor suggestion UI approval | Suggestions can be created and reviewed in CreativeWriter without mutating manuscript text before stale-text apply semantics exist. |
+| Suggestion apply approval | Accepted paragraph-scoped suggestions apply atomically and fail closed when the paragraph changed after proposal. |

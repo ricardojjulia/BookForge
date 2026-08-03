@@ -1097,6 +1097,230 @@ Out of scope:
 - `docs/creativewriter-release-readiness-checklist.md`
 - `docs/SOFTWARE_FACTORY.md`
 
+## CreativeWriter Factory Slice — Phase 5C Contributor Suggestions Contract
+
+Date: 2026-08-02
+Status: Implemented, focused verification passed
+Owner: Product + Engineering
+
+### Scope Lock
+
+This slice adds contributor suggestions as a dedicated contract and persistence layer. It intentionally does not add UI or mutate manuscript text.
+
+In scope:
+
+- Dedicated `creativewriter_contributor_suggestions` table.
+- Suggestion lifecycle states: proposed, accepted, rejected, withdrawn, applied, superseded.
+- Book, chapter, and paragraph target scoping.
+- Original text snapshot, suggested text, rationale, review note, proposer/reviewer identity, and lifecycle timestamps.
+- RLS policies for book-scoped view, viewer proposal creation, proposer withdrawal, and editor/admin/owner review updates.
+- API routes for list, create, and status transition.
+- Focused route tests for auth, visibility, target scoping, create payloads, proposer withdrawal, editor review, non-editor denial, immutable non-proposed statuses, and mutation query scoping.
+
+Out of scope:
+
+- CreativeWriter suggestion UI.
+- Applying suggestion text to manuscript paragraphs.
+- Stale paragraph conflict detection for accepted/applied suggestions.
+- Notifications.
+- Dedicated reviewer roles beyond existing book roles.
+- Offline/local DB suggestion queue.
+- Cloud Supabase migration execution.
+
+### Approval Gates
+
+- Scope approval: contract and persistence only.
+- Data approval: suggestions are separate from `reader_annotations`.
+- Security approval: route checks and RLS enforce book visibility, proposer identity, and editor review permissions.
+- Lifecycle approval: only proposed suggestions can transition in this slice.
+- Verification approval: focused route tests, scoped lint, local migration application, policy proof, broader CreativeWriter route tests, diff check, and typecheck status are recorded.
+
+### Decisions
+
+- Do not overload comments for suggested edits.
+- Allow book viewers to propose suggestions.
+- Allow proposers to withdraw their own proposed suggestions.
+- Require `can_edit_book` for accepted, rejected, applied, and superseded transitions.
+- Keep "applied" as a status marker for now, not a paragraph mutation.
+
+### Verification Evidence
+
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/suggestions/route.test.ts' 'src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts'`
+- Result: 2 test files passed, 13 tests passed.
+- Passed: scoped ESLint for suggestion route and suggestion route test files.
+- Passed: `supabase migration up --local`
+- Table proof: `creativewriter_contributor_suggestions` has target, proposer/reviewer, lifecycle, text evidence, rationale/review note, and timestamp fields.
+- Policy proof: `pg_policies` shows view, create, and update policies for `creativewriter_contributor_suggestions`.
+- Migration history proof: `202608020006|creativewriter_contributor_suggestions` exists in `supabase_migrations.schema_migrations`.
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/suggestions/route.test.ts' 'src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts' 'src/app/api/books/[bookId]/annotations/route.test.ts' 'src/app/api/books/[bookId]/annotations/[annotationId]/route.test.ts' src/components/creativewriter/creativewriter-workspace.test.tsx src/lib/creativewriter-ui/dashboard.test.ts src/lib/creativewriter-sync.test.ts src/app/api/creativewriter/sync/push/route.test.ts src/app/api/creativewriter/sync/pull/route.test.ts src/app/api/creativewriter/sync/resolve-conflict/route.test.ts`
+- Result: 9 test files passed, 48 tests passed.
+- Passed: full scoped ESLint for suggestion routes/tests, annotation routes/tests, CreativeWriter workspace, and dashboard files.
+- Passed: `git diff --check`
+- Passed: `curl -I http://localhost:4747/creativewriter` returned 200 from the running local dev server.
+- Passed: unauthenticated API smoke for `GET /api/books/book-1/suggestions` returned 401 `Authentication required.`
+- Browser smoke: `npx --yes agent-browser open http://localhost:4747/creativewriter` loaded without a Next.js error overlay, but the automation browser session was signed out and only exposed the public nav/sign-in state.
+- Blocked by unrelated existing generated route and route-test typing errors: `npx tsc --noEmit`
+
+### Phase 5C Deliverables
+
+- `supabase/migrations/202608020006_creativewriter_contributor_suggestions.sql`
+- `src/app/api/books/[bookId]/suggestions/route.ts`
+- `src/app/api/books/[bookId]/suggestions/[suggestionId]/route.ts`
+- `src/app/api/books/[bookId]/suggestions/route.test.ts`
+- `src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts`
+- `docs/creativewriter-phase-5c-evaluation.md`
+- `docs/creativewriter-implementation-plan.md`
+- `docs/creativewriter-release-readiness-checklist.md`
+- `docs/SOFTWARE_FACTORY.md`
+
+## CreativeWriter Factory Slice — Phase 5D Contributor Suggestion Review UI
+
+Date: 2026-08-02
+Status: Implemented, focused verification passed
+Owner: Product + Engineering
+
+### Scope Lock
+
+This slice turns the Phase 5C suggestion contract into a CreativeWriter review workflow. It intentionally does not apply accepted suggestions to manuscript text.
+
+In scope:
+
+- Load contributor suggestions into CreativeWriter workspace data.
+- Suggestions support-rail tab with Proposed, All, and Closed filters.
+- Selected-paragraph proposal form with original text evidence, suggested replacement text, and rationale.
+- Create, accept, reject, and withdraw actions wired to the authenticated suggestion APIs.
+- Suggestion-to-paragraph navigation through the existing dirty-draft guard.
+- Client normalization for snake_case API responses.
+- Focused mapper and component tests.
+
+Out of scope:
+
+- Applying accepted suggestions to paragraph text.
+- Stale original-text conflict detection.
+- Offline/local DB suggestion queue.
+- Notifications or contributor assignment workflow.
+- Cloud Supabase migration execution.
+- Live cross-account RLS proof.
+
+### Approval Gates
+
+- Scope approval: review UI only; no paragraph mutation.
+- Data approval: suggestions remain separate from reader comments.
+- API approval: CreativeWriter uses the authenticated Phase 5C suggestion routes.
+- Draft-safety approval: navigation from suggestions uses the existing unsynced-draft guard.
+- Verification approval: focused tests, scoped lint, broader CreativeWriter tests, route/API smoke, diff check, and typecheck status are recorded.
+
+### Decisions
+
+- Keep "accepted" as review approval only in this slice.
+- Do not expose an Apply button until stale-text conflict semantics exist.
+- Show suggestions beside comments and support context because authors need the edit proposal while writing.
+- Use Proposed, All, and Closed filters rather than mixing accepted/rejected/withdrawn suggestions into the active queue.
+
+### Verification Evidence
+
+- Passed: `npx vitest run src/components/creativewriter/creativewriter-workspace.test.tsx src/lib/creativewriter-ui/dashboard.test.ts`
+- Result: 2 test files passed, 18 tests passed.
+- Passed: scoped ESLint for CreativeWriter workspace, workspace tests, dashboard mapper, and dashboard tests.
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/suggestions/route.test.ts' 'src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts' 'src/app/api/books/[bookId]/annotations/route.test.ts' 'src/app/api/books/[bookId]/annotations/[annotationId]/route.test.ts' src/components/creativewriter/creativewriter-workspace.test.tsx src/lib/creativewriter-ui/dashboard.test.ts src/lib/creativewriter-sync.test.ts src/app/api/creativewriter/sync/push/route.test.ts src/app/api/creativewriter/sync/pull/route.test.ts src/app/api/creativewriter/sync/resolve-conflict/route.test.ts`
+- Result: 9 test files passed, 50 tests passed.
+- Passed: full scoped ESLint for suggestion routes/tests, annotation routes/tests, CreativeWriter workspace, and dashboard files.
+- Passed: `git diff --check`
+- Passed: `curl -I http://localhost:4747/creativewriter` returned 200 from the running local dev server.
+- Passed: unauthenticated API smoke for `GET /api/books/book-1/suggestions` returned 401 `Authentication required.`
+- Browser smoke: `npx --yes agent-browser open http://localhost:4747/creativewriter && npx --yes agent-browser wait --load networkidle && npx --yes agent-browser snapshot -i` loaded without a Next.js error overlay, but the automation browser session was signed out and only exposed public nav/sign-in state.
+- Blocked by unrelated existing generated route and route-test typing errors: `npx tsc --noEmit`
+
+### Phase 5D Deliverables
+
+- `src/lib/creativewriter-ui/dashboard.ts`
+- `src/lib/creativewriter-ui/dashboard.test.ts`
+- `src/components/creativewriter/creativewriter-workspace.tsx`
+- `src/components/creativewriter/creativewriter-workspace.test.tsx`
+- `docs/creativewriter-phase-5d-evaluation.md`
+- `docs/creativewriter-implementation-plan.md`
+- `docs/creativewriter-release-readiness-checklist.md`
+- `docs/SOFTWARE_FACTORY.md`
+
+## CreativeWriter Factory Slice — Phase 5E Safe Suggestion Apply
+
+Date: 2026-08-02
+Status: Implemented, focused verification passed
+Owner: Product + Engineering
+
+### Scope Lock
+
+This slice adds the explicit manuscript mutation step for accepted paragraph-scoped suggestions. It keeps acceptance and application separate.
+
+In scope:
+
+- Atomic Postgres function for applying accepted paragraph-scoped suggestions.
+- Editor-only apply permission through `can_edit_book`.
+- Accepted-only apply lifecycle rule.
+- Stale original-text guard before paragraph mutation.
+- Paragraph `current_text`, `accepted_text`, and `updated_at` updates on successful apply.
+- Suggestion `applied` lifecycle fields on successful apply.
+- API response shaping for updated suggestion and paragraph data.
+- CreativeWriter Apply action for accepted suggestions only.
+- Local paragraph and draft state refresh after successful apply.
+- Focused route and component tests.
+- Local migration application and database catalog proof.
+
+Out of scope:
+
+- Stale suggestion merge UI.
+- Apply support for book-level or chapter-level suggestions.
+- Bulk apply.
+- Notifications or assignment workflow.
+- Offline/local DB suggestion queue.
+- Cloud Supabase migration execution.
+- Live cross-account RLS proof.
+
+### Approval Gates
+
+- Lifecycle approval: proposed suggestions must be accepted before apply.
+- Data approval: paragraph text and suggestion status change atomically.
+- Conflict approval: stale paragraph text returns conflict instead of overwriting.
+- UI approval: Apply is visible only on accepted suggestions.
+- Draft-safety approval: apply is blocked while the active paragraph has an unsynced local draft.
+- Verification approval: focused tests, scoped lint, local migration application, function proof, broader CreativeWriter tests, route/API smoke, diff check, and typecheck status are recorded.
+
+### Decisions
+
+- Applying a suggestion writes both `current_text` and `accepted_text` so downstream Reader View, export, critic, and final manuscript surfaces see the applied manuscript text consistently.
+- The stale guard compares the paragraph's effective current text to the suggestion's `original_text_snapshot`.
+- Stale suggestions fail closed until a manual merge UX exists.
+- Book/chapter-scoped suggestions remain review-only until they have explicit mutation semantics.
+
+### Verification Evidence
+
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts' src/components/creativewriter/creativewriter-workspace.test.tsx`
+- Result: 2 test files passed, 25 tests passed.
+- Passed: scoped ESLint for suggestion status route, route tests, CreativeWriter workspace, and workspace tests.
+- Passed: `supabase migration up --local`
+- Function proof: `public.apply_creativewriter_contributor_suggestion(target_book_id uuid, target_suggestion_id uuid, target_reviewer_id uuid, target_review_note text default null)` exists in the active local database.
+- Migration history proof: `202608020007` exists in `supabase_migrations.schema_migrations`.
+- Passed: `npx vitest run 'src/app/api/books/[bookId]/suggestions/route.test.ts' 'src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts' 'src/app/api/books/[bookId]/annotations/route.test.ts' 'src/app/api/books/[bookId]/annotations/[annotationId]/route.test.ts' src/components/creativewriter/creativewriter-workspace.test.tsx src/lib/creativewriter-ui/dashboard.test.ts src/lib/creativewriter-sync.test.ts src/app/api/creativewriter/sync/push/route.test.ts src/app/api/creativewriter/sync/pull/route.test.ts src/app/api/creativewriter/sync/resolve-conflict/route.test.ts`
+- Result: 9 test files passed, 53 tests passed.
+- Passed: full scoped ESLint for suggestion routes/tests, annotation routes/tests, CreativeWriter workspace, and dashboard files.
+- Passed: `git diff --check`
+- Passed: `curl -I http://localhost:4747/creativewriter` returned 200 from the running local dev server.
+- Passed: unauthenticated API smoke for `GET /api/books/book-1/suggestions` returned 401 `Authentication required.`
+- Browser smoke: `npx --yes agent-browser open http://localhost:4747/creativewriter && npx --yes agent-browser wait --load networkidle && npx --yes agent-browser snapshot -i` loaded without a Next.js error overlay, but the automation browser session was signed out and only exposed public nav/sign-in state.
+- Blocked by unrelated existing generated route and route-test typing errors: `npx tsc --noEmit`
+
+### Phase 5E Deliverables
+
+- `supabase/migrations/202608020007_creativewriter_apply_contributor_suggestion.sql`
+- `src/app/api/books/[bookId]/suggestions/[suggestionId]/route.ts`
+- `src/app/api/books/[bookId]/suggestions/[suggestionId]/route.test.ts`
+- `src/components/creativewriter/creativewriter-workspace.tsx`
+- `src/components/creativewriter/creativewriter-workspace.test.tsx`
+- `docs/creativewriter-phase-5e-evaluation.md`
+- `docs/creativewriter-implementation-plan.md`
+- `docs/creativewriter-release-readiness-checklist.md`
+- `docs/SOFTWARE_FACTORY.md`
+
 ## Scope
 
 - Lock the v0.3.0 release slice.
@@ -1193,6 +1417,9 @@ Acceptance:
 - 2026-08-02: Added resizable CreativeWriter workspace columns with draggable and keyboard-accessible handles between the Books, Editor, and Support panels, persisted in browser local storage.
 - 2026-08-02: Completed CreativeWriter Phase 5A contributor comment review triage with Open/All/Resolved filters, comment-to-paragraph navigation, resolved/reopened API updates, local state refresh, focused coverage, and readiness documentation.
 - 2026-08-02: Completed CreativeWriter Phase 5B comment route hardening with explicit book/paragraph scoping, owner-or-editor mutation permissions, PATCH validation, reader annotation update RLS policy, focused route tests, and local migration proof.
+- 2026-08-02: Completed CreativeWriter Phase 5C contributor suggestions contract with dedicated persistence, lifecycle statuses, book/chapter/paragraph scoping, proposer/editor permissions, RLS policies, list/create/status APIs, focused route tests, and local migration proof.
+- 2026-08-02: Completed CreativeWriter Phase 5D contributor suggestion review UI with workspace suggestion loading, Suggestions tab, paragraph-scoped proposal form, accept/reject/withdraw review actions, focused coverage, and non-mutating accepted suggestion guardrail.
+- 2026-08-02: Completed CreativeWriter Phase 5E safe suggestion apply with an atomic Postgres apply function, accepted-only lifecycle, stale-text guard, explicit Apply UI, paragraph/draft state refresh, focused coverage, and local migration proof.
 - 2026-06-02: Added auto-review wizard resume success-path regression coverage to verify launch-token reuse and consistent job-id propagation across handshake and worker-launch calls.
 - 2026-06-02: Added auto-review wizard success-path regression coverage that verifies launch-token reuse between `launchOnly` handshake and worker-launch calls, and stabilized wizard tests by mocking the runner dependency.
 - 2026-06-02: Added auto-review wizard regression coverage for resume-path launch-handshake failure, verifying inline error surfacing and single process-launch attempt semantics.

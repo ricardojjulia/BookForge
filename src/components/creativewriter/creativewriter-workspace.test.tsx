@@ -333,6 +333,128 @@ describe("CreativeWriterWorkspace", () => {
     expect(screen.getAllByRole("button", { name: "Reopen" })).toHaveLength(2);
   });
 
+  it("creates contributor suggestions for the selected paragraph", async () => {
+    stubBrowserLayoutApis();
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          suggestion: {
+            id: "suggestion-2",
+            chapter_id: "chapter-1",
+            paragraph_id: "paragraph-1",
+            proposer_id: "user-1",
+            reviewer_id: null,
+            status: "proposed",
+            original_text_snapshot: "Original paragraph.",
+            suggested_text: "A better paragraph.",
+            rationale: "Sharper.",
+            review_note: null,
+            created_at: "2026-08-02T12:20:00.000Z",
+            updated_at: "2026-08-02T12:20:00.000Z",
+            reviewed_at: null,
+            applied_at: null,
+            withdrawn_at: null,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderWorkspace(workspaceData({ conflicts: [] }));
+
+    await user.click(screen.getByRole("tab", { name: /Suggestions/i }));
+    await user.type(screen.getByLabelText("Suggested replacement text"), "A better paragraph.");
+    await user.type(screen.getByLabelText("Suggestion rationale"), "Sharper.");
+    await user.click(screen.getByRole("button", { name: "Propose Suggestion" }));
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    expect(String(mockFetch.mock.calls[0]?.[0])).toBe("/api/books/book-1/suggestions");
+    expect(JSON.parse(String(mockFetch.mock.calls[0]?.[1]?.body))).toMatchObject({
+      chapterId: "chapter-1",
+      paragraphId: "paragraph-1",
+      originalTextSnapshot: "Original paragraph.",
+      suggestedText: "A better paragraph.",
+      rationale: "Sharper.",
+    });
+    expect(await screen.findByText("Contributor suggestion proposed.")).toBeInTheDocument();
+    expect(screen.getByText("A better paragraph.")).toBeInTheDocument();
+  });
+
+  it("accepts contributor suggestions before explicitly applying them to the manuscript draft", async () => {
+    stubBrowserLayoutApis();
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          suggestion: {
+            id: "suggestion-1",
+            status: "accepted",
+            reviewer_id: "editor-1",
+            review_note: null,
+            updated_at: "2026-08-02T12:25:00.000Z",
+            reviewed_at: "2026-08-02T12:25:00.000Z",
+            applied_at: null,
+            withdrawn_at: null,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    ).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          suggestion: {
+            id: "suggestion-1",
+            status: "applied",
+            reviewer_id: "editor-1",
+            review_note: null,
+            updated_at: "2026-08-02T12:30:00.000Z",
+            reviewed_at: "2026-08-02T12:25:00.000Z",
+            applied_at: "2026-08-02T12:30:00.000Z",
+            withdrawn_at: null,
+          },
+          paragraph: {
+            id: "paragraph-1",
+            currentText: "Try a more tactile sentence.",
+            acceptedText: "Try a more tactile sentence.",
+            updatedAt: "2026-08-02T12:30:00.000Z",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderWorkspace(workspaceData({ conflicts: [] }));
+
+    await user.click(screen.getByRole("tab", { name: /Suggestions/i }));
+    expect(screen.getByText("Contributor proposed manuscript changes")).toBeInTheDocument();
+    expect(screen.getByText("Try a more tactile sentence.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Accept" }));
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    expect(String(mockFetch.mock.calls[0]?.[0])).toBe("/api/books/book-1/suggestions/suggestion-1");
+    expect(JSON.parse(String(mockFetch.mock.calls[0]?.[1]?.body))).toEqual({ status: "accepted" });
+    expect(await screen.findByText("Contributor suggestion accepted.")).toBeInTheDocument();
+    expect(screen.getByLabelText("CreativeWriter manuscript editor")).toHaveValue("Original paragraph.");
+
+    await user.click(screen.getByRole("radio", { name: "Closed (1)" }));
+
+    expect(screen.getByText("Accepted")).toBeInTheDocument();
+    expect(screen.getByText("Try a more tactile sentence.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    expect(String(mockFetch.mock.calls[1]?.[0])).toBe("/api/books/book-1/suggestions/suggestion-1");
+    expect(JSON.parse(String(mockFetch.mock.calls[1]?.[1]?.body))).toEqual({ status: "applied" });
+    expect(await screen.findByText("Contributor suggestion applied.")).toBeInTheDocument();
+    expect(screen.getByLabelText("CreativeWriter manuscript editor")).toHaveValue("Try a more tactile sentence.");
+    expect(screen.getByText("Applied")).toBeInTheDocument();
+  });
+
   it("filters support context and pins selected entries per book", async () => {
     stubBrowserLayoutApis();
     const user = userEvent.setup();
@@ -432,6 +554,7 @@ function workspaceData(
         },
       ],
       readerComments: [],
+      contributorSuggestions: [],
       conflicts: options.conflicts ?? [],
       support: emptySupport(),
       project: {
@@ -517,6 +640,25 @@ function workspaceData(
         note: "Already handled.",
         resolved: true,
         createdAt: "2026-08-02T12:05:00.000Z",
+      },
+    ],
+    contributorSuggestions: [
+      {
+        id: "suggestion-1",
+        chapterId: "chapter-1",
+        paragraphId: "paragraph-1",
+        proposerId: "reader-1",
+        reviewerId: null,
+        status: "proposed",
+        originalTextSnapshot: "Original paragraph.",
+        suggestedText: "Try a more tactile sentence.",
+        rationale: "It better matches the book voice.",
+        reviewNote: null,
+        createdAt: "2026-08-02T12:10:00.000Z",
+        updatedAt: "2026-08-02T12:10:00.000Z",
+        reviewedAt: null,
+        appliedAt: null,
+        withdrawnAt: null,
       },
     ],
     conflicts: options.conflicts ?? [
