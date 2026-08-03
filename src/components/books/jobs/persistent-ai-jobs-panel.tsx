@@ -219,7 +219,7 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
   });
 
   return (
-    <Paper withBorder radius="md" p="xl" bg="#fbfaf8">
+    <Paper id="persistent-ai-jobs" withBorder radius="md" p="xl" bg="#fbfaf8" style={{ scrollMarginTop: 24 }}>
       <Stack>
         <Group justify="space-between" align="flex-start">
           <div>
