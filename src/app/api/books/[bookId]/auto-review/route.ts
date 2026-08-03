@@ -77,6 +77,31 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       }
 
       if (existingJob.status !== "completed") {
+        // Refuse to reset-and-relaunch if the underlying work is verifiably
+        // still alive (a revision_jobs row for this book with a heartbeat
+        // in the last 90s). Without this, clicking "Resume" while a
+        // previous run was still genuinely active would restart the whole
+        // pipeline from "analyze" -- duplicating the baseline critic sweep
+        // on top of whatever was already running. Found live: repeated
+        // resumes on one book left 13 full_book_rewrite jobs running in
+        // true parallel for ~2 hours before being caught.
+        const { data: activeUnderlyingJobs } = await supabase
+          .from("revision_jobs")
+          .select("id,settings")
+          .eq("book_id", bookId)
+          .eq("status", "running");
+        const stillAlive = (activeUnderlyingJobs || []).some((row) => {
+          const heartbeatAt = (row.settings as { progress?: { lastHeartbeatAt?: string } } | null)?.progress?.lastHeartbeatAt;
+          if (!heartbeatAt) return false;
+          return Date.now() - new Date(heartbeatAt).getTime() < 90000;
+        });
+        if (stillAlive) {
+          return NextResponse.json(
+            { error: "This book's Auto-Review run is still actively working. Wait for it to finish or fail before resuming." },
+            { status: 409 },
+          );
+        }
+
         const updatePayload: Record<string, unknown> = {
           status,
           error: null,
