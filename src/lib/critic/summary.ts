@@ -19,8 +19,15 @@ export function summarizeCriticContent(content: Record<string, unknown>) {
     firstReadableItem(content.issues);
   const chapterNote = firstReadableItem(content.chapterNotes);
   const voiceNote = firstReadableItem(content.voiceAndStyleNotes);
-  const continuityFlag = firstReadableItem(content.continuityFlags);
-  const nextStep = firstReadableItem(content.nextRevisionPlan);
+  // Critic lens prompts ask for continuityFlags/nextRevisionPlan, but this
+  // same summarizer also runs on non-critic report types shown in the same
+  // panel (e.g. rewrite_execution, whose continuity notes surfaced during
+  // rewriting use continuityWarnings/nextStep instead) -- without also
+  // checking those names, a report with real, readable findings fell back
+  // to the generic "did not include readable findings" message, worded as
+  // if it were specifically about a critic lens.
+  const continuityFlag = firstReadableItem(content.continuityFlags) || firstReadableItem(content.continuityWarnings);
+  const nextStep = firstReadableItem(content.nextRevisionPlan) || stringValue(content.nextStep);
 
   const sentences = [
     strongestStrength ? `Strength: ${strongestStrength}` : "",
