@@ -97,6 +97,7 @@ type AutoReviewJobSummary = {
 
 type AutoReviewJobResponse = {
   job?: AutoReviewJobSummary | null;
+  acceptedParagraphCount?: number;
 };
 
 const autoReviewStrategies = [
@@ -130,6 +131,7 @@ export function BookActions({
   const [pendingTask, setPendingTask] = useState<PendingTask | null>(null);
   const [pendingGuardTask, setPendingGuardTask] = useState<AiDashboardTask | null>(null);
   const [latestAutoReviewJob, setLatestAutoReviewJob] = useState<AutoReviewJobSummary | null>(null);
+  const [acceptedParagraphCount, setAcceptedParagraphCount] = useState(0);
   // Starts false on both server and the client's first render -- reading
   // localStorage inside the useState initializer runs on the client's
   // initial render too (not just the server), and if the user had
@@ -174,10 +176,12 @@ export function BookActions({
         );
         if (!cancelled) {
           setLatestAutoReviewJob(result.job || null);
+          setAcceptedParagraphCount(result.acceptedParagraphCount ?? 0);
         }
       } catch {
         if (!cancelled) {
           setLatestAutoReviewJob(null);
+          setAcceptedParagraphCount(0);
         }
       }
     }
@@ -405,8 +409,14 @@ export function BookActions({
     return task === "book-bible" || task === "chapter-summaries" || task === "critic" || task === "critic-all";
   }
 
+  // A "completed" job with zero accepted paragraphs right now means the
+  // manuscript was reset (e.g. Reset Rewrite) after that run finished --
+  // its "already reviewed, this is redundant" guidance no longer applies,
+  // since there's no revised text left for it to be redundant with.
+  const autoReviewOutputStale = latestAutoReviewJob?.status === "completed" && acceptedParagraphCount === 0;
+
   function requestTask(task: AiDashboardTask) {
-    if (latestAutoReviewJob?.status === "completed" && requiresPostAutoReviewConfirmation(task)) {
+    if (latestAutoReviewJob?.status === "completed" && !autoReviewOutputStale && requiresPostAutoReviewConfirmation(task)) {
       setPendingGuardTask(task);
       return;
     }
@@ -1178,7 +1188,7 @@ export function BookActions({
 
   return (
     <Stack>
-      {latestAutoReviewJob?.status === "completed" && (
+      {latestAutoReviewJob?.status === "completed" && !autoReviewOutputStale && (
         <Alert color="green" title="Auto-Review already completed for this manuscript">
           <Text size="sm" mb={6}>
             {`Last run: ${describeAutoReviewMode(latestAutoReviewJob.mode)} completed ${formatAutoReviewCompletionTime(
@@ -1188,6 +1198,20 @@ export function BookActions({
           </Text>
           <Text size="sm" c="dimmed">
             Review the revised manuscript and exports first. Prepare Context and Critic actions are still available, but they are usually redundant right after a completed Auto-Review.
+          </Text>
+        </Alert>
+      )}
+
+      {latestAutoReviewJob?.status === "completed" && autoReviewOutputStale && (
+        <Alert color="yellow" title="Manuscript reset since the last Auto-Review">
+          <Text size="sm" mb={6}>
+            {`Last run: ${describeAutoReviewMode(latestAutoReviewJob.mode)} completed ${formatAutoReviewCompletionTime(
+              latestAutoReviewJob.completed_at,
+              latestAutoReviewJob.created_at,
+            )}, but no paragraphs currently have accepted text -- the manuscript has been reset since then.`}
+          </Text>
+          <Text size="sm" c="dimmed">
+            That run's critic scores and revised text no longer reflect the current manuscript. A fresh Auto-Review is recommended rather than assuming the old results still apply.
           </Text>
         </Alert>
       )}
