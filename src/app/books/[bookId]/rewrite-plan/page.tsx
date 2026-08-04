@@ -12,6 +12,7 @@ import { ReadinessStatusGrid } from "@/components/books/rewrite/readiness-status
 import { LiveProcessBanner } from "@/components/books/jobs/live-process-banner";
 import { criticLenses } from "@/lib/critic/prompts";
 import { getRewriteCampaignStats, type RewriteCampaignRow } from "@/lib/rewrite/campaigns";
+import { getRewriteCoverage } from "@/lib/rewrite/coverage";
 import { getRewriteReadiness } from "@/lib/rewrite/readiness";
 import { getExistingRevisionState, shouldSkipParagraph, type ExistingRevisionRow } from "@/lib/rewrite/eligibility";
 import { getDefaultRewriteWorkflow, type RewriteWorkflowRow } from "@/lib/rewrite/workflows";
@@ -174,7 +175,7 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
     0,
     (paragraphCount || 0) - pendingDraftParagraphCount - acceptedParagraphCount - permanentlyIneligibleUntouchedCount,
   );
-  const rewriteCoverage = getRewriteCoverage(chapters || [], paragraphCoverageRows || [], revisionCoverageRows || []);
+  const rewriteCoverage = getRewriteCoverage(chapters || [], paragraphCoverageRows || [], revisionCoverageRows || [], acceptedParagraphIds);
   const campaignStats = getRewriteCampaignStats({
     paragraphCount: paragraphCount || 0,
     pendingDraftParagraphCount,
@@ -304,43 +305,6 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
     </AppShell>
   );
 }
-
-function getRewriteCoverage(
-  chapters: Array<{ id: string; chapter_number: number; title: string | null; exclude_from_rewrite?: boolean | null }>,
-  paragraphs: Array<{ id: string; chapter_id: string; original_text?: string | null; is_locked?: boolean | null }>,
-  revisions: Array<{ paragraph_id: string | null }>,
-) {
-  const paragraphIdsWithRevisions = new Set(revisions.map((revision) => revision.paragraph_id).filter(Boolean));
-  const paragraphsByChapter = paragraphs.reduce<Record<string, typeof paragraphs>>((groups, paragraph) => {
-    groups[paragraph.chapter_id] ||= [];
-    groups[paragraph.chapter_id].push(paragraph);
-    return groups;
-  }, {});
-
-  return chapters.map((chapter) => {
-    const chapterParagraphs = paragraphsByChapter[chapter.id] || [];
-    // "Total" must only count paragraphs that could ever actually be
-    // rewritten -- otherwise a chapter with any locked/too-short/title-echo
-    // paragraph (nearly every chapter has at least one) shows
-    // rewrittenParagraphs < totalParagraphs forever, keeping "Rewrite this
-    // chapter" visible even after genuine full coverage, so clicking it just
-    // silently does nothing.
-    const eligibleParagraphs = chapter.exclude_from_rewrite
-      ? []
-      : chapterParagraphs.filter(
-          (paragraph) => !paragraph.is_locked && !shouldSkipParagraph(paragraph.original_text || "", chapter.title),
-        );
-    const rewritten = eligibleParagraphs.filter((paragraph) => paragraphIdsWithRevisions.has(paragraph.id)).length;
-    return {
-      chapterId: chapter.id,
-      chapterNumber: chapter.chapter_number,
-      title: chapter.title,
-      totalParagraphs: eligibleParagraphs.length,
-      rewrittenParagraphs: rewritten,
-    };
-  });
-}
-
 
 function getSavedModelEvaluation(metadata: Record<string, unknown> | null) {
   const value = metadata?.modelEvaluation;

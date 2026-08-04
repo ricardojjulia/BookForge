@@ -49,6 +49,8 @@ export function RewriteExecutionPanel({
     title: string | null;
     totalParagraphs: number;
     rewrittenParagraphs: number;
+    realTotalParagraphs: number;
+    realRewrittenParagraphs: number;
   }>;
   activeCampaign: RewriteCampaignRow | null;
   campaignStats: RewriteCampaignStats;
@@ -1862,15 +1864,24 @@ function RewriteCoverageSummary({
     title: string | null;
     totalParagraphs: number;
     rewrittenParagraphs: number;
+    realTotalParagraphs: number;
+    realRewrittenParagraphs: number;
   }>;
   disabled?: boolean;
   loadingChapterId?: string | null;
   onRewriteChapter?: (chapterId: string) => void;
 }) {
-  const touchedChapters = coverage.filter((chapter) => chapter.rewrittenParagraphs > 0).length;
+  // Displayed numbers use the REAL paragraph counts (every paragraph in the
+  // book, only ones actually accepted) -- not the eligible-only counts,
+  // which undercount the denominator (excluding locked/too-short/title-echo
+  // paragraphs entirely) and overcount the numerator (any drafted paragraph,
+  // including ones auto-accept later rejected). The eligible-only fields
+  // are still used below purely to decide whether "Rewrite this chapter" is
+  // shown, since that button does nothing once no eligible paragraph is left.
+  const touchedChapters = coverage.filter((chapter) => chapter.realRewrittenParagraphs > 0).length;
   const totalChapters = coverage.length;
-  const totalParagraphs = coverage.reduce((sum, chapter) => sum + chapter.totalParagraphs, 0);
-  const rewrittenParagraphs = coverage.reduce((sum, chapter) => sum + chapter.rewrittenParagraphs, 0);
+  const totalParagraphs = coverage.reduce((sum, chapter) => sum + chapter.realTotalParagraphs, 0);
+  const rewrittenParagraphs = coverage.reduce((sum, chapter) => sum + chapter.realRewrittenParagraphs, 0);
   const percent = totalParagraphs ? Math.round((rewrittenParagraphs / totalParagraphs) * 100) : 0;
 
   return (
@@ -1887,8 +1898,8 @@ function RewriteCoverageSummary({
       <Progress value={percent} color="grape" radius="xl" mb="md" />
       <SimpleGrid cols={{ base: 1, md: 4 }}>
         {coverage.map((chapter) => {
-          const chapterPercent = chapter.totalParagraphs
-            ? Math.round((chapter.rewrittenParagraphs / chapter.totalParagraphs) * 100)
+          const chapterPercent = chapter.realTotalParagraphs
+            ? Math.round((chapter.realRewrittenParagraphs / chapter.realTotalParagraphs) * 100)
             : 0;
           return (
             <Paper key={chapter.chapterId} withBorder radius="sm" p="sm" bg="white">
@@ -1897,7 +1908,7 @@ function RewriteCoverageSummary({
               </Text>
               <Progress value={chapterPercent} color={chapterPercent ? "teal" : "gray"} radius="xl" size="sm" my={6} />
               <Text size="xs" c="dimmed" mb={6}>
-                {chapter.rewrittenParagraphs}/{chapter.totalParagraphs} paragraphs
+                {chapter.realRewrittenParagraphs}/{chapter.realTotalParagraphs} paragraphs
               </Text>
               {onRewriteChapter && chapter.rewrittenParagraphs < chapter.totalParagraphs && (
                 <Button

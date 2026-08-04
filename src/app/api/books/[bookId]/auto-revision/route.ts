@@ -409,7 +409,15 @@ function getThresholds(trustProfile: "careful" | "balanced" | "full_trust", risk
       ? { accept: 0.55, redo: 0.3 }
       : trustProfile === "balanced"
         ? { accept: 0.7, redo: 0.2 }
-        : { accept: 0.82, redo: 0.13 };
+        // full_trust previously only accepted 82% of even the lowest-risk
+        // drafts, dropping to 34% for anything flagged medium/high risk --
+        // for a mode whose entire point is "skip manual review," that left
+        // most of a manuscript's real paragraphs stuck as rejected/redo
+        // drafts (never written to paragraphs.accepted_text) even after a
+        // full autonomous pass. Raised so full_trust actually behaves like
+        // its name while still keeping a real, smaller safety margin for
+        // risk-flagged paragraphs below.
+        : { accept: 0.95, redo: 0.04 };
   if (risk === "high") return { accept: Math.max(0.12, profile.accept - 0.48), redo: Math.min(0.55, profile.redo + 0.26) };
   if (risk === "medium") return { accept: Math.max(0.25, profile.accept - 0.22), redo: Math.min(0.42, profile.redo + 0.12) };
   return profile;
