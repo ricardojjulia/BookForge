@@ -28,10 +28,17 @@ import { SceneEditorPanel } from "@/components/books/scene-editor-panel";
 import { StructureAuditPanel } from "@/components/books/structure-audit-panel";
 import { BookMetadataTimelinePanel } from "@/components/books/metadata/book-metadata-timeline-panel";
 import { getBookAuthorDisplay } from "@/lib/books/status";
+import { criticLenses } from "@/lib/critic/prompts";
 import { getRewriteReadiness, type RewriteReadiness } from "@/lib/rewrite/readiness";
 import type { RewriteWorkflowRow } from "@/lib/rewrite/workflows";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
+
+// Derived, not hardcoded: this badge/gate was stuck at "/7" for a while
+// after dialogue_density became the 8th critic lens (see the auto-review
+// pipeline's own missing-lens fix), so postCriticCount could read "8/7" --
+// a stale literal that just never got updated when the lens count changed.
+const CRITIC_LENS_COUNT = Object.keys(criticLenses).length;
 
 export default async function BookDashboardPage({ params }: { params: Promise<{ bookId: string }> }) {
   if (!hasSupabaseEnv()) {
@@ -565,8 +572,8 @@ function WorkflowCommandCenter({
               <Badge color={hasDriftReport ? "green" : "yellow"} variant="light">
                 Drift {hasDriftReport ? "checked" : "needed"}
               </Badge>
-              <Badge color={postCriticCount >= 7 ? "green" : "yellow"} variant="light">
-                Post-Critic {postCriticCount}/7
+              <Badge color={postCriticCount >= CRITIC_LENS_COUNT ? "green" : "yellow"} variant="light">
+                Post-Critic {postCriticCount}/{CRITIC_LENS_COUNT}
               </Badge>
             </Group>
             <Title order={3}>Production Command Center</Title>
@@ -696,7 +703,7 @@ function getBookCommandCenter(input: {
   }
 
   const acceptedPercent = input.paragraphCount ? Math.round((input.acceptedParagraphCount / input.paragraphCount) * 100) : 0;
-  if (acceptedPercent >= 80 && (!input.hasDriftReport || input.postCriticCount < 7)) {
+  if (acceptedPercent >= 80 && (!input.hasDriftReport || input.postCriticCount < CRITIC_LENS_COUNT)) {
     return {
       stage: "Quality check",
       stageColor: "yellow",
@@ -706,7 +713,7 @@ function getBookCommandCenter(input: {
     };
   }
 
-  if (acceptedPercent >= 90 && input.hasDriftReport && input.postCriticCount >= 7) {
+  if (acceptedPercent >= 90 && input.hasDriftReport && input.postCriticCount >= CRITIC_LENS_COUNT) {
     return {
       stage: "Export ready",
       stageColor: "green",
