@@ -42,7 +42,12 @@ const STAGE_MAX_ATTEMPTS = 3;
 
 function isTransientStageError(error: unknown) {
   const message = getError(error);
-  return /(fetch failed|Failed to fetch|ECONNRESET|ECONNREFUSED|ETIMEDOUT|HeadersTimeout|UND_ERR_|socket hang up|network error|timeout)/i.test(message);
+  // "Timed out waiting for stage job" is the auto-review worker's own poll
+  // giving up after 45 minutes -- not proof the underlying work failed. A
+  // full-manuscript rewrite can legitimately run for hours; treating this as
+  // retryable lets runStageWithRetry go back to watching the SAME dispatched
+  // job (see pendingStageJob below) instead of the whole run dying here.
+  return /(fetch failed|Failed to fetch|ECONNRESET|ECONNREFUSED|ETIMEDOUT|HeadersTimeout|UND_ERR_|socket hang up|network error|timeout|timed out)/i.test(message);
 }
 
 function wait(ms: number) {
@@ -63,10 +68,13 @@ type AutoReviewJobRow = {
   completed_at: string | null;
 };
 
+type PendingStageJob = { stage: string; jobId: string } | null;
+
 type MetadataSelection = {
   metadataSnapshotId?: string | null;
   metadataBranchName?: string | null;
   metadataSelectionSource?: "explicit_snapshot" | "branch_active" | "active_snapshot" | null;
+  pendingStageJob?: PendingStageJob;
 };
 
 type AutoReviewLogEntry = Record<string, unknown> & {
@@ -76,13 +84,34 @@ type AutoReviewLogEntry = Record<string, unknown> & {
 
 type AutoReviewJobUpdate = {
   stage?: string;
+  completedStageKey?: string;
   iteration?: number;
   completed?: boolean;
   failed?: boolean;
   error?: string;
   exportId?: string | null;
+  config?: Record<string, unknown>;
   logEntry?: Record<string, unknown>;
 };
+
+// Stages inside the rewrite/critic loop can legitimately run more than once
+// per job (once per quality-gate iteration). Recording their completion
+// under a plain name in `stages_completed` would make a resumed request
+// think iteration 2's "rewrite_execute" is already done because iteration
+// 0's was -- skipping work it actually needs to redo. Scoping the persisted
+// key to the iteration it ran in fixes that without touching stages that
+// only ever run once.
+const LOOP_STAGES = new Set<string>([
+  "rewrite_execute",
+  "auto_accept",
+  "drift_check",
+  ...CRITIC_LENSES.map((lens) => `critic_post:${lens}`),
+  "critics_check",
+]);
+
+function stageStatusKey(stage: string, iteration: number) {
+  return LOOP_STAGES.has(stage) ? `${stage}@${iteration}` : stage;
+}
 
 function getError(e: unknown) {
   if (e instanceof Error) return e.message;
@@ -169,15 +198,15 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     const updateJob = async (updates: AutoReviewJobUpdate) => {
       const { data: latest } = await supabase
         .from("auto_review_jobs")
-        .select("id,stages_completed,log,iteration")
+        .select("id,stages_completed,log,iteration,config")
         .eq("id", body.jobId)
         .eq("book_id", bookId)
         .eq("user_id", user.id)
         .single();
       if (!latest) throw new Error("Auto-review job disappeared.");
 
-      const stagesCompleted = updates.stage
-        ? Array.from(new Set([...(latest.stages_completed || []), updates.stage]))
+      const stagesCompleted = updates.completedStageKey
+        ? Array.from(new Set([...(latest.stages_completed || []), updates.completedStageKey]))
         : latest.stages_completed || [];
       const log = updates.logEntry
         ? [...(latest.log || []), { ...updates.logEntry, ts: new Date().toISOString() }]
@@ -187,6 +216,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       if (updates.stage) payload.current_stage = updates.stage;
       if (updates.iteration !== undefined) payload.iteration = updates.iteration;
       if (updates.exportId !== undefined) payload.export_id = updates.exportId;
+      if (updates.config !== undefined) {
+        payload.config = { ...((latest.config as Record<string, unknown> | null) || {}), ...updates.config };
+      }
       if (updates.completed) {
         payload.status = "completed";
         payload.completed_at = new Date().toISOString();
@@ -198,6 +230,16 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
       const { error } = await supabase.from("auto_review_jobs").update(payload).eq("id", body.jobId);
       if (error) throw error;
+    };
+
+    // Tracks the underlying revision_jobs row a server-managed stage
+    // dispatched, if any, so a retry or a resumed request can check whether
+    // it actually finished (or is still legitimately in flight) instead of
+    // firing off a costly duplicate -- see callStage below.
+    let pendingStageJob: PendingStageJob = selection.pendingStageJob ?? null;
+    const setPendingStageJob = async (value: PendingStageJob) => {
+      pendingStageJob = value;
+      await updateJob({ config: { pendingStageJob: value } });
     };
 
     if (body.launchToken) {
@@ -240,6 +282,33 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         bodyPayload.action === "preview";
 
       if (payload !== undefined && supportsServerManagedHandoff(path) && !isAutoRevisionPreview) {
+        if (pendingStageJob && pendingStageJob.stage === currentStage) {
+          const { data: existingJob } = await supabase
+            .from("revision_jobs")
+            .select("id,status")
+            .eq("id", pendingStageJob.jobId)
+            .eq("book_id", bookId)
+            .maybeSingle();
+
+          if (existingJob?.status === "completed") {
+            await setPendingStageJob(null);
+            return {};
+          }
+          if (existingJob && existingJob.status !== "failed" && existingJob.status !== "cancelled") {
+            // A prior attempt already dispatched this exact stage and (per
+            // the transient-timeout retry above) we're back here because
+            // that attempt's poll window ran out, not because the work
+            // failed. Full-manuscript rewrites can genuinely take hours --
+            // keep watching the SAME job instead of starting a costly
+            // duplicate one.
+            await pollJobUntilTerminal(pendingStageJob.jobId);
+            await setPendingStageJob(null);
+            return {};
+          }
+          // Not found, or it actually failed/cancelled: safe to dispatch fresh.
+          await setPendingStageJob(null);
+        }
+
         const queueRes = await fetch(new URL(path, baseUrl).toString(), {
           method: "POST",
           headers: {
@@ -263,6 +332,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         if (!stageJobId) {
           throw new Error(`Stage queue handoff missing job id: ${path}`);
         }
+        await setPendingStageJob({ stage: currentStage, jobId: stageJobId });
 
         // The "run" call processes the entire stage synchronously within its
         // own HTTP response (e.g. a full-book rewrite across hundreds of
@@ -304,7 +374,10 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           wait(QUICK_RESPONSE_WINDOW_MS).then(() => ({ settled: false as const, data: undefined })),
         ]);
 
-        if (quick.settled) return quick.data;
+        if (quick.settled) {
+          await setPendingStageJob(null);
+          return quick.data;
+        }
 
         // Didn't respond quickly -- this is a genuinely long-running stage.
         // Stop waiting on this specific HTTP call (still processing
@@ -313,6 +386,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         // an unhandled rejection.
         runPromise.catch(() => {});
         await pollJobUntilTerminal(stageJobId);
+        await setPendingStageJob(null);
         return {};
       }
 
@@ -352,7 +426,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     const addStage = async (stage: string, message: string, extra?: Record<string, unknown>) => {
       await updateJob({
         stage,
-        logEntry: { type: "stage_complete", stage, iteration: currentJob.iteration, message, ...(extra || {}) },
+        completedStageKey: stageStatusKey(stage, currentIteration),
+        logEntry: { type: "stage_complete", stage, iteration: currentIteration, message, ...(extra || {}) },
       });
     };
 
@@ -406,8 +481,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     currentStage = currentJob.current_stage || "analyze";
 
-    for (const stage of stageOrder) {
-      if (stageStatus.has(stage)) continue;
+    let stageIndex = 0;
+    while (stageIndex < stageOrder.length) {
+      const stage = stageOrder[stageIndex];
+      if (stageStatus.has(stageStatusKey(stage, currentIteration))) {
+        stageIndex += 1;
+        continue;
+      }
       currentStage = stage;
 
       // Mark the stage as actively in progress the moment it starts, not
@@ -475,13 +555,11 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
               message: `Starting rewrite iteration ${currentIteration + 1}`,
             },
           });
-          stageStatus.delete("rewrite_execute");
-          stageStatus.delete("auto_accept");
-          stageStatus.delete("drift_check");
-          for (const lens of CRITIC_LENSES) {
-            stageStatus.delete(`critic_post:${lens}`);
-          }
-          stageStatus.delete("critics_check");
+          // No need to clear stageStatus here: the next pass's stages are
+          // recorded under `${stage}@${currentIteration}` keys (see
+          // stageStatusKey), so this iteration's keys simply won't match
+          // anything already in stageStatus.
+          stageIndex = stageOrder.indexOf("rewrite_execute");
           continue;
         }
       } else if (stage === "export") {
@@ -497,6 +575,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/mark-finished`, { exportId }));
         await addStage(stage, "Book marked finished.");
       }
+      stageIndex += 1;
     }
 
     await updateJob({
