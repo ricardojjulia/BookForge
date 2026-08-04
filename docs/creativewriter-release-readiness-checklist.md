@@ -1,7 +1,7 @@
 # CreativeWriter Release Readiness Checklist
 
-Date: 2026-08-03
-Phase: 5L Contributor Assignment Status Updates
+Date: 2026-08-04
+Phase: 5Q Pinned Context Device-Scope Clarity
 Status: Not ready for broad release
 
 ## Current Readiness
@@ -54,7 +54,7 @@ Status: Not ready for broad release
 - [x] Accepted/applied suggestions can safely mutate manuscript text with stale-text conflict handling.
 - [ ] Contributor assignment creation, reassignment, edit, and delete controls are implemented.
 - [ ] Notes/research/bible edits sync through a designed non-manuscript contract.
-- [ ] Pinned context syncs across devices or has explicit local-only product language.
+- [x] Pinned context syncs across devices or has explicit local-only product language.
 - [ ] Visual order conflict review exists.
 - [ ] Import jobs run outside request/response lifecycle.
 - [ ] Full cloud browser/API/data verification exists.

@@ -367,6 +367,8 @@ Phase 5J restored profile-safe contributor labels after the embedded profile rel
 
 Phase 5K implemented the durable contributor assignment contract. Assignments now have a dedicated table, book-scoped RLS policies, authenticated list/create API, workspace loading, profile participant integration, and read-only CreativeWriter visibility. Assignment creation controls and status editing remain future slices.
 
+Phase 5Q made pinned support context device scope explicit. The existing per-book browser storage remains local-only, while the pinned panel now shows visible and accessible language that pins stay on this device and do not sync across devices.
+
 ### Phase 6: Offline/Desktop Shell
 
 - Local DB.
@@ -635,6 +637,15 @@ Phase 5K implemented the durable contributor assignment contract. Assignments no
 8. Add focused route and component tests for permission, status, request payload, and local UI refresh.
 9. Run focused tests, broader CreativeWriter tests, scoped lint, route/API smoke, browser smoke, diff check, typecheck status, and factory documentation updates.
 
+## Phase 5Q Implementation Steps
+
+1. Preserve the existing per-book browser `localStorage` pin contract.
+2. Show a concise visible device-scope label only when pinned context exists.
+3. Add accessible language that pins remain in this browser and do not sync across devices.
+4. Give the pinned context section semantic heading structure.
+5. Extend the existing support-context pin regression test without adding a cloud persistence contract.
+6. Run focused tests, scoped lint, browser proof, diagnostics, diff check, and typecheck evidence.
+
 ## Phase 2B Implementation Steps
 
 1. Add CreativeWriter import adapter for direct document files.
@@ -682,3 +693,4 @@ Phase 5K implemented the durable contributor assignment contract. Assignments no
 | Profile-safe label approval | Contributor labels use a separate best-effort profile lookup and never depend on embedded relationship availability. |
 | Assignment contract approval | Contributor assignments persist behind book-scoped RLS and are visible in CreativeWriter before editing controls ship. |
 | Assignment status approval | Contributors can update assignment lifecycle status through authenticated API and CreativeWriter controls before assignment creation UI ships. |
+| Pinned context scope approval | Visible and accessible device-only language prevents browser-local pins from implying cross-device sync. |

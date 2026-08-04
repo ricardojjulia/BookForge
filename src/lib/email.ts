@@ -50,16 +50,18 @@ export async function sendWorkflowNotification({
   title,
   body,
   actorLabel,
+  idempotencyKey,
 }: {
   toEmail: string;
   bookTitle: string;
   title: string;
   body: string;
   actorLabel: string;
+  idempotencyKey?: string;
 }): Promise<{ sent: boolean }> {
   if (!resend) return { sent: false };
 
-  await resend.emails.send({
+  const { error } = await resend.emails.send({
     from: FROM,
     to: toEmail,
     subject: `${title} · ${bookTitle}`,
@@ -69,7 +71,8 @@ export async function sendWorkflowNotification({
       <p>${body}</p>
     `,
     text: `${actorLabel} updated a workflow item on ${bookTitle}.\n\n${title}\n${body}`,
-  });
+  }, { idempotencyKey });
+  if (error) throw new Error(error.message);
 
   return { sent: true };
 }
