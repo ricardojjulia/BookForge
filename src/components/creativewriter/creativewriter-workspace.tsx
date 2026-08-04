@@ -724,7 +724,19 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                   />
                   {pinnedSupportEntries.length > 0 && (
                     <Stack gap="xs">
-                      <Text size="sm" fw={700}>Pinned Context</Text>
+                      <Group gap="xs">
+                        <Title order={3} size="sm">Pinned Context</Title>
+                        <Tooltip label="Pins are saved in this browser and do not sync across devices.">
+                          <Badge
+                            size="xs"
+                            variant="light"
+                            color="gray"
+                            aria-label="Pinned context is saved on this device only and does not sync across devices."
+                          >
+                            This device
+                          </Badge>
+                        </Tooltip>
+                      </Group>
                       {filterSupportEntries(pinnedSupportEntries, supportSearch).map((entry) => (
                         <SupportEntryCard key={`pinned-${entry.id}`} entry={entry} pinned onTogglePin={togglePinnedSupport} compact />
                       ))}

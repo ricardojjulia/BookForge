@@ -665,7 +665,9 @@ describe("CreativeWriterWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Pin Mara Vale" }));
 
-    expect(screen.getByText("Pinned Context")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Pinned Context", level: 3 })).toBeInTheDocument();
+    expect(screen.getByText("This device")).toBeInTheDocument();
+    expect(screen.getByLabelText("Pinned context is saved on this device only and does not sync across devices.")).toBeInTheDocument();
     expect(JSON.parse(window.localStorage.getItem("bookforge:creativewriter:pinned-support:book-1") || "[]")).toEqual(["character:character-1"]);
 
     await user.click(screen.getByRole("button", { name: "Clear support search" }));
