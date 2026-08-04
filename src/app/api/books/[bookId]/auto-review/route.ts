@@ -180,7 +180,19 @@ export async function GET(_: Request, { params }: { params: Promise<{ bookId: st
       }
     }
 
-    return NextResponse.json({ job });
+    // A "completed" job's UI guidance (skip critic/context, the manuscript
+    // is already revised) assumes its accepted work is still on the
+    // paragraphs -- untrue once a Reset Rewrite has run since. Rather than
+    // trust the job row alone, tell the client how much accepted coverage
+    // actually exists right now so it can tell a genuinely-done manuscript
+    // from a completed-but-since-reset one.
+    const { count: acceptedParagraphCount } = await supabase
+      .from("paragraphs")
+      .select("id", { count: "exact", head: true })
+      .eq("book_id", bookId)
+      .not("accepted_text", "is", null);
+
+    return NextResponse.json({ job, acceptedParagraphCount: acceptedParagraphCount ?? 0 });
   } catch (e) {
     if (isTransientJsonParseError(e)) {
       console.warn("Auto-review status polling transient parse error", e);
