@@ -22,7 +22,12 @@ const lensDescriptions: Record<CriticLens, string> = {
 };
 
 export function CriticScoreboard({ reports }: { reports: CriticReport[] }) {
-  const latestByLens = getLatestReportByLens(reports);
+  // `reports` here is often the book's raw, unfiltered coherence_reports
+  // feed (rewrite_execution, rewrite_plan, drift checks, etc. included) --
+  // the badge must only count the critic ones, or it silently displays a
+  // number larger than the 8 possible lenses could ever produce.
+  const criticReports = reports.filter((report) => isCriticReportType(report.report_type));
+  const latestByLens = getLatestReportByLens(criticReports);
 
   return (
     <Paper withBorder radius="md" p="xl" bg="white">
@@ -32,7 +37,7 @@ export function CriticScoreboard({ reports }: { reports: CriticReport[] }) {
           <Text c="dimmed">Single-value evaluation graphs appear as each lens is run.</Text>
         </div>
         <Badge color="grape" variant="light">
-          {reports.length} saved
+          {criticReports.length} saved
         </Badge>
       </Group>
 
@@ -103,6 +108,10 @@ function getLatestReportByLens(reports: CriticReport[]) {
 
 function getLensFromReportType(reportType: string) {
   return reportType.replace(/^critic_post:/, "").replace(/^critic:/, "") as CriticLens;
+}
+
+function isCriticReportType(reportType: string) {
+  return reportType.startsWith("critic:") || reportType.startsWith("critic_post:");
 }
 
 function scoreColor(score: number) {
