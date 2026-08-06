@@ -20,6 +20,10 @@ import {
   IconPencilStar,
   IconServer,
 } from "@tabler/icons-react";
+import { hasSupabaseEnv } from "@/lib/supabase/env";
+import { createClient } from "@/lib/supabase/server";
+
+export const dynamic = "force-dynamic";
 
 const features = [
   {
@@ -44,7 +48,17 @@ const features = [
   },
 ];
 
-export default function Home() {
+export default async function Home() {
+  let loggedIn = false;
+  if (hasSupabaseEnv()) {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    loggedIn = Boolean(user);
+  }
+  const importHref = loggedIn ? "/books/new" : "/auth";
+
   return (
     <Box bg="#fbfaf8" mih="100vh">
       <Container size="xl" py="xl">
@@ -59,9 +73,6 @@ export default function Home() {
             <Anchor href="/auth">
               Login
             </Anchor>
-            <Button component="a" href="/dashboard" color="grape">
-              Open Studio
-            </Button>
           </Group>
         </Group>
 
@@ -80,8 +91,8 @@ export default function Home() {
               cloud providers when you need scale.
             </Text>
             <Group mt="md">
-              <Button component="a" href="/books/new" size="lg" color="grape">
-                Import Manuscript
+              <Button component="a" href={importHref} size="lg" color="grape">
+                {loggedIn ? "Import Manuscript" : "Sign In to Get Started"}
               </Button>
             </Group>
           </Stack>
