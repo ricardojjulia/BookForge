@@ -17,11 +17,24 @@ type CriticReport = {
 
 const REPORTS_PER_PAGE = 12;
 
+// critic_batch/critic_post_batch are rollup records of a full-lens run
+// (which lenses ran, their scores, failures) -- not a single lens's
+// narrative, so they have no "readable findings" to summarize and no
+// single lens to recheck. The run itself is already tracked properly in
+// Jobs History and Analytics; showing it here just produces a confusing
+// "did not include readable findings... recheck this lens" entry for
+// something that was never a lens report in the first place.
+const BATCH_REPORT_TYPES = new Set(["critic_batch", "critic_post_batch"]);
+
 export function CriticReportsPanel({ bookId, reports }: { bookId: string; reports: CriticReport[] }) {
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState("all");
-  const reportTypeOptions = useMemo(() => getReportTypeOptions(reports), [reports]);
-  const filteredReports = useMemo(() => filterReports(reports, filter), [reports, filter]);
+  const displayableReports = useMemo(
+    () => reports.filter((report) => !BATCH_REPORT_TYPES.has(report.report_type)),
+    [reports],
+  );
+  const reportTypeOptions = useMemo(() => getReportTypeOptions(displayableReports), [displayableReports]);
+  const filteredReports = useMemo(() => filterReports(displayableReports, filter), [displayableReports, filter]);
   const totalPages = Math.max(1, Math.ceil(filteredReports.length / REPORTS_PER_PAGE));
   const visibleReports = filteredReports.slice((page - 1) * REPORTS_PER_PAGE, page * REPORTS_PER_PAGE);
 
@@ -39,7 +52,7 @@ export function CriticReportsPanel({ bookId, reports }: { bookId: string; report
         </div>
         <Group gap="xs">
           <Badge color="grape" variant="light">
-            {filteredReports.length}/{reports.length}
+            {filteredReports.length}/{displayableReports.length}
           </Badge>
           {totalPages > 1 && (
             <Badge color="gray" variant="light">
@@ -49,7 +62,7 @@ export function CriticReportsPanel({ bookId, reports }: { bookId: string; report
         </Group>
       </Group>
 
-      {!reports.length ? (
+      {!displayableReports.length ? (
         <Text c="dimmed">No critic reports yet. Run BookForge Critic to create one.</Text>
       ) : (
         <Stack>
