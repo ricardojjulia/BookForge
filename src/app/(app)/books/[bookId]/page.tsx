@@ -6,8 +6,8 @@ import { VoiceCapturePanel } from "@/components/books/voice-capture-panel";
 import { DeleteBookButton } from "@/components/books/delete-book-button";
 import { LiveProcessBanner } from "@/components/books/jobs/live-process-banner";
 import { CriticScoreboard } from "@/components/books/reports/critic-scoreboard";
-import { GuidanceWorkflowPanel } from "@/components/books/guidance/guidance-workflow-panel";
 import { AutoReviewWizard } from "@/components/books/auto-review/auto-review-wizard";
+import { BookPipelineWizard } from "@/components/onboarding/book-pipeline-wizard";
 import { BookConceptPanel } from "@/components/books/book-concept-panel";
 import { ArchitectureRoadmapPanel } from "@/components/books/architecture-roadmap-panel";
 import { getBookCriticReports } from "@/lib/books/book-data";
@@ -157,6 +157,14 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
     );
   }
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: userSettings } = user
+    ? await supabase.from("user_settings").select("onboarding_completed_steps").eq("user_id", user.id).maybeSingle()
+    : { data: null };
+  const onboardingCompletedSteps = (userSettings as { onboarding_completed_steps?: string[] } | null)?.onboarding_completed_steps ?? [];
+
   const dashboardReadiness =
     rewriteWorkflow && rewriteWorkflow.mode !== "chooser"
       ? getRewriteReadiness({
@@ -220,7 +228,10 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
             {getBookAuthorDisplay(book)} · {book.point_of_view || "POV unset"} · {book.tense || "tense unset"}
           </Text>
         </div>
-        <DeleteBookButton bookId={bookId} bookTitle={book.title} redirectTo="/dashboard" size="md" />
+        <Group gap="xs" align="center">
+          {user && <BookPipelineWizard bookId={bookId} userId={user.id} completedSteps={onboardingCompletedSteps} />}
+          <DeleteBookButton bookId={bookId} bookTitle={book.title} redirectTo="/dashboard" size="md" />
+        </Group>
       </Group>
 
       <SimpleGrid cols={{ base: 1, md: 4 }} mb="xl">
@@ -329,7 +340,19 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         </Group>
       </Paper>
 
-      <GuidanceWorkflowPanel bookId={bookId} reports={reports || []} />
+      <Paper withBorder radius="md" p="lg" bg="white" mt="xl">
+        <Group justify="space-between" align="center">
+          <div>
+            <Title order={3}>Guidance</Title>
+            <Text c="dimmed" size="sm">
+              Turn Critic and drift findings into a tracked, actionable checklist.
+            </Text>
+          </div>
+          <Link href={`/books/${bookId}/guidance`} style={{ textDecoration: "none" }}>
+            <Button color="grape" variant="light">Open Guidance</Button>
+          </Link>
+        </Group>
+      </Paper>
 
       <Paper withBorder radius="md" p="lg" bg="white" mt="xl">
         <Group justify="space-between" align="center">
