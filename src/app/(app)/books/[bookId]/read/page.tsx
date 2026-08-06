@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Alert, Badge, Button, Container, Group, Stack, Text, Title } from "@mantine/core";
-import { ReaderView } from "@/components/books/reader/reader-view";
+import { ReaderWithSearch } from "@/components/books/reader/reader-with-search";
 import { getBookCore } from "@/lib/books/book-data";
 import { safeReturnHref, safeReturnLabel } from "@/lib/navigation/return-link";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
@@ -60,7 +60,7 @@ export default async function ReaderPage({
           </Link>
         </Group>
       </Stack>
-      <ReaderView
+      <ReaderWithSearch
         bookId={bookId}
         chapters={chapters || []}
         paragraphs={paragraphs || []}

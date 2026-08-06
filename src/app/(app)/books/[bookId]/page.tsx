@@ -1,7 +1,6 @@
 import { Alert, Badge, Button, Container, Group, Paper, SimpleGrid, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
-import { ManuscriptSearch } from "@/components/books/manuscript-search";
 import { VoiceCapturePanel } from "@/components/books/voice-capture-panel";
 import { DeleteBookButton } from "@/components/books/delete-book-button";
 import { LiveProcessBanner } from "@/components/books/jobs/live-process-banner";
@@ -256,12 +255,9 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
           architecture={architectureToDisplay}
           chapters={chapters || []}
           plannedChapterCount={plannedChapterCount}
+          hasBlueprint={Boolean(bible)}
         />
       )}
-
-      <Paper withBorder radius="md" p="md" bg="white" mb="xl">
-        <ManuscriptSearch bookId={bookId} />
-      </Paper>
 
       <WorkflowCommandCenter
         bookId={bookId}
