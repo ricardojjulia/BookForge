@@ -1,4 +1,4 @@
-import { criticLenses } from "@/lib/critic/prompts";
+import { CRITIC_LENS_COUNT, computeCriticProgress } from "@/lib/critic/progress";
 import { evaluateChapterSummaryQuality } from "@/lib/manuscript/summary-quality";
 import type { RewriteWorkflowRow } from "@/lib/rewrite/workflows";
 
@@ -46,8 +46,8 @@ export function getRewriteReadiness(input: {
       }).status === "review",
   ).length;
   const usableSummaries = input.chapters.length - weakSummaries;
-  const criticDone = getCriticCoverage(input.criticReports);
-  const criticTotal = Object.keys(criticLenses).length;
+  const criticDone = computeCriticProgress(input.criticReports).baselineCount;
+  const criticTotal = CRITIC_LENS_COUNT;
   const hasSample = Boolean(input.latestRewriteJobId || input.workflow.sample_revision_job_id);
   const hasReviewedSample = input.acceptedParagraphCount > 0;
   const strategyApproved = input.workflow.strategy_approved || Boolean(input.workflow.campaign_id);
@@ -223,14 +223,6 @@ export function getRewriteReadiness(input: {
       7: blockedDetails(items, ["drift", "export"]),
     },
   };
-}
-
-function getCriticCoverage(reports: Array<{ report_type: string }>) {
-  const seen = new Set<string>();
-  Object.keys(criticLenses).forEach((lens) => {
-    if (reports.some((report) => report.report_type === `critic:${lens}`)) seen.add(lens);
-  });
-  return seen.size;
 }
 
 function parseModelEvaluation(value: Record<string, unknown> | null | undefined) {

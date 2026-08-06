@@ -28,17 +28,11 @@ import { SceneEditorPanel } from "@/components/books/scene-editor-panel";
 import { StructureAuditPanel } from "@/components/books/structure-audit-panel";
 import { BookMetadataTimelinePanel } from "@/components/books/metadata/book-metadata-timeline-panel";
 import { getBookAuthorDisplay } from "@/lib/books/status";
-import { criticLenses } from "@/lib/critic/prompts";
+import { computeCriticProgress, CRITIC_LENS_COUNT } from "@/lib/critic/progress";
 import { getRewriteReadiness, type RewriteReadiness } from "@/lib/rewrite/readiness";
 import type { RewriteWorkflowRow } from "@/lib/rewrite/workflows";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-
-// Derived, not hardcoded: this badge/gate was stuck at "/7" for a while
-// after dialogue_density became the 8th critic lens (see the auto-review
-// pipeline's own missing-lens fix), so postCriticCount could read "8/7" --
-// a stale literal that just never got updated when the lens count changed.
-const CRITIC_LENS_COUNT = Object.keys(criticLenses).length;
 
 export default async function BookDashboardPage({ params }: { params: Promise<{ bookId: string }> }) {
   if (!hasSupabaseEnv()) {
@@ -267,11 +261,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
   const pendingDraftParagraphs = new Set(
     (pendingDraftRows || []).map((row) => row.paragraph_id).filter(Boolean),
   ).size;
-  const postCriticCount = new Set(
-    (reports || [])
-      .filter((report) => String(report.report_type).startsWith("critic_post:"))
-      .map((report) => String(report.report_type).toLowerCase()),
-  ).size;
+  const postCriticCount = computeCriticProgress(reports || []).postCount;
   const commandCenter = getBookCommandCenter({
     bookId,
     status: book.status,

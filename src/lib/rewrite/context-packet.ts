@@ -1,4 +1,5 @@
 import { criticLenses } from "@/lib/critic/prompts";
+import { CRITIC_LENS_COUNT, isCriticBaselineReportType } from "@/lib/critic/progress";
 import { summarizeCriticContent } from "@/lib/critic/summary";
 import { describeDialogueDensity } from "@/lib/dialogue-density";
 import type { CriticLens } from "@/lib/types";
@@ -109,8 +110,8 @@ export function buildRewriteContextPacket(input: RewriteContextPacketInput) {
 
 function getCriticPriorities(reports: RewriteContextPacketInput["criticReports"]) {
   return reports
-    .filter((report) => report.report_type.startsWith("critic:"))
-    .slice(0, 7)
+    .filter((report) => isCriticBaselineReportType(report.report_type))
+    .slice(0, CRITIC_LENS_COUNT)
     .map((report) => {
       const lens = report.report_type.replace(/^critic:/, "") as CriticLens;
       const label = lens in criticLenses ? criticLenses[lens].label : report.report_type;

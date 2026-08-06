@@ -16,6 +16,7 @@ import {
 } from "@mantine/core";
 import { IconRocket, IconScissors, IconArrowUp, IconPlayerPlay } from "@tabler/icons-react";
 import { AutoReviewRunner } from "./auto-review-runner";
+import { CRITIC_LENS_COUNT } from "@/lib/critic/progress";
 import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 
 type Mode = "full_review" | "make_shorter" | "make_longer";
@@ -28,8 +29,7 @@ const MODES: { value: Mode; icon: React.ReactNode; label: string; tagline: strin
     icon: <IconRocket size={28} />,
     label: "Full Review",
     tagline: "Autonomous review and publish",
-    detail:
-      "Runs analyze, critics, rewrite, drift check, and re-critique. Repeats until all 7 critics are at least 70, up to 3 cycles, then exports and marks the book as finished.",
+    detail: `Runs analyze, critics, rewrite, drift check, and re-critique. Repeats until all ${CRITIC_LENS_COUNT} critics are at least 70, up to 3 cycles, then exports and marks the book as finished.`,
     color: "grape",
   },
   {

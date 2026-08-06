@@ -8,6 +8,7 @@ import { AiJobQueue, type AiJobQueueState } from "@/components/ai/ai-job-queue";
 import { AiTaskPreflight, type AiTaskPreflightData } from "@/components/ai/ai-task-preflight";
 import { estimateAiCallPlan } from "@/lib/ai/call-planner";
 import { criticLenses } from "@/lib/critic/prompts";
+import { CRITIC_LENS_COUNT } from "@/lib/critic/progress";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 import type { CriticLens } from "@/lib/types";
@@ -1509,7 +1510,7 @@ function formatResultMessage(path: string, result: { content?: Record<string, un
 
   if (path.includes("/critic/all")) {
     const completed = result.content?.completed;
-    return `BookForge Critic batch saved${typeof completed === "number" ? `: ${completed}/7 lenses completed.` : "."}`;
+    return `BookForge Critic batch saved${typeof completed === "number" ? `: ${completed}/${CRITIC_LENS_COUNT} lenses completed.` : "."}`;
   }
 
   if (path.includes("/critic")) {

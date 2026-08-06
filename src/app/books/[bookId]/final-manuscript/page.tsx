@@ -7,6 +7,7 @@ import { FinalQualityGate } from "@/components/books/export/final-quality-gate";
 import { FinalManuscriptBuilder } from "@/components/books/export/final-manuscript-builder";
 import { MarkFinishedButton } from "@/components/books/export/mark-finished-button";
 import { getLatestJobIdWithRevisions } from "@/lib/ai/job-state";
+import { isCriticPostReportType } from "@/lib/critic/progress";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -511,7 +512,7 @@ function getFinalReadiness(input: {
 }
 
 function getCriticStatus(reports: Array<{ report_type: string; created_at: string }>) {
-  const postRewriteCount = reports.filter((report) => report.report_type.startsWith("critic_post:")).length;
+  const postRewriteCount = reports.filter((report) => isCriticPostReportType(report.report_type)).length;
   if (postRewriteCount > 0) return "post-rewrite reports found";
   return reports.length ? "baseline reports only" : "not run";
 }

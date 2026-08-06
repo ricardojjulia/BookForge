@@ -11,6 +11,7 @@ import { ResetRewriteButton } from "@/components/books/rewrite/reset-rewrite-but
 import { ReadinessStatusGrid } from "@/components/books/rewrite/readiness-status-grid";
 import { LiveProcessBanner } from "@/components/books/jobs/live-process-banner";
 import { criticLenses } from "@/lib/critic/prompts";
+import { CRITIC_LENS_COUNT, computeCriticProgress } from "@/lib/critic/progress";
 import { getRewriteCampaignStats, type RewriteCampaignRow } from "@/lib/rewrite/campaigns";
 import { getRewriteCoverage } from "@/lib/rewrite/coverage";
 import { getRewriteReadiness } from "@/lib/rewrite/readiness";
@@ -18,7 +19,6 @@ import { getExistingRevisionState, shouldSkipParagraph, type ExistingRevisionRow
 import { getDefaultRewriteWorkflow, type RewriteWorkflowRow } from "@/lib/rewrite/workflows";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import type { CriticLens } from "@/lib/types";
 
 export default async function RewritePlanPage({ params }: { params: Promise<{ bookId: string }> }) {
   if (!hasSupabaseEnv()) {
@@ -231,7 +231,7 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
             chapterCount={chapterCount}
             hasBlueprint={Boolean(bible)}
             criticDone={criticCoverage.done}
-            criticTotal={Object.keys(criticLenses).length}
+            criticTotal={CRITIC_LENS_COUNT}
             hasRewritePlan={Boolean(rewritePlan)}
           />
         </div>
@@ -250,7 +250,8 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
                 <Group justify="space-between" align="flex-start" wrap="nowrap">
                   <Text size="sm">
                     Missing critic lenses: {criticCoverage.missing.map((lens) => criticLenses[lens].label).join(", ")}.
-                    You can generate a plan now, but the strongest plan comes after all seven lenses have been run.
+                    You can generate a plan now, but the strongest plan comes after all {CRITIC_LENS_COUNT} lenses have
+                    been run.
                   </Text>
                   <Button
                     component="a"
@@ -312,16 +313,9 @@ function getSavedModelEvaluation(metadata: Record<string, unknown> | null) {
 }
 
 function getCriticCoverage(reports: Array<{ report_type: string }>) {
-  const done = new Set<CriticLens>();
-
-  for (const report of reports) {
-    const lens = report.report_type.replace(/^critic:/, "") as CriticLens;
-    if (lens in criticLenses) done.add(lens);
-  }
-
-  const all = Object.keys(criticLenses) as CriticLens[];
+  const progress = computeCriticProgress(reports);
   return {
-    done: done.size,
-    missing: all.filter((lens) => !done.has(lens)),
+    done: progress.baselineCount,
+    missing: progress.missingBaselineLenses,
   };
 }

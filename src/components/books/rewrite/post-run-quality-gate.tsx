@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { criticLenses } from "@/lib/critic/prompts";
 import { summarizeStrategyOutcome } from "@/lib/critic/comparison";
+import { computeCriticProgress, CRITIC_LENS_COUNT } from "@/lib/critic/progress";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 
@@ -47,11 +48,7 @@ export function PostRunQualityGate({
   const outcome = useMemo(() => summarizeStrategyOutcome(reports), [reports]);
   const latestDrift = reports.find((report) => report.report_type === "rewrite_drift_check");
   const latestGuidance = reports.find((report) => report.report_type === "humanized_guidance");
-  const postCriticCount = new Set(
-    reports
-      .filter((report) => report.report_type.startsWith("critic_post:"))
-      .map((report) => report.report_type.toLowerCase()),
-  ).size;
+  const postCriticCount = computeCriticProgress(reports).postCount;
   const acceptedPercent = totalParagraphs ? Math.round((acceptedParagraphs / totalParagraphs) * 100) : 0;
   // pendingDraftCount === 0 and still below 90% means all reviewable paragraphs
   // are accepted — the gap is short structural paragraphs the rewrite skips (< 8 words).
@@ -59,7 +56,7 @@ export function PostRunQualityGate({
   const hasCompletedRewrite = latestRewriteJob?.status === "completed";
   const missingChecks = [
     !latestDrift ? "drift check" : "",
-    postCriticCount < 7 ? "post-rewrite Critic" : "",
+    postCriticCount < CRITIC_LENS_COUNT ? "post-rewrite Critic" : "",
     !latestGuidance ? "humanized guidance" : "",
   ].filter(Boolean);
 
@@ -169,7 +166,7 @@ export function PostRunQualityGate({
           />
           <QualityAction
             title="Post-rewrite Critic"
-            status={`${postCriticCount}/7 lenses`}
+            status={`${postCriticCount}/${CRITIC_LENS_COUNT} lenses`}
             description="Reruns every BookForge Critic lens against accepted rewrite context."
             loading={loading === "critic"}
             disabled={!hasCompletedRewrite}
