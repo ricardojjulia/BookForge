@@ -61,10 +61,13 @@ export function WorkflowCommandCenter({
             </Text>
           </div>
           <Group gap="xs" align="flex-start">
-            <Link href={actionHref} style={{ textDecoration: "none" }}>
-              <Button color="grape">{actionLabel}</Button>
-            </Link>
-            {showDirectAutoReviewCta && <AutoReviewWizard bookId={bookId} bookTitle={bookTitle} />}
+            {showDirectAutoReviewCta ? (
+              <AutoReviewWizard bookId={bookId} bookTitle={bookTitle} />
+            ) : (
+              <Link href={actionHref} style={{ textDecoration: "none" }}>
+                <Button color="grape">{actionLabel}</Button>
+              </Link>
+            )}
           </Group>
         </Group>
 
@@ -142,7 +145,7 @@ export function getBookCommandCenter(input: {
       stage: input.status === "generating" ? "Generating draft" : "Architecture planned",
       stageColor: "blue",
       guidance: `${input.plannedChapterCount.toLocaleString()} planned chapter shell(s) still need manuscript text before revision work can really begin. Open Studio Actions, click Generate Planned Draft, then confirm the AI Task Preflight by clicking Proceed.`,
-      actionLabel: "Generate Draft Chapters",
+      actionLabel: "Go to Generate Planned Draft",
       actionHref: `/books/${input.bookId}/studio`,
     };
   }
