@@ -1,5 +1,6 @@
 import { Badge, Group, Paper, RingProgress, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { criticLenses } from "@/lib/critic/prompts";
+import { isCriticReportType } from "@/lib/critic/progress";
 import { extractCriticScore } from "@/lib/critic/score";
 import type { CriticLens } from "@/lib/types";
 
@@ -108,10 +109,6 @@ function getLatestReportByLens(reports: CriticReport[]) {
 
 function getLensFromReportType(reportType: string) {
   return reportType.replace(/^critic_post:/, "").replace(/^critic:/, "") as CriticLens;
-}
-
-function isCriticReportType(reportType: string) {
-  return reportType.startsWith("critic:") || reportType.startsWith("critic_post:");
 }
 
 function scoreColor(score: number) {

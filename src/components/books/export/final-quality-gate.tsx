@@ -5,6 +5,7 @@ import { Alert, Badge, Button, Group, Paper, SimpleGrid, Stack, Text, Title } fr
 import { useRouter } from "next/navigation";
 import { criticLenses } from "@/lib/critic/prompts";
 import { buildCriticComparisons, summarizeStrategyOutcome } from "@/lib/critic/comparison";
+import { CRITIC_LENS_COUNT } from "@/lib/critic/progress";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 
@@ -121,7 +122,7 @@ export function FinalQualityGate({
         <SimpleGrid cols={{ base: 1, md: 3 }}>
           <QualityAction
             title="Post-rewrite Critic"
-            status={`${postCriticCount}/7 lenses`}
+            status={`${postCriticCount}/${CRITIC_LENS_COUNT} lenses`}
             description="Rerun all Critic lenses against accepted rewrite text."
             loading={loading === "critic"}
             onClick={() => runAction("critic")}
@@ -232,7 +233,7 @@ function getFinalQualityStatus({
       guidance: "High drift risk is present. Review drift findings and rerun affected chapters before exporting.",
     };
   }
-  if (postCriticCount < 7) {
+  if (postCriticCount < CRITIC_LENS_COUNT) {
     return {
       label: "critic needed",
       color: "yellow",
