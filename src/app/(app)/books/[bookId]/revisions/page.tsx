@@ -161,7 +161,7 @@ export default async function RevisionsPage({
           <Text c="dimmed">{book.title}</Text>
         </div>
         <Group>
-          <Link href={`/books/${bookId}/rewrite-plan`} style={{ textDecoration: "none" }}>
+          <Link href={`/books/${bookId}/critic-quality`} style={{ textDecoration: "none" }}>
             <Button variant="light" color="grape">
               Rewrite Architect
             </Button>

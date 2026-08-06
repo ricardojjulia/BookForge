@@ -386,7 +386,7 @@ export function RevisionReviewList({
             </Alert>
           )}
           <Group>
-            <Button component={Link} href={`/books/${bookId}/rewrite-plan`} color="grape">
+            <Button component={Link} href={`/books/${bookId}/critic-quality`} color="grape">
               Open Rewrite Architect
             </Button>
             <Button component={Link} href={`/books/${bookId}`} variant="light" color="dark">

@@ -4,19 +4,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Anchor, Badge, Box, Group, ScrollArea, Text } from "@mantine/core";
 
-/**
- * Links only to routes that exist today. The hub page is still one big
- * "Overview" screen pending the Phase 4 route breakup (Studio, Critic &
- * Quality, Manuscript, Bible, Collaboration) -- this list gets trimmed and
- * re-pointed at those seam routes once they exist.
- */
 function buildLinks(bookId: string) {
   return [
     { href: `/books/${bookId}`, label: "Overview", exact: true },
-    { href: `/books/${bookId}/rewrite-plan`, label: "Rewrite Plan" },
-    { href: `/books/${bookId}/revisions`, label: "Revisions" },
-    { href: `/books/${bookId}/jobs`, label: "Jobs" },
+    { href: `/books/${bookId}/studio`, label: "Studio" },
+    { href: `/books/${bookId}/critic-quality`, label: "Critic & Quality" },
+    { href: `/books/${bookId}/manuscript`, label: "Manuscript" },
     { href: `/books/${bookId}/world`, label: "World Bible" },
+    { href: `/books/${bookId}/collaboration`, label: "Collaboration" },
+    { href: `/books/${bookId}/jobs`, label: "Jobs" },
+    { href: `/books/${bookId}/revisions`, label: "Revisions" },
     { href: `/books/${bookId}/final-manuscript`, label: "Final Manuscript" },
     { href: `/books/${bookId}/publishing-lab`, label: "Publishing Lab" },
     { href: `/books/${bookId}/abridgement`, label: "Abridgement" },

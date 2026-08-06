@@ -7,6 +7,10 @@ import { RewritePlanActions } from "@/components/books/rewrite/rewrite-plan-acti
 import { RewritePlanView } from "@/components/books/rewrite/rewrite-plan-view";
 import { ResetRewriteButton } from "@/components/books/rewrite/reset-rewrite-button";
 import { ReadinessStatusGrid } from "@/components/books/rewrite/readiness-status-grid";
+import { PostRunQualityGate } from "@/components/books/rewrite/post-run-quality-gate";
+import { CriticComparisonPanel } from "@/components/books/reports/critic-comparison-panel";
+import { CriticReportsPanel } from "@/components/books/reports/critic-reports-panel";
+import { DriftReportsPanel } from "@/components/books/reports/drift-reports-panel";
 import { LiveProcessBanner } from "@/components/books/jobs/live-process-banner";
 import { getBookCriticReports } from "@/lib/books/book-data";
 import { criticLenses } from "@/lib/critic/prompts";
@@ -34,7 +38,8 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
     { data: book, error: bookError },
     { data: chapters },
     { data: bible },
-    { data: critics },
+    { data: reports },
+    { count: acceptedTextParagraphCount },
     { data: rewritePlan },
     { data: latestRewriteJob },
     { count: paragraphCount },
@@ -55,7 +60,8 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
       .select("content,updated_at")
       .eq("book_id", bookId)
       .maybeSingle(),
-    getBookCriticReports(supabase, bookId, { scope: "baseline", limit: 30 }).then((result) => ({ data: result.reports })),
+    getBookCriticReports(supabase, bookId).then((result) => ({ data: result.reports })),
+    supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId).not("accepted_text", "is", null),
     supabase
       .from("coherence_reports")
       .select("content,created_at")
@@ -131,7 +137,7 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
     );
   }
 
-  const criticCoverage = getCriticCoverage(critics || []);
+  const criticCoverage = getCriticCoverage(reports || []);
   const summarized = (chapters || []).filter((chapter) => chapter.summary).length;
   const chapterCount = chapters?.length || 0;
   const { pendingDraftParagraphIds, acceptedParagraphIds } = getExistingRevisionState(
@@ -183,7 +189,7 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
     hasBlueprint: Boolean(bible),
     hasRewritePlan: Boolean(rewritePlan),
     chapters: chapters || [],
-    criticReports: critics || [],
+    criticReports: reports || [],
     latestRewriteJobId: latestRewriteJob?.id || null,
     pendingDraftParagraphCount,
     acceptedParagraphCount,
@@ -195,13 +201,13 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
 
   return (
     <Container size="xl">
-      <DataFreshnessBanner routeKey={`book:${bookId}:rewrite-plan`} fetchedAt={new Date().toISOString()} label="Rewrite planning data" />
+      <DataFreshnessBanner routeKey={`book:${bookId}:critic-quality`} fetchedAt={new Date().toISOString()} label="Critic & quality data" />
       <LiveProcessBanner bookId={bookId} />
       <Group justify="space-between" mb="xl" align="flex-start">
         <div>
-          <Title>Rewrite Architect</Title>
+          <Title>Critic & Quality</Title>
           <Text c="dimmed">
-            {book.title} · {book.genre || "Genre unset"} · {book.target_audience || "Audience unset"}
+            Rewrite Architect · {book.title} · {book.genre || "Genre unset"} · {book.target_audience || "Audience unset"}
           </Text>
         </div>
         <ResetRewriteButton bookId={bookId} />
@@ -285,6 +291,34 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
         readiness={readiness}
         latestJob={(latestRewriteJob as { id: string; status: string | null; created_at: string; completed_at: string | null; settings: Record<string, unknown> | null } | null) || null}
       />
+
+      <PostRunQualityGate
+        bookId={bookId}
+        reports={reports || []}
+        latestRewriteJob={
+          (latestRewriteJob as {
+            id: string;
+            status: string | null;
+            created_at: string;
+            completed_at: string | null;
+            settings: Record<string, unknown> | null;
+          } | null) || null
+        }
+        acceptedParagraphs={acceptedTextParagraphCount || 0}
+        totalParagraphs={paragraphCount || 0}
+        pendingDraftCount={pendingDraftParagraphCount}
+      />
+
+      <CriticComparisonPanel
+        bookId={bookId}
+        reports={reports || []}
+        acceptedParagraphs={acceptedTextParagraphCount || 0}
+        totalParagraphs={paragraphCount || 0}
+      />
+
+      <CriticReportsPanel bookId={bookId} reports={reports || []} />
+
+      <DriftReportsPanel reports={reports || []} />
     </Container>
   );
 }

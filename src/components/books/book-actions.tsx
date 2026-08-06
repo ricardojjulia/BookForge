@@ -547,7 +547,7 @@ export function BookActions({
       else await post(`/api/books/${bookId}/critic/all`, { stage: "baseline" }, "Running baseline Critic lenses");
 
       if (status.hasRewritePlan) skipCompleted("Rewrite Architect plan");
-      else await post(`/api/books/${bookId}/rewrite-plan`, {}, "Creating Rewrite Architect plan");
+      else await post(`/api/books/${bookId}/critic-quality`, {}, "Creating Rewrite Architect plan");
 
       const firstStrategy = randomItem(autoReviewStrategies);
       const firstTrustProfile = randomItem(autoReviewTrustProfiles);
@@ -1252,7 +1252,7 @@ export function BookActions({
           title="Rewrite & Export"
           description="Revise drafted chapters and build reviewable/final files."
         >
-          <Button component={Link} href={`/books/${bookId}/rewrite-plan`} color="dark" variant="light" fullWidth>
+          <Button component={Link} href={`/books/${bookId}/critic-quality`} color="dark" variant="light" fullWidth>
             Rewrite Architect
           </Button>
           <Button component={Link} href={`/books/${bookId}/revisions`} color="teal" variant="light" fullWidth>

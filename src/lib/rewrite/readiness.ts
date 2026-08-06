@@ -99,7 +99,7 @@ export function getRewriteReadiness(input: {
         ? "A saved plan is ready for coherent rewrite calls."
         : "Generate a Rewrite Architect plan before running rewrite batches.",
       actionLabel: input.hasRewritePlan ? undefined : "Generate Plan",
-      href: input.hasRewritePlan ? undefined : `/books/${input.bookId}/rewrite-plan#planning-gate`,
+      href: input.hasRewritePlan ? undefined : `/books/${input.bookId}/critic-quality#planning-gate`,
     },
     {
       key: "model",
