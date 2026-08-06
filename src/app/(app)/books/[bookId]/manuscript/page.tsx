@@ -21,7 +21,7 @@ export default async function ManuscriptPage({ params }: { params: Promise<{ boo
 
   const { bookId } = await params;
   const supabase = await createClient();
-  const [{ data: chapters }, { data: paragraphRows }, { data: sceneRows }] = await Promise.all([
+  const [{ data: chapters }, { data: paragraphRows }, { data: sceneRows }, { data: sceneSplitSuggestions }] = await Promise.all([
     supabase
       .from("chapters")
       .select("id,chapter_number,title,summary,status,original_text,section_type,exclude_from_rewrite,exclude_from_export,structure_notes")
@@ -37,6 +37,11 @@ export default async function ManuscriptPage({ params }: { params: Promise<{ boo
       .select("id,chapter_id,scene_number,title,summary,status")
       .eq("book_id", bookId)
       .order("scene_number"),
+    supabase
+      .from("scene_split_suggestions")
+      .select("id,chapter_id,start_paragraph_id,title,rationale,status")
+      .eq("book_id", bookId)
+      .eq("status", "pending"),
   ]);
 
   return (
@@ -47,7 +52,12 @@ export default async function ManuscriptPage({ params }: { params: Promise<{ boo
 
         <StructureAuditPanel chapters={chapters || []} paragraphs={paragraphRows || []} />
 
-        <SceneEditorPanel chapters={chapters || []} scenes={sceneRows || []} paragraphs={paragraphRows || []} />
+        <SceneEditorPanel
+          chapters={chapters || []}
+          scenes={sceneRows || []}
+          paragraphs={paragraphRows || []}
+          suggestions={sceneSplitSuggestions || []}
+        />
 
         <Paper withBorder radius="md" p="xl" bg="white">
           <Title order={2} mb="md">
