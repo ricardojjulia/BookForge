@@ -1,17 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Alert,
   Badge,
   Button,
   Group,
-  Modal,
   Paper,
   PasswordInput,
   Select,
   Stack,
-  Stepper,
   Switch,
   Text,
   TextInput,
@@ -28,6 +26,8 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { PROVIDER_META } from "@/lib/ai/providers";
 import { OPENROUTER_TASK_MODEL_DEFAULTS } from "@/lib/ai/model-catalog";
+import { useWizardAutoOpen, WizardShell } from "@/components/onboarding/wizard-shell";
+import { markOnboardingStepDone, ONBOARDING_STEPS } from "@/lib/onboarding/steps";
 import type { LmStudioTaskKind } from "@/lib/types";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -103,14 +103,6 @@ async function saveSettings(userId: string, patch: Record<string, unknown>) {
     .from("user_settings")
     .upsert({ user_id: userId, ...patch }, { onConflict: "user_id" });
   if (error) throw error;
-}
-
-async function markAiSetupDone(userId: string, existing: string[]) {
-  const supabase = createClient();
-  const steps = Array.from(new Set([...existing, "ai_setup"]));
-  await supabase
-    .from("user_settings")
-    .upsert({ user_id: userId, onboarding_completed_steps: steps }, { onConflict: "user_id" });
 }
 
 // ── Step components ───────────────────────────────────────────────────────────
@@ -371,7 +363,7 @@ export function SetupWizard({
   completedSteps: string[];
   needsSetup: boolean;
 }) {
-  const [opened, setOpened] = useState(false);
+  const [opened, setOpened] = useWizardAutoOpen(needsSetup && !completedSteps.includes(ONBOARDING_STEPS.aiSetup));
   const [active, setActive] = useState(0);
   const [engine, setEngine] = useState<Engine>("lmstudio");
   const [saving, setSaving] = useState(false);
@@ -384,13 +376,6 @@ export function SetupWizard({
   const [cloudModel, setCloudModel] = useState("");
   const [cloudTaskModels, setCloudTaskModels] = useState<TaskModels | undefined>(undefined);
   const [connected, setConnected] = useState(false);
-
-  useEffect(() => {
-    if (needsSetup && !completedSteps.includes("ai_setup")) {
-      const timeoutId = window.setTimeout(() => setOpened(true), 0);
-      return () => window.clearTimeout(timeoutId);
-    }
-  }, [needsSetup, completedSteps]);
 
   async function finish() {
     setSaving(true);
@@ -412,7 +397,7 @@ export function SetupWizard({
           execution_mode: "cloud",
         });
       }
-      await markAiSetupDone(userId, completedSteps);
+      await markOnboardingStepDone(userId, ONBOARDING_STEPS.aiSetup, completedSteps);
       setDone(true);
       setActive(2);
     } catch {
@@ -427,29 +412,19 @@ export function SetupWizard({
   }
 
   return (
-    <>
-      <Button
-        variant="light"
-        color="grape"
-        size="xs"
-        onClick={() => { setActive(0); setConnected(false); setDone(false); setOpened(true); }}
-      >
-        Set up AI engine
-      </Button>
-
-      <Modal
-        opened={opened}
-        onClose={close}
-        title={<Text fw={700}>Set up your AI engine</Text>}
-        size="lg"
-        closeOnClickOutside={false}
-      >
-        <Stepper active={active} color="grape" size="sm" mb="xl">
-          <Stepper.Step label="Choose" description="Pick your engine" />
-          <Stepper.Step label="Configure" description="Connect and test" />
-          <Stepper.Step label="Done" description="Ready to write" />
-        </Stepper>
-
+    <WizardShell
+      opened={opened}
+      onClose={close}
+      onOpen={() => { setActive(0); setConnected(false); setDone(false); setOpened(true); }}
+      title="Set up your AI engine"
+      triggerLabel="Set up AI engine"
+      active={active}
+      steps={[
+        { label: "Choose", description: "Pick your engine" },
+        { label: "Configure", description: "Connect and test" },
+        { label: "Done", description: "Ready to write" },
+      ]}
+    >
         {/* Step 0 — pick engine */}
         {active === 0 && (
           <Stack>
@@ -536,7 +511,6 @@ export function SetupWizard({
             </Button>
           </Stack>
         )}
-      </Modal>
-    </>
+    </WizardShell>
   );
 }

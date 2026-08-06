@@ -12,6 +12,7 @@ function buildLinks(bookId: string) {
     { href: `/books/${bookId}/manuscript`, label: "Manuscript" },
     { href: `/books/${bookId}/world`, label: "World Bible" },
     { href: `/books/${bookId}/collaboration`, label: "Collaboration" },
+    { href: `/books/${bookId}/guidance`, label: "Guidance" },
     { href: `/books/${bookId}/jobs`, label: "Jobs" },
     { href: `/books/${bookId}/revisions`, label: "Revisions" },
     { href: `/books/${bookId}/final-manuscript`, label: "Final Manuscript" },
