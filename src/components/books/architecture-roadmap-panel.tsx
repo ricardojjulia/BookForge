@@ -261,7 +261,7 @@ export function ArchitectureRoadmapPanel({
             color="orange"
             variant="filled"
           >
-            Generate {plannedChapterCount} remaining chapter{plannedChapterCount === 1 ? "" : "s"}
+            Go to Generate {plannedChapterCount} remaining chapter{plannedChapterCount === 1 ? "" : "s"}
           </Button>
         )}
         {plannedChapterCount === 0 && (

@@ -662,7 +662,7 @@ function getBookCommandCenter(input: {
       stage: input.status === "generating" ? "Generating draft" : "Architecture planned",
       stageColor: "blue",
       guidance: `${input.plannedChapterCount.toLocaleString()} planned chapter shell(s) still need manuscript text before revision work can really begin. Open Studio Actions, click Generate Planned Draft, then confirm the AI Task Preflight by clicking Proceed.`,
-      actionLabel: "Generate Draft Chapters",
+      actionLabel: "Go to Generate Planned Draft",
       actionHref: `/books/${input.bookId}#studio-actions`,
     };
   }
