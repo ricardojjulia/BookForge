@@ -2,6 +2,7 @@ import { Alert, Badge, Button, Container, Group, Text, Title } from "@mantine/co
 import Link from "next/link";
 import { PublishingLabWorkspace } from "@/components/books/publishing-lab/publishing-lab-workspace";
 import { AppShell } from "@/components/layout/app-shell";
+import { getBookCore } from "@/lib/books/book-data";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -63,7 +64,7 @@ export default async function PublishingLabPage({ params }: { params: Promise<{ 
   const { bookId } = await params;
   const supabase = await createClient();
   const [{ data: book, error: bookError }, { data: reports }] = await Promise.all([
-    supabase.from("books").select("id,title,author_name,status").eq("id", bookId).single(),
+    getBookCore(supabase, bookId),
     supabase
       .from("coherence_reports")
       .select("id,content,created_at")

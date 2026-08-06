@@ -7,6 +7,7 @@ import { FinalQualityGate } from "@/components/books/export/final-quality-gate";
 import { FinalManuscriptBuilder } from "@/components/books/export/final-manuscript-builder";
 import { MarkFinishedButton } from "@/components/books/export/mark-finished-button";
 import { getLatestJobIdWithRevisions } from "@/lib/ai/job-state";
+import { getBookCriticReports } from "@/lib/books/book-data";
 import { isCriticPostReportType } from "@/lib/critic/progress";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -115,13 +116,9 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
-    supabase
-      .from("coherence_reports")
-      .select("report_type,content,created_at")
-      .eq("book_id", bookId)
-      .or("report_type.like.critic:%,report_type.like.critic_post:%,report_type.eq.humanized_guidance")
-      .order("created_at", { ascending: false })
-      .limit(30),
+    getBookCriticReports(supabase, bookId, { scope: "baseline_and_post_and_guidance", limit: 30 }).then((result) => ({
+      data: result.reports,
+    })),
     getLatestJobIdWithRevisions(supabase, bookId),
     supabase
       .from("exports")

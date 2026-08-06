@@ -6,6 +6,7 @@ import { RevisionStatsPanel } from "@/components/books/revision-stats-panel";
 import { RevisionReviewList } from "@/components/books/revisions/revision-review-list";
 import { WorkflowNotificationsPanel } from "@/components/books/collaboration/workflow-notifications-panel";
 import { ResetRewriteButton } from "@/components/books/rewrite/reset-rewrite-button";
+import { getBookCore } from "@/lib/books/book-data";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -63,7 +64,7 @@ export default async function RevisionsPage({
     { data: currentUserData },
   ] =
     await Promise.all([
-      supabase.from("books").select("title").eq("id", bookId).single(),
+      getBookCore(supabase, bookId),
       supabase
         .from("revision_versions")
         .select(
