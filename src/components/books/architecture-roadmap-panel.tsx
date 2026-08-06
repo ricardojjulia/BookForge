@@ -274,13 +274,8 @@ export function ArchitectureRoadmapPanel({
             <div>
               <Text fw={700} size="sm">Next step: Run Auto-Review</Text>
               <Text size="sm" c="dimmed">
-                All chapters now have draft prose. Auto-Review will read the full manuscript, run the critic panel, generate a Blueprint, and build a rewrite plan — all in one click. Find it in Studio Actions below, or use the button in the Production Command Center.
+                All chapters now have draft prose. Auto-Review will read the full manuscript, run the critic panel, generate a Blueprint, and build a rewrite plan — all in one click. Start it from the Auto-Review Wizard button in the Production Command Center above, or in Studio Actions below.
               </Text>
-              <Group mt="xs">
-                <Button component="a" href="#studio-actions" size="xs" color="orange">
-                  Run Auto-Review
-                </Button>
-              </Group>
             </div>
           </Group>
         </Paper>
