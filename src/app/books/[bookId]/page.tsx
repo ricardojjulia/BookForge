@@ -3,7 +3,6 @@ import Link from "next/link";
 import { AppShell } from "@/components/layout/app-shell";
 import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { BookActions } from "@/components/books/book-actions";
-import { ManuscriptSearch } from "@/components/books/manuscript-search";
 import { VoiceCapturePanel } from "@/components/books/voice-capture-panel";
 import { BookChatRail } from "@/components/books/chat/book-chat-rail";
 import { ChapterSummaryReview } from "@/components/books/chapter-summary-review";
@@ -328,10 +327,6 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
             hasBlueprint={Boolean(bible)}
           />
         )}
-
-        <Paper withBorder radius="md" p="md" bg="white" mb="xl">
-          <ManuscriptSearch bookId={bookId} />
-        </Paper>
 
         <WorkflowCommandCenter
           bookId={bookId}

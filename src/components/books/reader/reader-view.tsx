@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActionIcon, Badge, Button, Group, Paper, Stack, Text, Textarea, Title, Tooltip } from "@mantine/core";
 import { IconCheck, IconMessage, IconArrowsExchange } from "@tabler/icons-react";
 import { fetchJson } from "@/lib/http/fetch-json";
@@ -14,15 +14,37 @@ type Props = {
   chapters: Chapter[];
   paragraphs: Paragraph[];
   initialAnnotations: Annotation[];
+  /** Set (e.g. from a manuscript search result) to scroll to and briefly highlight a paragraph. */
+  highlightParagraphId?: string | null;
 };
 
-export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, initialAnnotations }: Props) {
+function paragraphDomId(paragraphId: string) {
+  return `paragraph-${paragraphId}`;
+}
+
+export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, initialAnnotations, highlightParagraphId }: Props) {
   const [annotations, setAnnotations] = useState<Annotation[]>(initialAnnotations);
   const [paragraphs, setParagraphs] = useState<Paragraph[]>(initialParagraphs);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [posting, setPosting] = useState<string | null>(null);
   const [comparing, setComparing] = useState<Record<string, boolean>>({});
   const [reverting, setReverting] = useState<string | null>(null);
+
+  // Imperative (not React state) because scrollIntoView is already
+  // imperative here, and the highlight is a transient visual effect on the
+  // DOM node itself rather than something any other render logic needs to
+  // read.
+  useEffect(() => {
+    if (!highlightParagraphId) return;
+    const el = document.getElementById(paragraphDomId(highlightParagraphId));
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.style.backgroundColor = "#fff3bf";
+    const timeoutId = window.setTimeout(() => {
+      el.style.backgroundColor = "";
+    }, 2000);
+    return () => window.clearTimeout(timeoutId);
+  }, [highlightParagraphId]);
 
   async function preferOriginal(paragraphId: string) {
     setReverting(paragraphId);
@@ -86,7 +108,13 @@ export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, in
             const hasAlternateVersion = Boolean(para.accepted_text && para.accepted_text !== para.original_text);
             const isComparing = Boolean(comparing[para.id]);
             return (
-              <Stack key={para.id} gap="xs">
+              <Stack
+                key={para.id}
+                id={paragraphDomId(para.id)}
+                gap="xs"
+                p="xs"
+                style={{ borderRadius: 6, transition: "background-color 0.4s ease" }}
+              >
                 <Group align="flex-start" wrap="nowrap" gap="xs">
                   <Text style={{ flex: 1, lineHeight: 1.8 }}>{text}</Text>
                   {hasAlternateVersion && (
