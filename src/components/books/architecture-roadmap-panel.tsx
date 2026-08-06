@@ -228,11 +228,15 @@ export function ArchitectureRoadmapPanel({
   architecture,
   chapters,
   plannedChapterCount,
+  hasBlueprint,
 }: {
   bookId: string;
   architecture: Record<string, unknown>;
   chapters: DbChapter[];
   plannedChapterCount: number;
+  /** Blueprint is Auto-Review's first output -- once it exists, Auto-Review
+   * has already run at least once, so "next step: run it" is stale. */
+  hasBlueprint: boolean;
 }) {
   const parts: ArchPart[] = Array.isArray(architecture.parts) ? (architecture.parts as ArchPart[]) : [];
   const totalChapters = parts.reduce((sum, p) => sum + (Array.isArray(p.chapters) ? p.chapters.length : 0), 0);
@@ -257,7 +261,7 @@ export function ArchitectureRoadmapPanel({
             color="orange"
             variant="filled"
           >
-            Generate {plannedChapterCount} remaining chapter{plannedChapterCount === 1 ? "" : "s"}
+            Go to Generate {plannedChapterCount} remaining chapter{plannedChapterCount === 1 ? "" : "s"}
           </Button>
         )}
         {plannedChapterCount === 0 && (
@@ -267,20 +271,15 @@ export function ArchitectureRoadmapPanel({
         )}
       </Group>
 
-      {plannedChapterCount === 0 && (
+      {plannedChapterCount === 0 && !hasBlueprint && (
         <Paper withBorder radius="md" p="md" bg="#fff8e1" mb="md">
           <Group gap="sm" align="flex-start">
             <Text size="xl">→</Text>
             <div>
               <Text fw={700} size="sm">Next step: Run Auto-Review</Text>
               <Text size="sm" c="dimmed">
-                All chapters now have draft prose. Auto-Review will read the full manuscript, run the critic panel, generate a Blueprint, and build a rewrite plan — all in one click. Find it in Studio Actions below, or use the button in the Production Command Center.
+                All chapters now have draft prose. Auto-Review will read the full manuscript, run the critic panel, generate a Blueprint, and build a rewrite plan — all in one click. Start it from the Auto-Review Wizard button in the Production Command Center above, or in Studio Actions below.
               </Text>
-              <Group mt="xs">
-                <Button component="a" href="#studio-actions" size="xs" color="orange">
-                  Run Auto-Review
-                </Button>
-              </Group>
             </div>
           </Group>
         </Paper>
