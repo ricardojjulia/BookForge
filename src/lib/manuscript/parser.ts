@@ -11,6 +11,19 @@ const inlineChapterHeadingPattern =
 
 const sceneBreakPattern = /^\s{0,3}(\*\s*\*\s*\*|#{3,}|-{3,}|_{3,})\s*$/m;
 
+const pdfPageMarkerPattern = /^--\s*\d+\s+of\s+\d+\s*--$/i;
+const pdfBarePageNumberPattern = /^\d+$/;
+
+export function stripPdfPageArtifacts(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => {
+      const trimmed = line.trim();
+      return !pdfPageMarkerPattern.test(trimmed) && !pdfBarePageNumberPattern.test(trimmed);
+    })
+    .join("\n");
+}
+
 export async function extractTextFromFile(file: File): Promise<string> {
   const extension = file.name.split(".").pop()?.toLowerCase();
 
@@ -35,7 +48,7 @@ export async function extractTextFromFile(file: File): Promise<string> {
     const buffer = Buffer.from(await file.arrayBuffer());
     const parser = new PDFParse({ data: buffer });
     const result = await parser.getText();
-    const text = result.text.trim();
+    const text = stripPdfPageArtifacts(result.text).trim();
     if (!text) throw new Error("This PDF has no extractable text. It may be a scanned image — convert it to text first.");
     return text;
   }
@@ -80,13 +93,16 @@ function splitChapters(text: string): ParsedChapter[] {
 
   if (!starts.length) return [];
 
-  const chapters = starts.map((start, index) => {
-    const next = starts[index + 1]?.index ?? lines.length;
+  const hasLeadingContent = starts[0].index > 0 && lines.slice(0, starts[0].index).join("\n").trim().length > 0;
+  const boundaries = hasLeadingContent ? [{ index: 0, title: "" }, ...starts] : starts;
+
+  const chapters = boundaries.map((start, index) => {
+    const next = boundaries[index + 1]?.index ?? lines.length;
     const chapterLines = lines.slice(start.index, next);
     const chapterText = chapterLines.join("\n").trim();
     return {
       chapterNumber: index + 1,
-      title: normalizeDetectedChapterTitle(start.title, index),
+      title: start.title ? normalizeDetectedChapterTitle(start.title, index) : `Chapter ${index + 1}`,
       text: chapterText,
       scenes: splitScenes(chapterText),
     };
@@ -109,6 +125,9 @@ function isChapterStartLine(line: string, lines: string[], index: number) {
   if (/^(p[aá]ginas preliminares|material complementario)$/i.test(line)) return true;
   if (/^conclusi[oó]n\s*:/i.test(line)) return true;
   if (!line.includes(":")) return false;
+
+  const beforeColon = line.slice(0, line.indexOf(":"));
+  if (/[.!?…]\s+\S/.test(beforeColon)) return false;
 
   if (followingBodyWordCount(lines, index) < 35) return false;
 
