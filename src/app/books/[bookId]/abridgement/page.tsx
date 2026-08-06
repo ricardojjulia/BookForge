@@ -2,6 +2,7 @@ import { Alert, Button, Container, Group, Title, Text } from "@mantine/core";
 import Link from "next/link";
 import { AppShell } from "@/components/layout/app-shell";
 import { AbridgementWorkspace } from "@/components/books/abridgement/abridgement-workspace";
+import { getBookCore } from "@/lib/books/book-data";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -21,7 +22,7 @@ export default async function AbridgementPage({ params }: { params: Promise<{ bo
   const { bookId } = await params;
   const supabase = await createClient();
   const [{ data: book, error }, { data: plan }, { data: suggestions }] = await Promise.all([
-    supabase.from("books").select("title").eq("id", bookId).single(),
+    getBookCore(supabase, bookId),
     supabase
       .from("abridgement_plans")
       .select("id,target_reduction_percent,summary,created_at")

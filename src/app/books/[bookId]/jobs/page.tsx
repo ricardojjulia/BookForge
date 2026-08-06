@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Container, Group, Paper, Progress, SimpleGrid, St
 import { AppShell } from "@/components/layout/app-shell";
 import { SelectedJobFocus } from "@/components/books/jobs/selected-job-focus";
 import { extractJobProgress, getJobProgressDisplay, isStaleRunningJob, summarizeRevisionJobs } from "@/lib/ai/job-state";
+import { getBookCore } from "@/lib/books/book-data";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -57,7 +58,7 @@ export default async function JobsHistoryPage({
   }
 
   const [{ data: book }, { data: jobs, error }] = await Promise.all([
-    supabase.from("books").select("title").eq("id", bookId).single(),
+    getBookCore(supabase, bookId),
     supabase
       .from("revision_jobs")
       .select("id,mode,status,settings,error_message,created_at,started_at,completed_at")

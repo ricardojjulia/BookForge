@@ -27,6 +27,7 @@ import { ArchitectureRoadmapPanel } from "@/components/books/architecture-roadma
 import { SceneEditorPanel } from "@/components/books/scene-editor-panel";
 import { StructureAuditPanel } from "@/components/books/structure-audit-panel";
 import { BookMetadataTimelinePanel } from "@/components/books/metadata/book-metadata-timeline-panel";
+import { getBookCriticReports } from "@/lib/books/book-data";
 import { getBookAuthorDisplay } from "@/lib/books/status";
 import { computeCriticProgress, CRITIC_LENS_COUNT } from "@/lib/critic/progress";
 import { getRewriteReadiness, type RewriteReadiness } from "@/lib/rewrite/readiness";
@@ -105,12 +106,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         .select("id,title,scope")
         .eq("book_id", bookId)
         .order("created_at", { ascending: false }),
-      supabase
-        .from("coherence_reports")
-        .select("id,report_type,created_at,content")
-        .eq("book_id", bookId)
-        .order("created_at", { ascending: false })
-        .limit(80),
+      getBookCriticReports(supabase, bookId).then((result) => ({ data: result.reports })),
       supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId).not("accepted_text", "is", null),
       supabase
         .from("revision_versions")

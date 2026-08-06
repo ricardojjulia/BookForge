@@ -12,7 +12,7 @@
  * derive per-stage durations and score progression across iterations.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Badge,
@@ -34,6 +34,7 @@ import {
   IconPlayerPlay,
   IconTrophy,
 } from "@tabler/icons-react";
+import { useAutoReviewStatus } from "@/lib/hooks/use-auto-review-status";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 
 type Mode = "full_review" | "make_shorter" | "make_longer";
@@ -176,9 +177,49 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
   // "Failed at stage: critics_check" can't mask a real failure inside a loop.
   const actualFailedStageRef = useRef<string | null>(null);
 
+  // Shares the same SWR cache entry (and staleness derivation) as
+  // book-actions.tsx's "last run" banner instead of polling this endpoint
+  // independently — two separate pollers previously meant a staleness fix
+  // applied to one could silently miss the other.
+  const { job } = useAutoReviewStatus(serverManaged ? bookId : "", {
+    refreshInterval: (data) => (data?.job?.status === "running" ? 2000 : 0),
+  });
+
+  // In serverManaged mode, stageStates/log/iteration/done/failed/errorMsg
+  // are entirely a function of `job` (the local-run setters below are all
+  // gated on `!serverManaged`) — derive them here instead of mirroring
+  // `job` into local state via an effect.
+  const jobDerived = useMemo(() => {
+    if (!serverManaged || !job) return null;
+
+    const completed = new Set(job.stages_completed || []);
+    return {
+      stageStates: stageStates.map((stage) => {
+        if (completed.has(stage.id)) return { ...stage, status: "done" as StageStatus };
+        if (job.current_stage === stage.id && job.status === "running") return { ...stage, status: "running" as StageStatus };
+        if (job.status === "failed" && job.current_stage === stage.id) {
+          return { ...stage, status: "failed" as StageStatus, detail: job.error || "Failed" };
+        }
+        return { ...stage, status: "pending" as StageStatus, detail: undefined };
+      }),
+      log: (job.log || []).map((entry, index) => `[${index + 1}] ${entry.message || entry.stage || entry.type || "log"}`),
+      iteration: job.iteration || 0,
+      done: job.status === "completed",
+      failed: job.status === "failed",
+      errorMsg: job.error || null,
+    };
+  }, [serverManaged, job, stageStates]);
+
+  const effectiveStageStates = jobDerived?.stageStates ?? stageStates;
+  const effectiveLog = jobDerived?.log ?? log;
+  const effectiveIteration = jobDerived?.iteration ?? iteration;
+  const effectiveDone = jobDerived?.done ?? done;
+  const effectiveFailed = jobDerived?.failed ?? failed;
+  const effectiveErrorMsg = jobDerived?.errorMsg ?? errorMsg;
+
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [log]);
+  }, [effectiveLog]);
 
   function setStatus(stageId: string, status: StageStatus, detail?: string) {
     setStageStates((prev) =>
@@ -613,91 +654,38 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!serverManaged) return;
-
-    let cancelled = false;
-    let pollId: number | null = null;
-
-    const syncFromJob = async () => {
-      const res = await fetch(`/api/books/${bookId}/auto-review`);
-      const data = await res.json().catch(() => ({}));
-      const job = data.job as {
-        status?: string;
-        current_stage?: string;
-        stages_completed?: string[];
-        iteration?: number;
-        log?: Array<{ message?: string; stage?: string; iteration?: number; type?: string }>;
-        error?: string | null;
-        export_id?: string | null;
-      } | undefined;
-      if (cancelled || !job) return;
-
-      const completed = new Set(job.stages_completed || []);
-      setStageStates((prev) =>
-        prev.map((stage) => {
-          if (completed.has(stage.id)) return { ...stage, status: "done" };
-          if (job.current_stage === stage.id && job.status === "running") return { ...stage, status: "running" };
-          if (job.status === "failed" && job.current_stage === stage.id) return { ...stage, status: "failed", detail: job.error || "Failed" };
-          return { ...stage, status: "pending", detail: undefined };
-        }),
-      );
-      setLog((job.log || []).map((entry, index) => `[${index + 1}] ${entry.message || entry.stage || entry.type || "log"}`));
-      setIteration(job.iteration || 0);
-      setExportId(job.export_id || null);
-      setDone(job.status === "completed");
-      setFailed(job.status === "failed");
-      setErrorMsg(job.error || null);
-
-      // Stop polling once the worker reaches a terminal state.
-      if ((job.status === "completed" || job.status === "failed") && pollId !== null) {
-        window.clearInterval(pollId);
-        pollId = null;
-      }
-    };
-
-    void syncFromJob();
-    pollId = window.setInterval(() => {
-      void syncFromJob();
-    }, 2000);
-    return () => {
-      cancelled = true;
-      if (pollId !== null) window.clearInterval(pollId);
-    };
-  }, [bookId, serverManaged]);
-
-  const doneCount = stageStates.filter((s) => s.status === "done" || s.status === "skipped").length;
+  const doneCount = effectiveStageStates.filter((s) => s.status === "done" || s.status === "skipped").length;
   const progress = Math.round((doneCount / stages.length) * 100);
-  const currentStage = stageStates.find((s) => s.status === "running");
+  const currentStage = effectiveStageStates.find((s) => s.status === "running");
   const groups = Array.from(new Set(stages.map((s) => s.group)));
-  const likelyTransientFailure = /fetch failed|Failed to fetch|timeout|could not reach lm studio|ECONNREFUSED|ECONNRESET/i.test(errorMsg || "");
+  const likelyTransientFailure = /fetch failed|Failed to fetch|timeout|could not reach lm studio|ECONNREFUSED|ECONNRESET/i.test(effectiveErrorMsg || "");
 
   return (
     <Stack gap="md">
       <div>
         <Title order={4}>{bookTitle}</Title>
         <Text size="sm" c="dimmed">
-          {done ? "Published!" : failed ? "Failed" : `Running — ${currentStage?.label || "…"}`}
+          {effectiveDone ? "Published!" : effectiveFailed ? "Failed" : `Running — ${currentStage?.label || "…"}`}
         </Text>
       </div>
 
       <Progress
         value={progress}
-        color={done ? "green" : failed ? "red" : "grape"}
+        color={effectiveDone ? "green" : effectiveFailed ? "red" : "grape"}
         size="md"
         radius="xl"
-        animated={!done && !failed}
+        animated={!effectiveDone && !effectiveFailed}
       />
 
-      {done && (
+      {effectiveDone && (
         <Alert color="green" icon={<IconTrophy size={18} />} title="Book Published!">
           All critics passed. Your book has been exported and marked as finished.
         </Alert>
       )}
-      {failed && (
+      {effectiveFailed && (
         <Alert color="red" icon={<IconX size={18} />} title="Workflow failed">
           <Text size="sm" mb="xs">
-            {errorMsg}. {likelyTransientFailure
+            {effectiveErrorMsg}. {likelyTransientFailure
               ? "This is often transient (LM Studio restart, brief network timeout, or provider hiccup). Resume to continue from the next unfinished stage."
               : "Fix the issue, then resume. Completed stages will be skipped."}
           </Text>
@@ -713,7 +701,7 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
             <div key={group}>
               <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={4}>{group}</Text>
               <Stack gap={4}>
-                {stageStates
+                {effectiveStageStates
                   .filter((s) => s.group === group)
                   .map((s) => (
                     <Paper key={s.id} withBorder={false} py={4} px="sm" radius="sm"
@@ -759,33 +747,33 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
       <Paper withBorder radius="sm" p="sm" bg="#0f0f0f" ff="monospace">
         <ScrollArea h={120}>
           <div ref={logRef}>
-            {log.map((line, i) => (
+            {effectiveLog.map((line, i) => (
               <Text key={i} size="xs" c="green.4">{line}</Text>
             ))}
-            {!done && !failed && <Text size="xs" c="dimmed">…</Text>}
+            {!effectiveDone && !effectiveFailed && <Text size="xs" c="dimmed">…</Text>}
           </div>
         </ScrollArea>
       </Paper>
 
-      {iteration > 0 && (
+      {effectiveIteration > 0 && (
         <Group>
           <Badge color="grape" variant="light">
-            Rewrite cycle {iteration + 1} of {MAX_ITERATIONS}
+            Rewrite cycle {effectiveIteration + 1} of {MAX_ITERATIONS}
           </Badge>
         </Group>
       )}
 
       <Group justify="flex-end">
-        {(done || failed) && (
+        {(effectiveDone || effectiveFailed) && (
           <Button
-            color={done ? "green" : "gray"}
+            color={effectiveDone ? "green" : "gray"}
             onClick={onDone}
-            leftSection={done ? <IconCheck size={16} /> : undefined}
+            leftSection={effectiveDone ? <IconCheck size={16} /> : undefined}
           >
-            {done ? "Close & Go to Book" : "Close"}
+            {effectiveDone ? "Close & Go to Book" : "Close"}
           </Button>
         )}
-        {!done && !failed && (
+        {!effectiveDone && !effectiveFailed && (
           <Group gap="xs">
             <Loader size="xs" color="grape" />
             <Text size="sm" c="dimmed">Running autonomously — no action needed</Text>

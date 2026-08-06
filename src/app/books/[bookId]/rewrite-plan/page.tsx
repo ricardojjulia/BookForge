@@ -10,6 +10,7 @@ import { RewritePlanView } from "@/components/books/rewrite/rewrite-plan-view";
 import { ResetRewriteButton } from "@/components/books/rewrite/reset-rewrite-button";
 import { ReadinessStatusGrid } from "@/components/books/rewrite/readiness-status-grid";
 import { LiveProcessBanner } from "@/components/books/jobs/live-process-banner";
+import { getBookCriticReports } from "@/lib/books/book-data";
 import { criticLenses } from "@/lib/critic/prompts";
 import { CRITIC_LENS_COUNT, computeCriticProgress } from "@/lib/critic/progress";
 import { getRewriteCampaignStats, type RewriteCampaignRow } from "@/lib/rewrite/campaigns";
@@ -58,13 +59,7 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
       .select("content,updated_at")
       .eq("book_id", bookId)
       .maybeSingle(),
-    supabase
-      .from("coherence_reports")
-      .select("report_type,created_at,content")
-      .eq("book_id", bookId)
-      .like("report_type", "critic:%")
-      .order("created_at", { ascending: false })
-      .limit(30),
+    getBookCriticReports(supabase, bookId, { scope: "baseline", limit: 30 }).then((result) => ({ data: result.reports })),
     supabase
       .from("coherence_reports")
       .select("content,created_at")
