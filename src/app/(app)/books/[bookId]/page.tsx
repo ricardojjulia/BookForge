@@ -1,31 +1,15 @@
-import { Alert, Badge, Button, Container, Group, Paper, Progress, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
+import { Alert, Badge, Button, Container, Group, Paper, Progress, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
-import { BookActions } from "@/components/books/book-actions";
 import { ManuscriptSearch } from "@/components/books/manuscript-search";
 import { VoiceCapturePanel } from "@/components/books/voice-capture-panel";
-import { BookChatRail } from "@/components/books/chat/book-chat-rail";
-import { ChapterSummaryReview } from "@/components/books/chapter-summary-review";
-import { ChapterSummaryViewer } from "@/components/books/chapter-summary-viewer";
-import { ChapterMetadataPanel } from "@/components/books/chapter-metadata-panel";
 import { DeleteBookButton } from "@/components/books/delete-book-button";
-import { PersistentAiJobsPanel } from "@/components/books/jobs/persistent-ai-jobs-panel";
 import { LiveProcessBanner } from "@/components/books/jobs/live-process-banner";
-import { BookInputsManager } from "@/components/books/inputs/book-inputs-manager";
-import { PassageLockManager } from "@/components/books/passage-lock-manager";
-import { CollaborationPanel } from "@/components/books/collaboration-panel";
-import { CriticComparisonPanel } from "@/components/books/reports/critic-comparison-panel";
-import { CriticReportsPanel } from "@/components/books/reports/critic-reports-panel";
 import { CriticScoreboard } from "@/components/books/reports/critic-scoreboard";
-import { DriftReportsPanel } from "@/components/books/reports/drift-reports-panel";
 import { GuidanceWorkflowPanel } from "@/components/books/guidance/guidance-workflow-panel";
 import { AutoReviewWizard } from "@/components/books/auto-review/auto-review-wizard";
-import { PostRunQualityGate } from "@/components/books/rewrite/post-run-quality-gate";
 import { BookConceptPanel } from "@/components/books/book-concept-panel";
 import { ArchitectureRoadmapPanel } from "@/components/books/architecture-roadmap-panel";
-import { SceneEditorPanel } from "@/components/books/scene-editor-panel";
-import { StructureAuditPanel } from "@/components/books/structure-audit-panel";
-import { BookMetadataTimelinePanel } from "@/components/books/metadata/book-metadata-timeline-panel";
 import { getBookCriticReports } from "@/lib/books/book-data";
 import { getBookAuthorDisplay } from "@/lib/books/status";
 import { computeCriticProgress, CRITIC_LENS_COUNT } from "@/lib/critic/progress";
@@ -49,19 +33,11 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
     { data: book, error },
     { data: chapters },
     { count: paragraphs },
-    { count: scenes },
     { data: bible },
-    { data: authorNotes },
-    { data: characters },
-    { data: styleSamples },
-    { data: matterSections },
-    { data: revisionInstructions },
     { data: reports },
     { count: acceptedParagraphs },
     { count: pendingDrafts },
     { data: pendingDraftRows },
-    { data: paragraphRows },
-    { data: sceneRows },
     { data: latestRewriteJob },
     { data: rewriteWorkflow },
     { data: rewritePlan },
@@ -76,33 +52,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         .eq("book_id", bookId)
         .order("chapter_number"),
       supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId),
-      supabase.from("scenes").select("id", { count: "exact", head: true }).eq("book_id", bookId),
       supabase.from("book_bibles").select("content,updated_at,voice_profile").eq("book_id", bookId).maybeSingle(),
-      supabase
-        .from("author_notes")
-        .select("creative_instructions,voice_guidance,worldview_notes,theological_alignment,forbidden_changes")
-        .eq("book_id", bookId)
-        .maybeSingle(),
-      supabase
-        .from("characters")
-        .select("id,name,role,age,description,voice_notes,motivation,do_not_change_notes")
-        .eq("book_id", bookId)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("style_samples")
-        .select("id,title,guidance_notes")
-        .eq("book_id", bookId)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("book_matter_sections")
-        .select("id,section_type,title")
-        .eq("book_id", bookId)
-        .order("sort_order"),
-      supabase
-        .from("revision_instructions")
-        .select("id,title,scope")
-        .eq("book_id", bookId)
-        .order("created_at", { ascending: false }),
       getBookCriticReports(supabase, bookId).then((result) => ({ data: result.reports })),
       supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId).not("accepted_text", "is", null),
       supabase
@@ -118,16 +68,6 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         .eq("accepted", false)
         .eq("rejected", false)
         .not("paragraph_id", "is", null),
-      supabase
-        .from("paragraphs")
-        .select("id,chapter_id,scene_id,paragraph_number,original_text,is_locked")
-        .eq("book_id", bookId)
-        .order("paragraph_number"),
-      supabase
-        .from("scenes")
-        .select("id,chapter_id,scene_number,title,summary,status")
-        .eq("book_id", bookId)
-        .order("scene_number"),
       supabase
         .from("revision_jobs")
         .select("id,status,created_at,completed_at,settings")
@@ -346,7 +286,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
                 </Text>
               )}
             </div>
-            <Link href={`/books/${bookId}/rewrite-plan`} style={{ textDecoration: "none" }}>
+            <Link href={`/books/${bookId}/critic-quality`} style={{ textDecoration: "none" }}>
               <Button color="grape">
                 Continue Rewrite Workflow
               </Button>
@@ -361,145 +301,50 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         existingProfile={(bible as { voice_profile?: unknown } | null)?.voice_profile as Record<string, unknown> | null}
       />
 
-      <BookChatRail bookId={bookId} />
-
-      <BookMetadataTimelinePanel bookId={bookId} />
-
-      <Paper id="studio-actions" withBorder radius="md" p="xl" bg="white" mt="xl">
-        <Group justify="space-between" mb="sm" align="flex-start" wrap="nowrap">
+      <Paper withBorder radius="md" p="lg" bg="white" mt="xl">
+        <Group justify="space-between" align="center">
           <div>
-            <Group gap="xs" mb={4}>
-              <Title order={2}>Studio Actions</Title>
-              <Badge color="grape" variant="light" size="sm">Local AI via LM Studio</Badge>
-            </Group>
+            <Title order={3}>Studio</Title>
             <Text c="dimmed" size="sm">
-              Analyze, evaluate, revise, review, and export this manuscript from one controlled workflow.
+              Run Critic, generate drafts, launch Auto-Review, and manage AI jobs for this book.
             </Text>
           </div>
-          <AutoReviewWizard bookId={bookId} bookTitle={book.title} />
-        </Group>
-        <Group gap="xs" mb="lg">
-          <Link href={`/books/${bookId}/world`} style={{ textDecoration: "none" }}>
-            <Button size="xs" color="violet" variant="light">World Bible</Button>
-          </Link>
-          <Link href={`/books/${bookId}/read?returnTo=${encodeURIComponent(`/books/${bookId}`)}&returnLabel=${encodeURIComponent("Back to Book")}`} style={{ textDecoration: "none" }}>
-            <Button size="xs" color="cyan" variant="light">Reader View</Button>
-          </Link>
-          <Link href={`/books/${bookId}/abridgement`} style={{ textDecoration: "none" }}>
-            <Button size="xs" color="teal" variant="light">Abridged Edition</Button>
-          </Link>
-          <Link href={`/books/${bookId}/publishing-lab`} style={{ textDecoration: "none" }}>
-            <Button size="xs" color="orange" variant="light">Publishing Lab</Button>
-          </Link>
-          <Link href={`/books/${bookId}/jobs`} style={{ textDecoration: "none" }}>
-            <Button size="xs" color="grape" variant="light">Jobs History</Button>
+          <Link href={`/books/${bookId}/studio`} style={{ textDecoration: "none" }}>
+            <Button color="grape" variant="light">Open Studio</Button>
           </Link>
         </Group>
-        <BookActions
-          bookId={bookId}
-          chapterCount={chapters?.length || 0}
-          sceneCount={scenes || 0}
-          paragraphCount={paragraphs || 0}
-          plannedChapterCount={plannedChapterCount}
-        />
       </Paper>
 
-      <Stack mt="xl" gap={0}>
-        <PersistentAiJobsPanel bookId={bookId} />
-      </Stack>
-
-      <CriticReportsPanel bookId={bookId} reports={reports || []} />
-
-      <CriticComparisonPanel
-        bookId={bookId}
-        reports={reports || []}
-        acceptedParagraphs={acceptedParagraphs || 0}
-        totalParagraphs={paragraphs || 0}
-      />
-
-      <PostRunQualityGate
-        bookId={bookId}
-        reports={reports || []}
-        latestRewriteJob={
-          (latestRewriteJob as {
-            id: string;
-            status: string | null;
-            created_at: string;
-            completed_at: string | null;
-            settings: Record<string, unknown> | null;
-          } | null) || null
-        }
-        acceptedParagraphs={acceptedParagraphs || 0}
-        totalParagraphs={paragraphs || 0}
-        pendingDraftCount={pendingDraftParagraphs}
-      />
-
-      <DriftReportsPanel reports={reports || []} />
+      <Paper withBorder radius="md" p="lg" bg="white" mt="xl">
+        <Group justify="space-between" align="center">
+          <div>
+            <Title order={3}>Critic & Quality</Title>
+            <Text c="dimmed" size="sm">
+              Detailed critic reports, before/after comparisons, the post-run quality gate, and drift checks.
+            </Text>
+          </div>
+          <Link href={`/books/${bookId}/critic-quality`} style={{ textDecoration: "none" }}>
+            <Button color="grape" variant="light">Open Critic & Quality</Button>
+          </Link>
+        </Group>
+      </Paper>
 
       <GuidanceWorkflowPanel bookId={bookId} reports={reports || []} />
 
-      <ChapterMetadataPanel bookId={bookId} chapters={chapters || []} paragraphs={paragraphRows || []} />
-
-      <StructureAuditPanel chapters={chapters || []} paragraphs={paragraphRows || []} />
-
-      <SceneEditorPanel chapters={chapters || []} scenes={sceneRows || []} paragraphs={paragraphRows || []} />
-
-      <Stack mt="xl" gap={0}>
-        <BookInputsManager
-          bookId={bookId}
-          book={book}
-          bible={bible}
-          authorNotes={authorNotes}
-          characters={characters || []}
-          styleSamples={styleSamples || []}
-          matterSections={matterSections || []}
-          revisionInstructions={revisionInstructions || []}
-        />
-      </Stack>
-
-      <Paper withBorder radius="md" p="xl" bg="white" mt="xl">
-        <Title order={2} mb="md">
-          Collaboration
-        </Title>
-        <CollaborationPanel bookId={bookId} />
+      <Paper withBorder radius="md" p="lg" bg="white" mt="xl">
+        <Group justify="space-between" align="center">
+          <div>
+            <Title order={3}>World Bible</Title>
+            <Text c="dimmed" size="sm">
+              Characters, locations, themes, motifs, timeline, and book-level inputs (metadata, style, author notes).
+            </Text>
+          </div>
+          <Link href={`/books/${bookId}/world`} style={{ textDecoration: "none" }}>
+            <Button color="grape" variant="light">Open World Bible</Button>
+          </Link>
+        </Group>
       </Paper>
 
-      <Paper withBorder radius="md" p="xl" bg="white" mt="xl">
-        <Title order={2} mb="md">
-          Chapter Browser
-        </Title>
-        <ChapterSummaryReview bookId={bookId} chapters={chapters || []} />
-        <PassageLockManager chapters={chapters || []} paragraphs={paragraphRows || []} />
-        <Table striped highlightOnHover>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Title</th>
-              <th>Status</th>
-              <th>Summary</th>
-            </tr>
-          </thead>
-          <tbody>
-            {chapters?.map((chapter) => (
-              <tr key={chapter.id}>
-                <td>{chapter.chapter_number}</td>
-                <td>{chapter.title}</td>
-                <td>
-                  <Badge variant="light">{chapter.status}</Badge>
-                </td>
-                <td>
-                  <ChapterSummaryViewer
-                    chapterId={chapter.id}
-                    chapterNumber={chapter.chapter_number}
-                    title={chapter.title}
-                    summary={chapter.summary}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </Paper>
     </Container>
   );
 }
@@ -536,7 +381,7 @@ function WorkflowCommandCenter({
   hasDriftReport: boolean;
 }) {
   const showDirectAutoReviewCta =
-    actionLabel.toLowerCase().includes("auto-review") && actionHref.includes("#studio-actions");
+    actionLabel.toLowerCase().includes("auto-review") && actionHref.endsWith("/studio");
   const pendingDraftHref = `/books/${bookId}/revisions`;
 
   return (
@@ -643,7 +488,7 @@ function getBookCommandCenter(input: {
       stageColor: "blue",
       guidance: `${input.plannedChapterCount.toLocaleString()} planned chapter shell(s) still need manuscript text before revision work can really begin. Open Studio Actions, click Generate Planned Draft, then confirm the AI Task Preflight by clicking Proceed.`,
       actionLabel: "Generate Draft Chapters",
-      actionHref: `/books/${input.bookId}#studio-actions`,
+      actionHref: `/books/${input.bookId}/studio`,
     };
   }
 
@@ -653,7 +498,7 @@ function getBookCommandCenter(input: {
       stageColor: "blue",
       guidance: "Your draft is ready. Run Auto-Review to analyze it, get critic feedback, and start improving — it generates the Blueprint automatically as its first step.",
       actionLabel: "Run Auto-Review",
-      actionHref: `/books/${input.bookId}#studio-actions`,
+      actionHref: `/books/${input.bookId}/studio`,
     };
   }
 
@@ -663,7 +508,7 @@ function getBookCommandCenter(input: {
       stageColor: "grape",
       guidance: "Blueprint is in place. Run Auto-Review to generate a rewrite plan and begin improving the manuscript.",
       actionLabel: "Run Auto-Review",
-      actionHref: `/books/${input.bookId}#studio-actions`,
+      actionHref: `/books/${input.bookId}/studio`,
     };
   }
 
@@ -671,7 +516,7 @@ function getBookCommandCenter(input: {
     input.rewriteReadiness?.items.find((item) => item.status === "recommended" && item.href);
   if (pendingAction?.href && pendingAction.actionLabel) {
     const actionHref =
-      pendingAction.href === `/books/${input.bookId}` ? `/books/${input.bookId}#studio-actions` : pendingAction.href;
+      pendingAction.href === `/books/${input.bookId}` ? `/books/${input.bookId}/studio` : pendingAction.href;
     return {
       stage: input.rewriteReadiness?.overallStatus === "blocked" ? "Blocked" : "Recommended",
       stageColor: input.rewriteReadiness?.overallStatus === "blocked" ? "red" : "yellow",
@@ -708,7 +553,7 @@ function getBookCommandCenter(input: {
       stageColor: "grape",
       guidance: "Continue the guided rewrite workflow, run the next safe batch when ready, and keep accepting reviewed drafts.",
       actionLabel: "Continue Rewrite",
-      actionHref: `/books/${input.bookId}/rewrite-plan`,
+      actionHref: `/books/${input.bookId}/critic-quality`,
     };
   }
 
@@ -717,7 +562,7 @@ function getBookCommandCenter(input: {
     stageColor: "teal",
     guidance: "The manuscript is structured and ready for analysis, Critic passes, or a guided rewrite workflow.",
     actionLabel: "Open Studio Actions",
-    actionHref: `/books/${input.bookId}#studio-actions`,
+    actionHref: `/books/${input.bookId}/studio`,
   };
 }
 

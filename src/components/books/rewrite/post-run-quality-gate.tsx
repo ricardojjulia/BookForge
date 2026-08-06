@@ -205,7 +205,7 @@ export function PostRunQualityGate({
           <Button component={Link} href={`/books/${bookId}/revisions?job=${latestRewriteJob?.id || "latest"}`} variant="light" color="teal" disabled={!latestRewriteJob}>
             Review sample batch
           </Button>
-          <Button component={Link} href={`/books/${bookId}/rewrite-plan`} variant="light" color="grape">
+          <Button component={Link} href={`/books/${bookId}/critic-quality`} variant="light" color="grape">
             Adjust strategy
           </Button>
           <Button component={Link} href={`/books/${bookId}/final-manuscript`} variant="light" color="green">
