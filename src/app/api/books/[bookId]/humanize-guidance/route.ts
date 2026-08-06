@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
+import { CRITIC_LENS_COUNT, isCriticBaselineReportType } from "@/lib/critic/progress";
 import { buildHumanizeGuidancePrompt } from "@/lib/humanize/guidance-prompt";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
@@ -63,9 +64,9 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
     const { client, preparedModel, modelSelection, telemetryContext } = modelPlan;
 
     const criticReports = (reports || [])
-      .filter((report) => String(report.report_type).startsWith("critic:"))
+      .filter((report) => isCriticBaselineReportType(String(report.report_type)))
       .map((report) => ({ reportType: report.report_type, content: report.content as Record<string, unknown> | null }))
-      .slice(0, 7);
+      .slice(0, CRITIC_LENS_COUNT);
     const driftReports = (reports || [])
       .filter((report) => report.report_type === "rewrite_drift_check")
       .map((report) => ({ content: report.content as Record<string, unknown> | null }))

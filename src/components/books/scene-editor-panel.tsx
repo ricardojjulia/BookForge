@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Alert, Badge, Button, Group, Modal, Paper, ScrollArea, Stack, Text, Title } from "@mantine/core";
+import { IconSparkles } from "@tabler/icons-react";
 import { useDisclosure } from "@mantine/hooks";
 import { useRouter } from "next/navigation";
 import { fetchJson } from "@/lib/http/fetch-json";
@@ -29,14 +30,25 @@ type SceneEditorParagraph = {
   original_text: string;
 };
 
+export type SceneSplitSuggestion = {
+  id: string;
+  chapter_id: string;
+  start_paragraph_id: string;
+  title: string;
+  rationale: string | null;
+  status: string;
+};
+
 export function SceneEditorPanel({
   chapters,
   scenes,
   paragraphs,
+  suggestions = [],
 }: {
   chapters: SceneEditorChapter[];
   scenes: SceneEditorScene[];
   paragraphs: SceneEditorParagraph[];
+  suggestions?: SceneSplitSuggestion[];
 }) {
   const router = useRouter();
   const [opened, { open, close }] = useDisclosure(false);
@@ -44,7 +56,43 @@ export function SceneEditorPanel({
   const [error, setError] = useState("");
   const paragraphsByChapter = useMemo(() => groupBy(paragraphs, "chapter_id"), [paragraphs]);
   const scenesByChapter = useMemo(() => groupBy(scenes, "chapter_id"), [scenes]);
+  const suggestionsByChapter = useMemo(() => groupBy(suggestions, "chapter_id"), [suggestions]);
+  const paragraphById = useMemo(() => new Map(paragraphs.map((paragraph) => [paragraph.id, paragraph])), [paragraphs]);
   const sceneIssues = useMemo(() => getSceneIssues(chapters, scenes, paragraphs), [chapters, paragraphs, scenes]);
+
+  async function suggestScenes(chapterId: string) {
+    setLoadingId(`suggest:${chapterId}`);
+    setError("");
+    try {
+      await fetchJson(`/api/chapters/${chapterId}/suggest-scenes`, { method: "POST" }, "Suggest scenes");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to suggest scenes.");
+    } finally {
+      setLoadingId(null);
+    }
+  }
+
+  async function reviewSuggestion(suggestion: SceneSplitSuggestion, status: "approved" | "rejected") {
+    setLoadingId(`review:${suggestion.id}`);
+    setError("");
+    try {
+      await fetchJson(
+        `/api/scene-split-suggestions/${suggestion.id}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ status }),
+        },
+        status === "approved" ? "Accept scene suggestion" : "Reject scene suggestion",
+      );
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update suggestion.");
+    } finally {
+      setLoadingId(null);
+    }
+  }
 
   async function renameScene(scene: SceneEditorScene) {
     const title = window.prompt("Scene title", scene.title || `Scene ${scene.scene_number}`);
@@ -167,6 +215,9 @@ export function SceneEditorPanel({
                   (a, b) => a.paragraph_number - b.paragraph_number,
                 );
                 const paragraphCounts = countParagraphsByScene(chapterParagraphs);
+                const chapterSuggestions = (suggestionsByChapter[chapter.id] || []).filter(
+                  (suggestion) => suggestion.status === "pending",
+                );
                 return (
                   <Paper key={chapter.id} withBorder radius="md" p="md" bg="#fbfaf8">
                     <Group justify="space-between" mb="sm">
@@ -178,12 +229,76 @@ export function SceneEditorPanel({
                           {chapterScenes.length} scenes · {chapterParagraphs.length} paragraphs
                         </Text>
                       </div>
-                      {!chapterScenes.length && (
-                        <Badge color="red" variant="light">
-                          No scenes
-                        </Badge>
-                      )}
+                      <Group gap="xs">
+                        {!chapterScenes.length && (
+                          <Badge color="red" variant="light">
+                            No scenes
+                          </Badge>
+                        )}
+                        <Button
+                          size="xs"
+                          variant="light"
+                          color="grape"
+                          leftSection={<IconSparkles size={14} />}
+                          loading={loadingId === `suggest:${chapter.id}`}
+                          disabled={chapterParagraphs.length < 2}
+                          onClick={() => suggestScenes(chapter.id)}
+                        >
+                          Suggest Scenes
+                        </Button>
+                      </Group>
                     </Group>
+
+                    {chapterSuggestions.length > 0 && (
+                      <Stack gap="xs" mb="sm">
+                        {chapterSuggestions.map((suggestion) => {
+                          const targetParagraph = paragraphById.get(suggestion.start_paragraph_id);
+                          return (
+                            <Paper key={suggestion.id} withBorder radius="sm" p="sm" bg="#f8f0ff">
+                              <Group justify="space-between" align="flex-start" wrap="nowrap">
+                                <div>
+                                  <Group gap="xs" mb={2}>
+                                    <Badge color="grape" variant="light" size="sm">
+                                      Suggested scene
+                                    </Badge>
+                                    {targetParagraph && (
+                                      <Text size="xs" c="dimmed">
+                                        starts at paragraph {targetParagraph.paragraph_number}
+                                      </Text>
+                                    )}
+                                  </Group>
+                                  <Text fw={700}>{suggestion.title}</Text>
+                                  {suggestion.rationale && (
+                                    <Text size="sm" c="dimmed">
+                                      {suggestion.rationale}
+                                    </Text>
+                                  )}
+                                </div>
+                                <Group gap="xs" wrap="nowrap">
+                                  <Button
+                                    size="xs"
+                                    color="teal"
+                                    loading={loadingId === `review:${suggestion.id}`}
+                                    onClick={() => reviewSuggestion(suggestion, "approved")}
+                                  >
+                                    Accept
+                                  </Button>
+                                  <Button
+                                    size="xs"
+                                    variant="subtle"
+                                    color="gray"
+                                    loading={loadingId === `review:${suggestion.id}`}
+                                    onClick={() => reviewSuggestion(suggestion, "rejected")}
+                                  >
+                                    Reject
+                                  </Button>
+                                </Group>
+                              </Group>
+                            </Paper>
+                          );
+                        })}
+                      </Stack>
+                    )}
 
                     <Stack gap="sm">
                       {chapterScenes.map((scene, index) => (

@@ -8,8 +8,10 @@ import { AiJobQueue, type AiJobQueueState } from "@/components/ai/ai-job-queue";
 import { AiTaskPreflight, type AiTaskPreflightData } from "@/components/ai/ai-task-preflight";
 import { estimateAiCallPlan } from "@/lib/ai/call-planner";
 import { criticLenses } from "@/lib/critic/prompts";
+import { CRITIC_LENS_COUNT } from "@/lib/critic/progress";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
+import { useAutoReviewStatus, type AutoReviewJob } from "@/lib/hooks/use-auto-review-status";
 import type { CriticLens } from "@/lib/types";
 
 type AiDashboardTask = "book-bible" | "critic" | "critic-all" | "chapter-summaries" | "generate-draft" | "auto-review";
@@ -87,19 +89,6 @@ type AutoReviewStatusResponse = {
   };
 };
 
-type AutoReviewJobSummary = {
-  id: string;
-  mode: "full_review" | "make_shorter" | "make_longer";
-  status: "running" | "completed" | "failed" | "cancelled";
-  completed_at: string | null;
-  created_at: string;
-};
-
-type AutoReviewJobResponse = {
-  job?: AutoReviewJobSummary | null;
-  acceptedParagraphCount?: number;
-};
-
 const autoReviewStrategies = [
   "conservative_polish",
   "humanized_literary",
@@ -130,8 +119,7 @@ export function BookActions({
   const [output, setOutput] = useState("");
   const [pendingTask, setPendingTask] = useState<PendingTask | null>(null);
   const [pendingGuardTask, setPendingGuardTask] = useState<AiDashboardTask | null>(null);
-  const [latestAutoReviewJob, setLatestAutoReviewJob] = useState<AutoReviewJobSummary | null>(null);
-  const [acceptedParagraphCount, setAcceptedParagraphCount] = useState(0);
+  const { job: latestAutoReviewJob, autoReviewOutputStale } = useAutoReviewStatus(bookId);
   // Starts false on both server and the client's first render -- reading
   // localStorage inside the useState initializer runs on the client's
   // initial render too (not just the server), and if the user had
@@ -163,39 +151,6 @@ export function BookActions({
     if (!detailedQueuePrefHydrated.current) return;
     window.localStorage.setItem("bookforge.alwaysShowDetailedQueue", alwaysShowDetailedQueue ? "1" : "0");
   }, [alwaysShowDetailedQueue]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadLatestAutoReviewJob() {
-      try {
-        const result = await fetchJson<AutoReviewJobResponse>(
-          `/api/books/${bookId}/auto-review`,
-          { cache: "no-store" },
-          "Auto-review latest job status",
-        );
-        if (!cancelled) {
-          setLatestAutoReviewJob(result.job || null);
-          setAcceptedParagraphCount(result.acceptedParagraphCount ?? 0);
-        }
-      } catch {
-        if (!cancelled) {
-          setLatestAutoReviewJob(null);
-          setAcceptedParagraphCount(0);
-        }
-      }
-    }
-
-    void loadLatestAutoReviewJob();
-    const interval = window.setInterval(() => {
-      void loadLatestAutoReviewJob();
-    }, 30000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [bookId]);
 
   async function getModelStatus(): Promise<ModelStatusResponse> {
     return fetchJson<ModelStatusResponse>(
@@ -409,12 +364,6 @@ export function BookActions({
     return task === "book-bible" || task === "chapter-summaries" || task === "critic" || task === "critic-all";
   }
 
-  // A "completed" job with zero accepted paragraphs right now means the
-  // manuscript was reset (e.g. Reset Rewrite) after that run finished --
-  // its "already reviewed, this is redundant" guidance no longer applies,
-  // since there's no revised text left for it to be redundant with.
-  const autoReviewOutputStale = latestAutoReviewJob?.status === "completed" && acceptedParagraphCount === 0;
-
   function requestTask(task: AiDashboardTask) {
     if (latestAutoReviewJob?.status === "completed" && !autoReviewOutputStale && requiresPostAutoReviewConfirmation(task)) {
       setPendingGuardTask(task);
@@ -598,7 +547,7 @@ export function BookActions({
       else await post(`/api/books/${bookId}/critic/all`, { stage: "baseline" }, "Running baseline Critic lenses");
 
       if (status.hasRewritePlan) skipCompleted("Rewrite Architect plan");
-      else await post(`/api/books/${bookId}/rewrite-plan`, {}, "Creating Rewrite Architect plan");
+      else await post(`/api/books/${bookId}/critic-quality`, {}, "Creating Rewrite Architect plan");
 
       const firstStrategy = randomItem(autoReviewStrategies);
       const firstTrustProfile = randomItem(autoReviewTrustProfiles);
@@ -1303,7 +1252,7 @@ export function BookActions({
           title="Rewrite & Export"
           description="Revise drafted chapters and build reviewable/final files."
         >
-          <Button component={Link} href={`/books/${bookId}/rewrite-plan`} color="dark" variant="light" fullWidth>
+          <Button component={Link} href={`/books/${bookId}/critic-quality`} color="dark" variant="light" fullWidth>
             Rewrite Architect
           </Button>
           <Button component={Link} href={`/books/${bookId}/revisions`} color="teal" variant="light" fullWidth>
@@ -1482,7 +1431,7 @@ function formatAutoReviewMessage(firstReview: AutoRevisionResponse | null, secon
   return parts.join(" ");
 }
 
-function describeAutoReviewMode(mode: AutoReviewJobSummary["mode"]) {
+function describeAutoReviewMode(mode: AutoReviewJob["mode"]) {
   if (mode === "make_shorter") return "Make Shorter Auto-Review";
   if (mode === "make_longer") return "Make Longer Auto-Review";
   return "Full Auto-Review";
@@ -1509,7 +1458,7 @@ function formatResultMessage(path: string, result: { content?: Record<string, un
 
   if (path.includes("/critic/all")) {
     const completed = result.content?.completed;
-    return `BookForge Critic batch saved${typeof completed === "number" ? `: ${completed}/7 lenses completed.` : "."}`;
+    return `BookForge Critic batch saved${typeof completed === "number" ? `: ${completed}/${CRITIC_LENS_COUNT} lenses completed.` : "."}`;
   }
 
   if (path.includes("/critic")) {

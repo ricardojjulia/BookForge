@@ -5,6 +5,7 @@ import { IconInfoCircle } from "@tabler/icons-react";
 import { Accordion, ActionIcon, Badge, Button, Group, JsonInput, Pagination, Paper, Select, SimpleGrid, Stack, Text, Title, Tooltip } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { useRouter } from "next/navigation";
+import { isCriticPostReportType, isCriticReportType } from "@/lib/critic/progress";
 import { extractCriticScore } from "@/lib/critic/score";
 import { CRITIC_SUMMARY_FALLBACK, summarizeCriticContent } from "@/lib/critic/summary";
 
@@ -115,7 +116,7 @@ export function CriticReportsPanel({ bookId, reports }: { bookId: string; report
                             </Tooltip>
                           )}
                         </Group>
-                        {(report.report_type.startsWith("critic:") || report.report_type.startsWith("critic_post:")) && (
+                        {isCriticReportType(report.report_type) && (
                           <Group>
                             <RecheckCriticButton bookId={bookId} reportType={report.report_type} />
                           </Group>
@@ -141,7 +142,7 @@ export function CriticReportsPanel({ bookId, reports }: { bookId: string; report
 function RecheckCriticButton({ bookId, reportType }: { bookId: string; reportType: string }) {
   const router = useRouter();
   const [loading, { open, close }] = useDisclosure(false);
-  const isPostRewrite = reportType.startsWith("critic_post:");
+  const isPostRewrite = isCriticPostReportType(reportType);
   const lens = reportType.replace(/^critic_post:/, "").replace(/^critic:/, "");
   const stage = isPostRewrite ? "post_rewrite" : "baseline";
 
@@ -221,7 +222,7 @@ function getReportTypeOptions(reports: CriticReport[]) {
 }
 
 function filterReports(reports: CriticReport[], filter: string) {
-  if (filter === "critic") return reports.filter((report) => report.report_type.startsWith("critic"));
+  if (filter === "critic") return reports.filter((report) => isCriticReportType(report.report_type));
   if (filter === "rewrite") return reports.filter((report) => report.report_type.startsWith("rewrite"));
   if (filter === "continuity") return reports.filter((report) => report.report_type === "continuity_ledger");
   if (filter.startsWith("type:")) {
