@@ -582,10 +582,13 @@ function WorkflowCommandCenter({
             </Text>
           </div>
           <Group gap="xs" align="flex-start">
-            <Link href={actionHref} style={{ textDecoration: "none" }}>
-              <Button color="grape">{actionLabel}</Button>
-            </Link>
-            {showDirectAutoReviewCta && <AutoReviewWizard bookId={bookId} bookTitle={bookTitle} />}
+            {showDirectAutoReviewCta ? (
+              <AutoReviewWizard bookId={bookId} bookTitle={bookTitle} />
+            ) : (
+              <Link href={actionHref} style={{ textDecoration: "none" }}>
+                <Button color="grape">{actionLabel}</Button>
+              </Link>
+            )}
           </Group>
         </Group>
 
