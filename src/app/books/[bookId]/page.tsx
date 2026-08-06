@@ -70,6 +70,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
     { data: pendingDraftRows },
     { data: paragraphRows },
     { data: sceneRows },
+    { data: sceneSplitSuggestions },
     { data: latestRewriteJob },
     { data: rewriteWorkflow },
     { data: rewritePlan },
@@ -141,6 +142,11 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
         .select("id,chapter_id,scene_number,title,summary,status")
         .eq("book_id", bookId)
         .order("scene_number"),
+      supabase
+        .from("scene_split_suggestions")
+        .select("id,chapter_id,start_paragraph_id,title,rationale,status")
+        .eq("book_id", bookId)
+        .eq("status", "pending"),
       supabase
         .from("revision_jobs")
         .select("id,status,created_at,completed_at,settings")
@@ -462,7 +468,12 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
 
         <StructureAuditPanel chapters={chapters || []} paragraphs={paragraphRows || []} />
 
-        <SceneEditorPanel chapters={chapters || []} scenes={sceneRows || []} paragraphs={paragraphRows || []} />
+        <SceneEditorPanel
+          chapters={chapters || []}
+          scenes={sceneRows || []}
+          paragraphs={paragraphRows || []}
+          suggestions={sceneSplitSuggestions || []}
+        />
 
         <Stack mt="xl" gap={0}>
           <BookInputsManager
