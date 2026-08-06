@@ -325,6 +325,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
             architecture={architectureToDisplay}
             chapters={chapters || []}
             plannedChapterCount={plannedChapterCount}
+            hasBlueprint={Boolean(bible)}
           />
         )}
 

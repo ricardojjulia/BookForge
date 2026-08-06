@@ -228,11 +228,15 @@ export function ArchitectureRoadmapPanel({
   architecture,
   chapters,
   plannedChapterCount,
+  hasBlueprint,
 }: {
   bookId: string;
   architecture: Record<string, unknown>;
   chapters: DbChapter[];
   plannedChapterCount: number;
+  /** Blueprint is Auto-Review's first output -- once it exists, Auto-Review
+   * has already run at least once, so "next step: run it" is stale. */
+  hasBlueprint: boolean;
 }) {
   const parts: ArchPart[] = Array.isArray(architecture.parts) ? (architecture.parts as ArchPart[]) : [];
   const totalChapters = parts.reduce((sum, p) => sum + (Array.isArray(p.chapters) ? p.chapters.length : 0), 0);
@@ -267,7 +271,7 @@ export function ArchitectureRoadmapPanel({
         )}
       </Group>
 
-      {plannedChapterCount === 0 && (
+      {plannedChapterCount === 0 && !hasBlueprint && (
         <Paper withBorder radius="md" p="md" bg="#fff8e1" mb="md">
           <Group gap="sm" align="flex-start">
             <Text size="xl">→</Text>
