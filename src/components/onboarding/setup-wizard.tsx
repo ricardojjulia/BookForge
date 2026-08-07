@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Alert,
   Badge,
@@ -363,6 +364,7 @@ export function SetupWizard({
   completedSteps: string[];
   needsSetup: boolean;
 }) {
+  const router = useRouter();
   const [opened, setOpened] = useWizardAutoOpen(needsSetup && !completedSteps.includes(ONBOARDING_STEPS.aiSetup));
   const [active, setActive] = useState(0);
   const [engine, setEngine] = useState<Engine>("lmstudio");
@@ -409,6 +411,7 @@ export function SetupWizard({
 
   function close() {
     setOpened(false);
+    if (done) router.refresh();
   }
 
   return (

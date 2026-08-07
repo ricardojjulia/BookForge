@@ -109,7 +109,7 @@ export function CreateBookWizard() {
   const [idea, setIdea] = useState("");
   const [genre, setGenre] = useState<string | null>("Literary nonfiction");
   const [audience, setAudience] = useState<string | null>("General adult");
-  const [language, setLanguage] = useState<string | null>("Spanish");
+  const [language, setLanguage] = useState<string | null>("English");
   const [targetPages, setTargetPages] = useState<number | "">(120);
   const [tone, setTone] = useState("");
   const [boundaries, setBoundaries] = useState("");
