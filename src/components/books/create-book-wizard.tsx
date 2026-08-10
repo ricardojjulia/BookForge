@@ -169,6 +169,35 @@ export function CreateBookWizard({ existingProject }: { existingProject?: Existi
     setResumeChoice("resolved");
   }
 
+  // A single blocking LLM call (concept: ~10-30s, architecture: can run
+  // 60-90s+ for a full book) with only a static "this can take a bit"
+  // message is easy to mistake for a hang -- there's nothing distinguishing
+  // "still working" from "silently broken." This ticks a live elapsed-time
+  // counter and an estimated (never-quite-100%) progress bar for whichever
+  // step is currently running, purely as a "the system is still alive"
+  // signal -- there's no real per-unit progress to report for a single call.
+  const activeStep: "concept" | "architecture" | "accepting" | null = conceptLoading
+    ? "concept"
+    : architectureLoading
+      ? "architecture"
+      : acceptingArchitecture
+        ? "accepting"
+        : null;
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    if (!activeStep) return;
+    const resetId = window.setTimeout(() => setElapsedSeconds(0), 0);
+    const intervalId = window.setInterval(() => setElapsedSeconds((current) => current + 1), 1000);
+    return () => {
+      window.clearTimeout(resetId);
+      window.clearInterval(intervalId);
+    };
+  }, [activeStep]);
+  const estimatedDurationSeconds = activeStep === "concept" ? 20 : activeStep === "architecture" ? 75 : 8;
+  const estimatedProgressPercent = activeStep
+    ? Math.min(94, Math.round((1 - Math.exp(-elapsedSeconds / estimatedDurationSeconds)) * 100))
+    : 0;
+
   const runModelPreflight = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -205,7 +234,7 @@ export function CreateBookWizard({ existingProject }: { existingProject?: Existi
     setArchitectureLoading(true);
     setError("");
     setStatusColor("blue");
-    setStatusMessage("Generating chapter architecture... This can take a bit.");
+    setStatusMessage("Generating chapter architecture... This can take 60-90 seconds for a full book.");
     try {
       const result = await fetchJson<{ content?: { architecture?: ChapterArchitecture } }>(
         "/api/creation/architecture",
@@ -551,6 +580,18 @@ export function CreateBookWizard({ existingProject }: { existingProject?: Existi
           {!!statusMessage && (
             <Alert color={statusColor} variant="light">
               <Text size="sm">{statusMessage}</Text>
+              {activeStep && (
+                <>
+                  <Progress value={estimatedProgressPercent} animated color={statusColor} mt="xs" />
+                  <Text size="xs" c="dimmed" mt={4}>
+                    {elapsedSeconds}s elapsed -- {activeStep === "architecture"
+                      ? "a full book's architecture typically takes 60-90 seconds. Still working; no need to reload."
+                      : activeStep === "concept"
+                        ? "typically takes 10-30 seconds. Still working; no need to reload."
+                        : "typically takes a few seconds. Still working; no need to reload."}
+                  </Text>
+                </>
+              )}
             </Alert>
           )}
         </Stack>
