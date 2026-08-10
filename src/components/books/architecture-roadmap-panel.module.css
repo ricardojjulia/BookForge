@@ -1,8 +1,9 @@
-.chapterRow {
+.chapterChip {
   cursor: pointer;
   user-select: none;
+  transition: transform 0.1s ease;
 }
 
-.chapterMeta {
-  flex: 1;
+.chapterChip:hover {
+  transform: translateY(-1px);
 }
