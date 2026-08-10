@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Alert, Badge, Box, Button, Collapse, Divider, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { AnimatePresence, motion } from "framer-motion";
+import { Alert, Badge, Box, Button, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { WORDS_PER_PAGE } from "@/lib/manuscript/page-estimate";
 import classes from "./architecture-roadmap-panel.module.css";
@@ -61,7 +62,113 @@ function toStr(v: unknown): string {
   return "";
 }
 
-function ChapterRow({
+function chipBg(status: string) {
+  if (status === "draft") return "var(--mantine-color-blue-1)";
+  if (status === "planned") return "var(--mantine-color-yellow-1)";
+  if (status === "missing") return "var(--mantine-color-gray-1)";
+  return "var(--mantine-color-teal-1)";
+}
+
+function chipBorder(status: string) {
+  if (status === "draft") return "var(--mantine-color-blue-4)";
+  if (status === "planned") return "var(--mantine-color-yellow-5)";
+  if (status === "missing") return "var(--mantine-color-gray-4)";
+  return "var(--mantine-color-teal-4)";
+}
+
+function PartProgressRing({ progress, color }: { progress: number; color: string }) {
+  const size = 44;
+  const strokeWidth = 4;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  return (
+    <Box style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={size / 2} cy={size / 2} r={radius} stroke="var(--mantine-color-gray-2)" strokeWidth={strokeWidth} fill="none" />
+        <motion.circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={color}
+          strokeWidth={strokeWidth}
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          initial={{ strokeDashoffset: circumference }}
+          animate={{ strokeDashoffset: circumference * (1 - progress) }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </svg>
+      <Text
+        size="9px"
+        fw={800}
+        style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
+      >
+        {Math.round(progress * 100)}%
+      </Text>
+    </Box>
+  );
+}
+
+function ChapterChip({
+  chapter,
+  status,
+  selected,
+  index,
+  onClick,
+}: {
+  chapter: ArchChapter;
+  status: string;
+  selected: boolean;
+  index: number;
+  onClick: () => void;
+}) {
+  return (
+    <Box style={{ position: "relative" }}>
+      {selected && (
+        <motion.div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: -4,
+            borderRadius: 10,
+            border: "1px solid var(--mantine-color-grape-4)",
+          }}
+          animate={{ scale: [1, 1.12, 1], opacity: [0.6, 0.15, 0.6] }}
+          transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+        />
+      )}
+      <motion.div
+        onClick={onClick}
+        title={chapter.title || `Chapter ${chapter.chapterNumber}`}
+        className={classes.chapterChip}
+        initial={{ opacity: 0, scale: 0.7 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ delay: index * 0.03, duration: 0.2, ease: "easeOut" }}
+        whileHover={{ scale: 1.12, y: -2 }}
+        whileTap={{ scale: 0.94 }}
+        style={{
+          position: "relative",
+          width: 36,
+          height: 36,
+          borderRadius: 8,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontWeight: 700,
+          fontSize: 13,
+          background: chipBg(status),
+          border: `2px solid ${selected ? "var(--mantine-color-grape-6)" : chipBorder(status)}`,
+        }}
+      >
+        {chapter.chapterNumber}
+      </motion.div>
+    </Box>
+  );
+}
+
+function ChapterDetail({
   chapter,
   status,
   bookId,
@@ -73,7 +180,6 @@ function ChapterRow({
   dbChapterId: string | null;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
   const keyBeats = Array.isArray(chapter.keyBeats) ? chapter.keyBeats.map(toStr).filter(Boolean) : [];
@@ -102,76 +208,52 @@ function ChapterRow({
   }
 
   return (
-    <Box>
-      <Group
-        justify="space-between"
-        align="flex-start"
-        className={classes.chapterRow}
-        onClick={() => setOpen((o) => !o)}
-        py={6}
-      >
-        <Group align="flex-start" gap="sm" className={classes.chapterMeta}>
-          <Text size="xs" c="dimmed" w={28} ta="right" mt={2}>
-            {chapter.chapterNumber}
-          </Text>
-          <div className={classes.chapterMeta}>
-            <Group gap="xs" mb={2}>
-              <Text size="sm" fw={600}>
-                {chapter.title || `Chapter ${chapter.chapterNumber}`}
-              </Text>
-              <Badge size="xs" color={statusColor(status)} variant="light">
-                {status}
-              </Badge>
-              {targetWords && (
-                <Text size="xs" c="dimmed">
-                  ~{targetWords.toLocaleString()} words
-                </Text>
-              )}
-            </Group>
-            {chapter.purpose && (
-              <Text size="xs" c="dimmed" lineClamp={open ? undefined : 2}>
-                {chapter.purpose}
-              </Text>
-            )}
-          </div>
-        </Group>
-        <Text size="xs" c="dimmed" mt={2}>
-          {open ? "▲" : "▼"}
+    <Box mt="xs" p="sm" style={{ borderRadius: 8, background: "var(--mantine-color-body)" }}>
+      <Group gap="xs" mb={4}>
+        <Text size="sm" fw={600}>
+          {chapter.chapterNumber}. {chapter.title || `Chapter ${chapter.chapterNumber}`}
         </Text>
+        <Badge size="xs" color={statusColor(status)} variant="light">
+          {status}
+        </Badge>
+        {targetWords && (
+          <Text size="xs" c="dimmed">
+            ~{targetWords.toLocaleString()} words
+          </Text>
+        )}
       </Group>
-
-      <Collapse expanded={open}>
-        <Box pl={40} pb={8}>
-          {chapter.emotionalMovement && (
-            <Text size="xs" mb={4}>
-              <Text span fw={600}>Emotional arc: </Text>{chapter.emotionalMovement}
-            </Text>
-          )}
-          {keyBeats.length > 0 && (
-            <Box mb={4}>
-              <Text size="xs" fw={600} mb={2}>Key beats</Text>
-              <Stack gap={1}>
-                {keyBeats.map((beat, i) => (
-                  <Text size="xs" key={i}>· {beat}</Text>
-                ))}
-              </Stack>
-            </Box>
-          )}
-          {(status === "planned" || status === "missing") && dbChapterId && (
-            <Box mt={6}>
-              <Button size="compact-xs" variant="light" color="orange" loading={generating} onClick={generateThisChapter}>
-                Generate this chapter
-              </Button>
-              {error && (
-                <Alert color="red" p="xs" mt={4}>
-                  <Text size="xs">{error}</Text>
-                </Alert>
-              )}
-            </Box>
+      {chapter.purpose && (
+        <Text size="xs" c="dimmed" mb={4}>
+          {chapter.purpose}
+        </Text>
+      )}
+      {chapter.emotionalMovement && (
+        <Text size="xs" mb={4}>
+          <Text span fw={600}>Emotional arc: </Text>{chapter.emotionalMovement}
+        </Text>
+      )}
+      {keyBeats.length > 0 && (
+        <Box mb={4}>
+          <Text size="xs" fw={600} mb={2}>Key beats</Text>
+          <Stack gap={1}>
+            {keyBeats.map((beat, i) => (
+              <Text size="xs" key={i}>· {beat}</Text>
+            ))}
+          </Stack>
+        </Box>
+      )}
+      {(status === "planned" || status === "missing") && dbChapterId && (
+        <Box mt={6}>
+          <Button size="compact-xs" variant="light" color="orange" loading={generating} onClick={generateThisChapter}>
+            Generate this chapter
+          </Button>
+          {error && (
+            <Alert color="red" p="xs" mt={4}>
+              <Text size="xs">{error}</Text>
+            </Alert>
           )}
         </Box>
-      </Collapse>
-      <Divider opacity={0.3} />
+      )}
     </Box>
   );
 }
@@ -187,38 +269,61 @@ function PartSection({
   dbChapters: DbChapter[];
   bookId: string;
 }) {
+  const [selected, setSelected] = useState<number | null>(null);
   const archChapters: ArchChapter[] = Array.isArray(part.chapters) ? part.chapters : [];
   const drafted = archChapters.filter((c) => chapterStatus(dbChapters, c.chapterNumber ?? 0) === "draft").length;
+  const selectedChapter = selected != null ? archChapters[selected] : null;
+  const progress = archChapters.length ? drafted / archChapters.length : 0;
 
   return (
-    <Box mb="md">
-      <Group justify="space-between" mb={4}>
-        <div>
-          <Text size="xs" fw={700} tt="uppercase" c="dimmed">
-            Part {partIndex + 1}
+    <Box mb="sm">
+      <Group justify="space-between" align="center" gap="xs" wrap="nowrap">
+        <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
+          <Text size="xs" fw={700} c="dimmed" style={{ flexShrink: 0 }}>
+            P{partIndex + 1}
           </Text>
-          <Title order={5}>{part.title || `Part ${partIndex + 1}`}</Title>
-          {part.purpose && (
-            <Text size="xs" c="dimmed">
-              {part.purpose}
-            </Text>
-          )}
-        </div>
-        <Badge variant="light" color={drafted === archChapters.length ? "green" : "yellow"}>
-          {drafted}/{archChapters.length} chapters with draft prose
-        </Badge>
+          <Text size="sm" fw={600} truncate>
+            {part.title || `Part ${partIndex + 1}`}
+          </Text>
+        </Group>
+        <PartProgressRing progress={progress} color={progress >= 1 ? "var(--mantine-color-green-6)" : "var(--mantine-color-yellow-6)"} />
       </Group>
-      <Box>
+      {part.purpose && (
+        <Text size="xs" c="dimmed" lineClamp={1} mb={6}>
+          {part.purpose}
+        </Text>
+      )}
+      <Group gap={6}>
         {archChapters.map((chapter, i) => (
-          <ChapterRow
+          <ChapterChip
             key={chapter.chapterNumber ?? i}
             chapter={chapter}
             status={chapterStatus(dbChapters, chapter.chapterNumber ?? 0)}
-            bookId={bookId}
-            dbChapterId={dbChapters.find((c) => c.chapter_number === chapter.chapterNumber)?.id ?? null}
+            selected={selected === i}
+            index={i}
+            onClick={() => setSelected((current) => (current === i ? null : i))}
           />
         ))}
-      </Box>
+      </Group>
+      <AnimatePresence initial={false}>
+        {selectedChapter && (
+          <motion.div
+            key={selected}
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+            style={{ overflow: "hidden" }}
+          >
+            <ChapterDetail
+              chapter={selectedChapter}
+              status={chapterStatus(dbChapters, selectedChapter.chapterNumber ?? 0)}
+              bookId={bookId}
+              dbChapterId={dbChapters.find((c) => c.chapter_number === selectedChapter.chapterNumber)?.id ?? null}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </Box>
   );
 }
@@ -248,7 +353,7 @@ export function ArchitectureRoadmapPanel({
         <div>
           <Title order={3}>Architecture Roadmap</Title>
           <Text c="dimmed" size="sm">
-            {draftedChapters} of {totalChapters} chapters have draft prose · click any chapter to expand key beats
+            {draftedChapters} of {totalChapters} chapters have draft prose · click a chapter number for details
           </Text>
           <Text c="dimmed" size="xs">
             Draft prose means the chapter text was generated. It is not yet final polish.
@@ -299,7 +404,7 @@ export function ArchitectureRoadmapPanel({
         </Paper>
       )}
 
-      <Stack gap="lg">
+      <Stack gap="md">
         {parts.map((part, i) => (
           <PartSection key={i} part={part} partIndex={i} dbChapters={chapters} bookId={bookId} />
         ))}
