@@ -195,11 +195,12 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
     pendingDraftParagraphCount,
     acceptedParagraphCount,
     untouchedParagraphCount,
+    permanentlyIneligibleCount: permanentlyIneligibleUntouchedCount,
     latestDriftReportId: latestDriftReport?.id || null,
     modelEvaluation: getSavedModelEvaluation(workflowState.metadata),
     workflow: workflowState,
   });
-  const nextStep = getNextStepGuidance(readiness, bookId);
+  const nextStep = getNextStepGuidance(readiness, bookId, permanentlyIneligibleUntouchedCount);
 
   return (
     <Container size="xl">
