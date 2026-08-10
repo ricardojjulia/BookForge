@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Alert, Badge, Button, Checkbox, Group, NumberInput, Paper, Progress, SimpleGrid, Stack, Text, Textarea, Title } from "@mantine/core";
+import { Alert, Badge, Box, Button, Checkbox, Group, NumberInput, Paper, Progress, SimpleGrid, Stack, Text, Textarea, Title } from "@mantine/core";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AiJobQueue, type AiJobQueueState } from "@/components/ai/ai-job-queue";
@@ -1247,7 +1247,12 @@ function CampaignMetric({ label, value }: { label: string; value: number | strin
 }
 
 function RewriteReadinessGate({ readiness }: { readiness: RewriteReadiness }) {
-  const visibleItems = readiness.items.filter((item) => item.status !== "ready").slice(0, 6);
+  // Show what's actually driving the overall status, not a fixed first-4
+  // slice of an 11-item list -- otherwise the badge can read "Blocked"
+  // while every card visible on screen says "Ready", and the real
+  // blockers show up nowhere except unlinked text further down.
+  const attentionItems = readiness.items.filter((item) => item.status !== "ready").slice(0, 6);
+
   return (
     <Paper withBorder radius="md" p="lg" bg="#fffdf8">
       <Stack>
@@ -1263,37 +1268,44 @@ function RewriteReadinessGate({ readiness }: { readiness: RewriteReadiness }) {
           </Badge>
         </Group>
 
-        <SimpleGrid cols={{ base: 1, md: 4 }}>
-          {readiness.items.slice(0, 4).map((item) => (
-            <Paper key={item.key} withBorder radius="sm" p="sm" bg="white">
-              <Group justify="space-between" align="flex-start">
-                <Text fw={900} size="sm">
-                  {item.label}
-                </Text>
-                <Badge color={readinessColor(item.status)} variant="light">
-                  {readinessLabel(item.status)}
-                </Badge>
-              </Group>
-              <Text size="xs" c="dimmed" mt={4}>
-                {item.detail}
-              </Text>
-            </Paper>
-          ))}
-        </SimpleGrid>
-
-        {visibleItems.length > 0 && (
-          <Alert color={readiness.overallStatus === "blocked" ? "red" : "yellow"} variant="light">
-            <Text fw={900} mb={4}>
-              {readiness.overallStatus === "blocked" ? "Resolve these before the safest next move" : "Recommended before continuing"}
-            </Text>
-            <Stack gap={4}>
-              {visibleItems.map((item) => (
-                <Text key={item.key} size="sm">
-                  <strong>{item.label}:</strong> {item.detail}
-                </Text>
-              ))}
-            </Stack>
+        {attentionItems.length === 0 ? (
+          <Alert color="green" variant="light">
+            Every readiness check has passed.
           </Alert>
+        ) : (
+          <SimpleGrid cols={{ base: 1, md: 2 }}>
+            {attentionItems.map((item) => (
+              <Paper key={item.key} withBorder radius="sm" p="sm" bg="white">
+                <Group justify="space-between" align="flex-start" wrap="nowrap">
+                  <Box style={{ minWidth: 0 }}>
+                    <Group gap="xs">
+                      <Text fw={900} size="sm">
+                        {item.label}
+                      </Text>
+                      <Badge color={readinessColor(item.status)} variant="light" size="xs">
+                        {readinessLabel(item.status)}
+                      </Badge>
+                    </Group>
+                    <Text size="xs" c="dimmed" mt={4}>
+                      {item.detail}
+                    </Text>
+                  </Box>
+                  {item.actionLabel && item.href && (
+                    <Button
+                      component={Link}
+                      href={item.href}
+                      size="compact-xs"
+                      variant="light"
+                      color="grape"
+                      style={{ flexShrink: 0 }}
+                    >
+                      {item.actionLabel}
+                    </Button>
+                  )}
+                </Group>
+              </Paper>
+            ))}
+          </SimpleGrid>
         )}
       </Stack>
     </Paper>
