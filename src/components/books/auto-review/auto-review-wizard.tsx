@@ -14,12 +14,14 @@ import {
   Text,
   ThemeIcon,
 } from "@mantine/core";
-import { IconRocket, IconScissors, IconArrowUp, IconPlayerPlay } from "@tabler/icons-react";
+import { IconRocket, IconScissors, IconArrowUp, IconPlayerPlay, IconChecklist } from "@tabler/icons-react";
+import Link from "next/link";
 import { AutoReviewRunner } from "./auto-review-runner";
 import { CRITIC_LENS_COUNT } from "@/lib/critic/progress";
 import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 
 type Mode = "full_review" | "make_shorter" | "make_longer";
+type Selection = Mode | "guided";
 
 type Props = { bookId: string; bookTitle: string };
 
@@ -52,6 +54,16 @@ const MODES: { value: Mode; icon: React.ReactNode; label: string; tagline: strin
   },
 ];
 
+const GUIDED_OPTION = {
+  value: "guided" as const,
+  icon: <IconChecklist size={28} />,
+  label: "Guided — Review Each Step",
+  tagline: "You approve every stage, nothing auto-publishes",
+  detail:
+    "Takes you to the step-by-step rewrite workflow: generate a plan, run a small reviewable sample batch, approve the strategy, then continue in batches you control. Nothing runs or publishes automatically.",
+  color: "dark",
+};
+
 type ResumableJob = {
   id: string;
   mode: Mode;
@@ -61,7 +73,7 @@ type ResumableJob = {
 
 export function AutoReviewWizard({ bookId, bookTitle }: Props) {
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<Mode | null>(null);
+  const [selected, setSelected] = useState<Selection | null>(null);
   const [running, setRunning] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [completedStages, setCompletedStages] = useState<string[] | undefined>(undefined);
@@ -87,7 +99,7 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
 
   async function start(resumeFrom?: ResumableJob) {
     const mode = resumeFrom?.mode ?? selected;
-    if (!mode) return;
+    if (!mode || mode === "guided") return;
     setStartError(null);
 
     const res = await fetch(`/api/books/${bookId}/auto-review`, {
@@ -179,7 +191,7 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
             bookId={bookId}
             bookTitle={bookTitle}
             jobId={jobId}
-            mode={selected!}
+            mode={selected as Mode}
             onDone={reset}
             completedStages={completedStages}
             serverManaged
@@ -206,11 +218,13 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
             )}
 
             <Text c="dimmed" size="sm">
-              {checkingResume ? "Checking for previous runs..." : "Choose a mode. BookForge runs the full pipeline automatically and publishes the result when complete."}
+              {checkingResume
+                ? "Checking for previous runs..."
+                : "Choose a mode. The first three run the full pipeline automatically and publish when complete. Guided lets you review and approve each stage yourself."}
             </Text>
 
             <Stack gap="sm">
-              {MODES.map((mode) => (
+              {[...MODES, GUIDED_OPTION].map((mode) => (
                 <Card
                   key={mode.value}
                   withBorder
@@ -247,13 +261,19 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
 
             <Group justify="flex-end" mt="sm">
               <Button variant="subtle" color="gray" onClick={reset}>Cancel</Button>
-              <Button
-                color="grape"
-                disabled={!selected}
-                onClick={() => start()}
-              >
-                Start Auto-Review
-              </Button>
+              {selected === "guided" ? (
+                <Button component={Link} href={`/books/${bookId}/critic-quality`} color="dark">
+                  Go to Guided Workflow
+                </Button>
+              ) : (
+                <Button
+                  color="grape"
+                  disabled={!selected}
+                  onClick={() => start()}
+                >
+                  Start Auto-Review
+                </Button>
+              )}
             </Group>
           </Stack>
         )}
