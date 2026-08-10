@@ -3,6 +3,7 @@ import Link from "next/link";
 import { AutoReviewWizard } from "@/components/books/auto-review/auto-review-wizard";
 import { BookActions } from "@/components/books/book-actions";
 import { PersistentAiJobsPanel } from "@/components/books/jobs/persistent-ai-jobs-panel";
+import { detectAndHealStaleJobs } from "@/lib/ai/job-state";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -32,6 +33,20 @@ export default async function StudioPage({ params }: { params: Promise<{ bookId:
         <Alert color="red">Book not found or you do not have access.</Alert>
       </Container>
     );
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (user) {
+    const { data: activeJobs } = await supabase
+      .from("revision_jobs")
+      .select("id,mode,status,settings,created_at")
+      .eq("book_id", bookId)
+      .in("status", ["running", "queued"]);
+    if (activeJobs?.length) {
+      await detectAndHealStaleJobs(supabase, user.id, activeJobs);
+    }
   }
 
   const plannedChapterCount =
