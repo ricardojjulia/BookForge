@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Divider, Group, Modal, Paper, Select, SimpleGrid, Stack, Switch, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AiJobQueue, type AiJobQueueState } from "@/components/ai/ai-job-queue";
+import { AiJobQueue, AiJobQueueInlineStatus, type AiJobQueueState } from "@/components/ai/ai-job-queue";
 import { AiTaskPreflight, type AiTaskPreflightData } from "@/components/ai/ai-task-preflight";
 import { estimateAiCallPlan } from "@/lib/ai/call-planner";
 import { criticLenses } from "@/lib/critic/prompts";
@@ -1185,6 +1185,10 @@ export function BookActions({
             <Text size="xs" c="dimmed">
               This opens AI Task Preflight. Click Proceed in that dialog to start chapter generation.
             </Text>
+            <AiJobQueueInlineStatus
+              job={queue}
+              visible={loading === "preflight:generate-draft" || loading === `/api/books/${bookId}/generate-draft`}
+            />
           </Stack>
         </Paper>
       )}
@@ -1202,6 +1206,10 @@ export function BookActions({
           >
             Generate Manuscript Blueprint
           </Button>
+          <AiJobQueueInlineStatus
+            job={queue}
+            visible={loading === "preflight:book-bible" || loading === `/api/books/${bookId}/analyze`}
+          />
           <Button
             fullWidth
             variant="light"
@@ -1217,6 +1225,10 @@ export function BookActions({
           <Text size="xs" c="dimmed">
             This opens AI Task Preflight. Click Proceed in that dialog to start summary generation.
           </Text>
+          <AiJobQueueInlineStatus
+            job={queue}
+            visible={loading === "preflight:chapter-summaries" || loading === `/api/books/${bookId}/chapters/summarize`}
+          />
         </ActionPanel>
 
         <ActionPanel
@@ -1238,6 +1250,10 @@ export function BookActions({
           >
             Run Selected Critic Lens
           </Button>
+          <AiJobQueueInlineStatus
+            job={queue}
+            visible={loading === "preflight:critic" || loading === `/api/books/${bookId}/critic`}
+          />
           <Button
             fullWidth
             color="grape"
@@ -1246,6 +1262,10 @@ export function BookActions({
           >
             Run All Critic Lenses
           </Button>
+          <AiJobQueueInlineStatus
+            job={queue}
+            visible={loading === "preflight:critic-all" || loading === `/api/books/${bookId}/critic/all`}
+          />
         </ActionPanel>
 
         <ActionPanel

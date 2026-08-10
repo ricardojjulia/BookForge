@@ -20,6 +20,7 @@ import {
 } from "@mantine/core";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { GenerationProgressAlert } from "@/components/ai/generation-progress-alert";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { DIALOG_DENSITY_LABELS, DIALOG_DENSITY_LEVELS, type DialogDensity } from "@/lib/dialogue-density";
 import { estimateWordsForPages } from "@/lib/manuscript/page-estimate";
@@ -171,11 +172,11 @@ export function CreateBookWizard({ existingProject }: { existingProject?: Existi
 
   // A single blocking LLM call (concept: ~10-30s, architecture: can run
   // 60-90s+ for a full book) with only a static "this can take a bit"
-  // message is easy to mistake for a hang -- there's nothing distinguishing
-  // "still working" from "silently broken." This ticks a live elapsed-time
-  // counter and an estimated (never-quite-100%) progress bar for whichever
-  // step is currently running, purely as a "the system is still alive"
-  // signal -- there's no real per-unit progress to report for a single call.
+  // message is easy to mistake for a hang. Each trigger button below renders
+  // its own GenerationProgressAlert right next to itself (not a shared alert
+  // scrolled away elsewhere), since the page has three separate action
+  // groups (generate concept / accept concept / accept architecture) spread
+  // across different Paper sections.
   const activeStep: "concept" | "architecture" | "accepting" | null = conceptLoading
     ? "concept"
     : architectureLoading
@@ -183,20 +184,6 @@ export function CreateBookWizard({ existingProject }: { existingProject?: Existi
       : acceptingArchitecture
         ? "accepting"
         : null;
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  useEffect(() => {
-    if (!activeStep) return;
-    const resetId = window.setTimeout(() => setElapsedSeconds(0), 0);
-    const intervalId = window.setInterval(() => setElapsedSeconds((current) => current + 1), 1000);
-    return () => {
-      window.clearTimeout(resetId);
-      window.clearInterval(intervalId);
-    };
-  }, [activeStep]);
-  const estimatedDurationSeconds = activeStep === "concept" ? 20 : activeStep === "architecture" ? 75 : 8;
-  const estimatedProgressPercent = activeStep
-    ? Math.min(94, Math.round((1 - Math.exp(-elapsedSeconds / estimatedDurationSeconds)) * 100))
-    : 0;
 
   const runModelPreflight = useCallback(async () => {
     setLoading(true);
@@ -580,18 +567,6 @@ export function CreateBookWizard({ existingProject }: { existingProject?: Existi
           {!!statusMessage && (
             <Alert color={statusColor} variant="light">
               <Text size="sm">{statusMessage}</Text>
-              {activeStep && (
-                <>
-                  <Progress value={estimatedProgressPercent} animated color={statusColor} mt="xs" />
-                  <Text size="xs" c="dimmed" mt={4}>
-                    {elapsedSeconds}s elapsed -- {activeStep === "architecture"
-                      ? "a full book's architecture typically takes 60-90 seconds. Still working; no need to reload."
-                      : activeStep === "concept"
-                        ? "typically takes 10-30 seconds. Still working; no need to reload."
-                        : "typically takes a few seconds. Still working; no need to reload."}
-                  </Text>
-                </>
-              )}
             </Alert>
           )}
         </Stack>
@@ -693,6 +668,13 @@ export function CreateBookWizard({ existingProject }: { existingProject?: Existi
               Back to Dashboard
             </Button>
           </Group>
+          <GenerationProgressAlert
+            active={activeStep === "concept"}
+            message="Generating concept pass..."
+            detail="typically takes 10-30 seconds"
+            estimatedSeconds={20}
+            color="grape"
+          />
         </Stack>
       </Paper>
 
@@ -745,6 +727,13 @@ export function CreateBookWizard({ existingProject }: { existingProject?: Existi
                 Regenerate Concept
               </Button>
             </Group>
+            <GenerationProgressAlert
+              active={activeStep === "architecture"}
+              message="Generating chapter architecture..."
+              detail="a full book's architecture typically takes 60-90 seconds"
+              estimatedSeconds={75}
+              color="teal"
+            />
           </Stack>
         </Paper>
       )}
@@ -825,6 +814,13 @@ export function CreateBookWizard({ existingProject }: { existingProject?: Existi
                 Regenerate Architecture
               </Button>
             </Group>
+            <GenerationProgressAlert
+              active={activeStep === "accepting"}
+              message="Accepting architecture and creating your book..."
+              detail="typically takes a few seconds"
+              estimatedSeconds={8}
+              color="teal"
+            />
           </Stack>
         </Paper>
       )}

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Alert, Badge, Button, Group, Tabs, Text } from "@mantine/core";
 import { IconSparkles } from "@tabler/icons-react";
 import { EntityList } from "@/components/books/world/entity-list";
+import { GenerationProgressAlert } from "@/components/ai/generation-progress-alert";
 import { fetchJson } from "@/lib/http/fetch-json";
 
 type Chapter = { id: string; chapter_number: number; title: string | null };
@@ -100,6 +101,12 @@ export function WorldBibleEditor({
         </Button>
       </Group>
       {message && <Alert color={message.color} mb="lg" onClose={() => setMessage(null)} withCloseButton>{message.text}</Alert>}
+      <GenerationProgressAlert
+        active={discovering}
+        message="Discovering characters, locations, themes, and motifs across the manuscript..."
+        detail="a full book typically takes 1-2 minutes"
+        estimatedSeconds={75}
+      />
       <Tabs value={tab} onChange={setTab}>
       <Tabs.List mb="xl">
         <Tabs.Tab value="characters">Characters ({initialCharacters.length})</Tabs.Tab>

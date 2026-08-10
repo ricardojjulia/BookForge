@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Alert, Badge, Button, Checkbox, Group, NumberInput, Paper, Select, SimpleGrid, Stack, Text, Textarea, TextInput, Title } from "@mantine/core";
 import { useRouter } from "next/navigation";
+import { GenerationProgressAlert } from "@/components/ai/generation-progress-alert";
 import { fetchJson } from "@/lib/http/fetch-json";
 
 type FinalManuscriptBuilderProps = {
@@ -454,6 +455,19 @@ export function FinalManuscriptBuilder({
             )}
           </Group>
 
+          <GenerationProgressAlert
+            active={previewLoading}
+            message="Assembling preview..."
+            estimatedSeconds={15}
+            color="dark"
+          />
+          <GenerationProgressAlert
+            active={loading}
+            message={`Building ${formatLabel(format)} export...`}
+            detail="a full manuscript can take a minute or more"
+            estimatedSeconds={40}
+            color="grape"
+          />
           {message && <Alert color="green">{message}</Alert>}
           {error && <Alert color="red">{error}</Alert>}
           {preview && (
