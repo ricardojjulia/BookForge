@@ -245,11 +245,52 @@ export function BookActions({
     );
   }
 
+  function jobModeForTask(task: AiDashboardTask) {
+    switch (task) {
+      case "book-bible":
+        return "manuscript_blueprint";
+      case "chapter-summaries":
+        return "chapter_summaries";
+      case "critic":
+        return "bookforge_critic";
+      case "critic-all":
+        return "bookforge_critic_batch";
+      case "generate-draft":
+        return "creation_draft_generation";
+      default:
+        return null;
+    }
+  }
+
+  // Real median seconds-per-unit from every user's completed runs of this
+  // task, pooled globally so a first-time user benefits from it immediately
+  // instead of only the local-throughput formula's guess -- see
+  // src/lib/ai/estimation-history.ts for why that formula alone is
+  // frequently off by 10-1000x for cloud-routed accounts. Failure here just
+  // means falling back to the existing static estimate, never blocking.
+  async function getHistoricalSecondsPerCall(task: AiDashboardTask): Promise<number | null> {
+    const mode = jobModeForTask(task);
+    if (!mode) return null;
+    try {
+      const result = await fetchJson<{ content?: { estimate?: { secondsPerUnit: number; sampleSize: number } | null } }>(
+        `/api/ai/estimation-history?task=${encodeURIComponent(mode)}`,
+        { cache: "no-store" },
+        "Historical estimate lookup",
+      );
+      return result.content?.estimate?.secondsPerUnit ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async function openPreflight(task: AiDashboardTask) {
     setOutput("");
     setLoading(`preflight:${task}`);
     try {
-      const status = await getModelStatus();
+      const [status, historicalSecondsPerCall] = await Promise.all([
+        getModelStatus(),
+        getHistoricalSecondsPerCall(task),
+      ]);
       const modelKey =
         task === "critic" || task === "critic-all" || task === "auto-review"
           ? "reasoningModel"
@@ -284,6 +325,7 @@ export function BookActions({
         chapterCount,
         sceneCount,
         paragraphCount,
+        historicalSecondsPerCall,
       });
       const autoReviewRewriteUnits = Math.min(Math.max(paragraphCount, 1), 5000);
       const estimatedUnits =
