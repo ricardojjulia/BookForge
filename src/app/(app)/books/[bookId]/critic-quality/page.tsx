@@ -1,4 +1,5 @@
-import { Alert, Button, Container, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { Alert, Badge, Button, Container, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import Link from "next/link";
 import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { RewriteExecutionPanel } from "@/components/books/rewrite/rewrite-execution-panel";
 import { RewriteApprovalPanel } from "@/components/books/rewrite/rewrite-approval-panel";
@@ -17,7 +18,7 @@ import { criticLenses } from "@/lib/critic/prompts";
 import { CRITIC_LENS_COUNT, computeCriticProgress } from "@/lib/critic/progress";
 import { getRewriteCampaignStats, type RewriteCampaignRow } from "@/lib/rewrite/campaigns";
 import { getRewriteCoverage } from "@/lib/rewrite/coverage";
-import { getRewriteReadiness } from "@/lib/rewrite/readiness";
+import { getNextStepGuidance, getRewriteReadiness } from "@/lib/rewrite/readiness";
 import { getExistingRevisionState, shouldSkipParagraph, type ExistingRevisionRow } from "@/lib/rewrite/eligibility";
 import { getDefaultRewriteWorkflow, type RewriteWorkflowRow } from "@/lib/rewrite/workflows";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
@@ -198,6 +199,7 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
     modelEvaluation: getSavedModelEvaluation(workflowState.metadata),
     workflow: workflowState,
   });
+  const nextStep = getNextStepGuidance(readiness, bookId);
 
   return (
     <Container size="xl">
@@ -212,6 +214,20 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
         </div>
         <ResetRewriteButton bookId={bookId} />
       </Group>
+
+      <Paper withBorder radius="md" p="lg" bg="#fffdf8" mb="xl">
+        <Group justify="space-between" align="flex-start">
+          <div>
+            <Badge color="grape" variant="light" mb={6}>
+              Step {nextStep.stepNumber} of 7 · {nextStep.stepLabel}
+            </Badge>
+            <Text size="sm">{nextStep.message}</Text>
+          </div>
+          <Link href={nextStep.ctaHref} style={{ textDecoration: "none" }}>
+            <Button color="grape">{nextStep.ctaLabel}</Button>
+          </Link>
+        </Group>
+      </Paper>
 
       <div id="readiness-status">
         <ReadinessStatusGrid
