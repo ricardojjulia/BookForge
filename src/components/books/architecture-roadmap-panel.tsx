@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Alert, Badge, Box, Button, Group, Paper, Stack, Text, Title } from "@mantine/core";
@@ -361,8 +362,8 @@ export function ArchitectureRoadmapPanel({
         </div>
         {plannedChapterCount > 0 && (
           <Button
-            component="a"
-            href="#studio-actions"
+            component={Link}
+            href={`/books/${bookId}/studio#studio-actions`}
             color="orange"
             variant="filled"
           >
