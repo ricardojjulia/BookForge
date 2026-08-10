@@ -1271,6 +1271,8 @@ function RewriteReadinessGate({ readiness }: { readiness: RewriteReadiness }) {
         {attentionItems.length === 0 ? (
           <Alert color="green" variant="light">
             Every readiness check has passed.
+            {readiness.skippedCount > 0 &&
+              ` (${readiness.skippedCount} short paragraph(s) -- dialogue lines/fragments under 8 words, or locked/excluded -- are intentionally not included in rewrite passes and don't count toward this.)`}
           </Alert>
         ) : (
           <SimpleGrid cols={{ base: 1, md: 2 }}>

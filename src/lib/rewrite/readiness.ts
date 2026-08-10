@@ -21,6 +21,13 @@ export type RewriteReadiness = {
   items: RewriteReadinessItem[];
   stepStatus: Record<number, RewriteReadinessStatus>;
   stepBlockers: Record<number, string[]>;
+  /** Paragraphs excluded from rewrite consideration entirely (short
+   * dialogue/fragments, locked, or an excluded chapter) -- surfaced at the
+   * top level so an "everything's ready" summary can disclose it too, not
+   * just the "Full Spread Coverage" item's own detail text (which stops
+   * rendering once that item is "ready" and drops out of the attention
+   * list). */
+  skippedCount: number;
 };
 
 export function getRewriteReadiness(input: {
@@ -33,6 +40,15 @@ export function getRewriteReadiness(input: {
   pendingDraftParagraphCount: number;
   acceptedParagraphCount: number;
   untouchedParagraphCount: number;
+  /** Paragraphs excluded from rewrite consideration entirely (locked, an
+   * excluded chapter, or a short dialogue/fragment under the 8-word
+   * threshold) -- these are NOT counted in untouchedParagraphCount, so
+   * without surfacing this number separately, "Full Spread Coverage:
+   * Ready" can silently mean "every eligible paragraph is done" while a
+   * large, invisible category of real manuscript text was never
+   * considered at all. Optional so existing callers that don't have this
+   * figure handy don't need to change. */
+  permanentlyIneligibleCount?: number;
   modelEvaluation?: Record<string, unknown> | null;
   latestDriftReportId?: string | null;
   workflow: RewriteWorkflowRow;
@@ -55,6 +71,7 @@ export function getRewriteReadiness(input: {
   const hasAcceptedRevisions = input.acceptedParagraphCount > 0;
   const modelEvaluation = parseModelEvaluation(input.modelEvaluation);
   const modelScore = modelEvaluation.score;
+  const skippedCount = input.permanentlyIneligibleCount ?? 0;
 
   const items: RewriteReadinessItem[] = [
     {
@@ -170,8 +187,10 @@ export function getRewriteReadiness(input: {
       status: input.untouchedParagraphCount === 0 ? "ready" : strategyApproved ? "recommended" : "blocked",
       detail:
         input.untouchedParagraphCount === 0
-          ? "Every eligible paragraph has rewrite coverage."
-          : `${input.untouchedParagraphCount} paragraph(s) still have no rewrite draft -- click "Run Next Batch" in Guided Rewrite Run, step 5, until this reaches zero.`,
+          ? skippedCount > 0
+            ? `Every eligible paragraph has rewrite coverage. ${skippedCount} short paragraph(s) (dialogue lines/fragments under 8 words, or locked/excluded) are intentionally not included in rewrite passes and don't count toward this.`
+            : "Every eligible paragraph has rewrite coverage."
+          : `${input.untouchedParagraphCount} paragraph(s) still have no rewrite draft -- click "Run Next Batch" in Guided Rewrite Run, step 5, until this reaches zero.${skippedCount > 0 ? ` (${skippedCount} additional short paragraph(s) are intentionally excluded from rewrite passes and won't appear here even at zero.)` : ""}`,
       actionLabel: input.untouchedParagraphCount === 0 ? undefined : "Go to Guided Rewrite Run",
       href: input.untouchedParagraphCount === 0 ? undefined : `/books/${input.bookId}/critic-quality#guided-rewrite-run`,
     },
@@ -230,6 +249,7 @@ export function getRewriteReadiness(input: {
       6: blockedDetails(items, ["coverage"]),
       7: blockedDetails(items, ["drift", "export"]),
     },
+    skippedCount,
   };
 }
 
@@ -301,7 +321,7 @@ const STEP_LABELS = [
   "Export",
 ];
 
-export function getNextStepGuidance(readiness: RewriteReadiness, bookId: string): NextStepGuidance {
+export function getNextStepGuidance(readiness: RewriteReadiness, bookId: string, skippedCount = 0): NextStepGuidance {
   const currentStep = ([1, 2, 3, 4, 5, 6, 7] as const).find((step) => readiness.stepStatus[step] !== "ready") ?? 7;
   const stepLabel = STEP_LABELS[currentStep - 1];
   const blockers = readiness.stepBlockers[currentStep] || [];
@@ -310,7 +330,10 @@ export function getNextStepGuidance(readiness: RewriteReadiness, bookId: string)
     return {
       stepNumber: 7,
       stepLabel: "Done",
-      message: "Every step is complete. This book is ready for final export.",
+      message:
+        skippedCount > 0
+          ? `Every eligible step is complete (${skippedCount} short paragraph(s) were intentionally excluded from rewrite passes). This book is ready for final export.`
+          : "Every step is complete. This book is ready for final export.",
       ctaLabel: "Open Final Builder",
       ctaHref: `/books/${bookId}/final-manuscript`,
     };
