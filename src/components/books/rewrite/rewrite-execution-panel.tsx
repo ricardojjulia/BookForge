@@ -483,46 +483,22 @@ export function RewriteExecutionPanel({
   return (
     <Paper withBorder radius="md" p="xl" bg="white" mb="xl">
       <Stack>
-        <Group justify="space-between" align="flex-start">
-          <div>
-            <Title order={2}>Execute Rewrite</Title>
-            <Text c="dimmed">
-              The rewrite executor will process the book in coherent units and save every result as revision history.
-            </Text>
-          </div>
-          <Button color="grape" disabled={!hasPlan || loading || eligibleParagraphCount === 0} loading={loading} onClick={executeRewrite}>
-            {eligibleParagraphCount > 0
-              ? // This button only processes one maxUnits-sized batch per click
-                // (default 25) -- with no counter, a user could easily believe a
-                // single click rewrites the whole book. Mirror "Generate Planned
-                // Draft (3 of 6)"'s self-documenting label so partial coverage
-                // is visible up front, not just discoverable after the fact.
-                `Execute Rewrite (${Math.min(Number(maxUnits || eligibleParagraphCount), eligibleParagraphCount).toLocaleString()} of ${eligibleParagraphCount.toLocaleString()})`
-              : "Execute Rewrite"}
-          </Button>
-          <Button component={Link} href={`/books/${bookId}/revisions`} color="teal" variant="light">
-            Review Draft Revisions
-          </Button>
-        </Group>
-
-        <Alert color={hasPlan ? "blue" : "yellow"}>
-          {hasPlan
-            ? "Execution creates draft revision versions. By default, BookForge skips paragraphs that already have pending or accepted rewrite work."
-            : "Generate a rewrite plan before execution can be enabled."}
-        </Alert>
-        {latestJob && (
-          <Alert color="grape">
-            Latest rewrite job: {latestJob.status || "unknown"} · created {new Date(latestJob.created_at).toLocaleString()}
-            {typeof latestJob.settings?.rewritten === "number" ? ` · ${latestJob.settings.rewritten} rewritten` : ""}
-          </Alert>
-        )}
-        <RewriteCoverageSummary
-          coverage={rewriteCoverage}
-          disabled={!hasPlan || loading}
-          loadingChapterId={chapterLoading}
-          onRewriteChapter={(chapterId) => executeRewriteWith({ chapterId })}
-        />
+        {/* Order matches how an author actually decides: am I ready, what
+            approach should I take, then how do I want to proceed (guided
+            or manual)? Manual's raw controls and the advanced campaign/
+            completion tooling come after that decision, not before it. */}
         <RewriteReadinessGate readiness={readiness} />
+        <RewriteStrategySelector
+          strategyId={strategyId}
+          settings={strategySettings}
+          authorInstructions={authorInstructions}
+          onStrategyChange={(nextStrategyId) => {
+            setStrategyId(nextStrategyId);
+            setStrategySettings(rewriteStrategies[nextStrategyId].settings);
+          }}
+          onSettingsChange={setStrategySettings}
+          onAuthorInstructionsChange={setAuthorInstructions}
+        />
         <GuidedRewriteRun
           bookId={bookId}
           mode={workflowMode}
@@ -558,82 +534,45 @@ export function RewriteExecutionPanel({
             })
           }
         />
-        <PersistentRewriteCampaignPanel
-          bookId={bookId}
-          campaign={activeCampaign}
-          stats={campaignStats}
-          suggestedBatchSize={suggestedBatchSize}
-          loading={loading}
-          campaignLoading={campaignLoading}
-          hasPlan={hasPlan}
-          jobs={campaignJobs}
-          latestDriftReport={latestDriftReport}
-          onCreateSamplingCampaign={() => createCampaign("sample_all_chapters")}
-          onCreateFullCoverageCampaign={() => createCampaign("full_coverage")}
-          onPause={() => updateCampaign("pause")}
-          onResume={() => updateCampaign("resume")}
-          onCancel={() => updateCampaign("cancel")}
-          onComplete={() => updateCampaign("complete")}
-          onRunDriftCheck={(jobId) => runCampaignDriftCheck(jobId)}
-          onRunNextBatch={(campaign) =>
-            executeRewriteWith({
-              campaignId: campaign.id,
-              maxUnits: campaign.batch_size || suggestedBatchSize,
-              distributeAcrossChapters: campaign.distribute_across_chapters,
-              coverageMode: campaign.goal === "sample_all_chapters" ? "uncovered_chapter_sample" : "normal",
-              strategyId: normalizeCampaignStrategyId(campaign.strategy_id),
-              strategySettings: normalizeCampaignStrategySettings(campaign.strategy_settings),
-              authorInstructions: campaign.author_instructions || "",
-              rewriteExistingDrafts: campaign.rewrite_existing_drafts,
-              rewriteAccepted: campaign.rewrite_accepted,
-            })
-          }
-        />
-        <RewriteCompletionControls
+
+        <Group justify="space-between" align="flex-start">
+          <div>
+            <Title order={2}>Manual Controls</Title>
+            <Text c="dimmed">
+              The rewrite executor will process the book in coherent units and save every result as revision history.
+            </Text>
+          </div>
+          <Button color="grape" disabled={!hasPlan || loading || eligibleParagraphCount === 0} loading={loading} onClick={executeRewrite}>
+            {eligibleParagraphCount > 0
+              ? // This button only processes one maxUnits-sized batch per click
+                // (default 25) -- with no counter, a user could easily believe a
+                // single click rewrites the whole book. Mirror "Generate Planned
+                // Draft (3 of 6)"'s self-documenting label so partial coverage
+                // is visible up front, not just discoverable after the fact.
+                `Execute Rewrite (${Math.min(Number(maxUnits || eligibleParagraphCount), eligibleParagraphCount).toLocaleString()} of ${eligibleParagraphCount.toLocaleString()})`
+              : "Execute Rewrite"}
+          </Button>
+          <Button component={Link} href={`/books/${bookId}/revisions`} color="teal" variant="light">
+            Review Draft Revisions
+          </Button>
+        </Group>
+
+        <Alert color={hasPlan ? "blue" : "yellow"}>
+          {hasPlan
+            ? "Execution creates draft revision versions. By default, BookForge skips paragraphs that already have pending or accepted rewrite work."
+            : "Generate a rewrite plan before execution can be enabled."}
+        </Alert>
+        {latestJob && (
+          <Alert color="grape">
+            Latest rewrite job: {latestJob.status || "unknown"} · created {new Date(latestJob.created_at).toLocaleString()}
+            {typeof latestJob.settings?.rewritten === "number" ? ` · ${latestJob.settings.rewritten} rewritten` : ""}
+          </Alert>
+        )}
+        <RewriteCoverageSummary
           coverage={rewriteCoverage}
-          eligibleParagraphCount={eligibleParagraphCount}
-          pendingDraftParagraphCount={pendingDraftParagraphCount}
-          acceptedParagraphCount={acceptedParagraphCount}
-          untouchedParagraphCount={untouchedParagraphCount}
-          suggestedBatchSize={suggestedBatchSize}
-          loading={loading}
-          hasPlan={hasPlan}
-          onRunSafeBatch={() => executeRewriteWith({ maxUnits: suggestedBatchSize, distributeAcrossChapters: true })}
-          onRunChapterSamples={() =>
-            executeRewriteWith({
-              maxUnits: Math.max(1, rewriteCoverage.filter((chapter) => chapter.totalParagraphs > 0 && chapter.rewrittenParagraphs === 0).length),
-              distributeAcrossChapters: true,
-              coverageMode: "uncovered_chapter_sample",
-            })
-          }
-          onRunFullChapterSamples={() =>
-            executeRewriteWith({
-              maxUnits: Math.max(1, rewriteCoverage.filter((chapter) => chapter.totalParagraphs > 0 && chapter.rewrittenParagraphs === 0).length),
-              distributeAcrossChapters: true,
-              coverageMode: "uncovered_chapter_sample",
-            })
-          }
-          onRunFullCoverage={() =>
-            executeRewriteWith({
-              maxUnits: eligibleParagraphCount,
-              distributeAcrossChapters: true,
-            })
-          }
-          onPrepareFullCoverage={() => {
-            setDistributeAcrossChapters(true);
-            setMaxUnits(suggestedBatchSize);
-          }}
-        />
-        <RewriteStrategySelector
-          strategyId={strategyId}
-          settings={strategySettings}
-          authorInstructions={authorInstructions}
-          onStrategyChange={(nextStrategyId) => {
-            setStrategyId(nextStrategyId);
-            setStrategySettings(rewriteStrategies[nextStrategyId].settings);
-          }}
-          onSettingsChange={setStrategySettings}
-          onAuthorInstructionsChange={setAuthorInstructions}
+          disabled={!hasPlan || loading}
+          loadingChapterId={chapterLoading}
+          onRewriteChapter={(chapterId) => executeRewriteWith({ chapterId })}
         />
         {message && <Alert color="green">{message}</Alert>}
         {error && <Alert color="red">{error}</Alert>}
@@ -721,6 +660,73 @@ export function RewriteExecutionPanel({
             onRetryFailed={executeRewrite}
           />
         )}
+
+        <PersistentRewriteCampaignPanel
+          bookId={bookId}
+          campaign={activeCampaign}
+          stats={campaignStats}
+          suggestedBatchSize={suggestedBatchSize}
+          loading={loading}
+          campaignLoading={campaignLoading}
+          hasPlan={hasPlan}
+          jobs={campaignJobs}
+          latestDriftReport={latestDriftReport}
+          onCreateSamplingCampaign={() => createCampaign("sample_all_chapters")}
+          onCreateFullCoverageCampaign={() => createCampaign("full_coverage")}
+          onPause={() => updateCampaign("pause")}
+          onResume={() => updateCampaign("resume")}
+          onCancel={() => updateCampaign("cancel")}
+          onComplete={() => updateCampaign("complete")}
+          onRunDriftCheck={(jobId) => runCampaignDriftCheck(jobId)}
+          onRunNextBatch={(campaign) =>
+            executeRewriteWith({
+              campaignId: campaign.id,
+              maxUnits: campaign.batch_size || suggestedBatchSize,
+              distributeAcrossChapters: campaign.distribute_across_chapters,
+              coverageMode: campaign.goal === "sample_all_chapters" ? "uncovered_chapter_sample" : "normal",
+              strategyId: normalizeCampaignStrategyId(campaign.strategy_id),
+              strategySettings: normalizeCampaignStrategySettings(campaign.strategy_settings),
+              authorInstructions: campaign.author_instructions || "",
+              rewriteExistingDrafts: campaign.rewrite_existing_drafts,
+              rewriteAccepted: campaign.rewrite_accepted,
+            })
+          }
+        />
+        <RewriteCompletionControls
+          coverage={rewriteCoverage}
+          eligibleParagraphCount={eligibleParagraphCount}
+          pendingDraftParagraphCount={pendingDraftParagraphCount}
+          acceptedParagraphCount={acceptedParagraphCount}
+          untouchedParagraphCount={untouchedParagraphCount}
+          suggestedBatchSize={suggestedBatchSize}
+          loading={loading}
+          hasPlan={hasPlan}
+          onRunSafeBatch={() => executeRewriteWith({ maxUnits: suggestedBatchSize, distributeAcrossChapters: true })}
+          onRunChapterSamples={() =>
+            executeRewriteWith({
+              maxUnits: Math.max(1, rewriteCoverage.filter((chapter) => chapter.totalParagraphs > 0 && chapter.rewrittenParagraphs === 0).length),
+              distributeAcrossChapters: true,
+              coverageMode: "uncovered_chapter_sample",
+            })
+          }
+          onRunFullChapterSamples={() =>
+            executeRewriteWith({
+              maxUnits: Math.max(1, rewriteCoverage.filter((chapter) => chapter.totalParagraphs > 0 && chapter.rewrittenParagraphs === 0).length),
+              distributeAcrossChapters: true,
+              coverageMode: "uncovered_chapter_sample",
+            })
+          }
+          onRunFullCoverage={() =>
+            executeRewriteWith({
+              maxUnits: eligibleParagraphCount,
+              distributeAcrossChapters: true,
+            })
+          }
+          onPrepareFullCoverage={() => {
+            setDistributeAcrossChapters(true);
+            setMaxUnits(suggestedBatchSize);
+          }}
+        />
 
         <div>
           <Text fw={800} mb="xs">
