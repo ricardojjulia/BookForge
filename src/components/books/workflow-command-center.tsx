@@ -154,7 +154,7 @@ export function getBookCommandCenter(input: {
     return {
       stage: "Draft ready",
       stageColor: "blue",
-      guidance: "Your draft is ready. Run Auto-Review to analyze it, get critic feedback, and start improving — it generates the Blueprint automatically as its first step.",
+      guidance: "Your draft is ready. Click Auto-Review Wizard to analyze it, get critic feedback, and start improving — it generates the Blueprint automatically as its first step.",
       actionLabel: "Run Auto-Review",
       actionHref: `/books/${input.bookId}/studio`,
     };
@@ -164,7 +164,7 @@ export function getBookCommandCenter(input: {
     return {
       stage: "Ready to rewrite",
       stageColor: "grape",
-      guidance: "Blueprint is in place. Run Auto-Review to generate a rewrite plan and begin improving the manuscript.",
+      guidance: "Blueprint is in place. Click Auto-Review Wizard to generate a rewrite plan and begin improving the manuscript.",
       actionLabel: "Run Auto-Review",
       actionHref: `/books/${input.bookId}/studio`,
     };
