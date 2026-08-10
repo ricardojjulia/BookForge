@@ -139,6 +139,8 @@ export function getRewriteReadiness(input: {
       detail: hasSample
         ? "At least one rewrite job exists for review."
         : "Run a small spread batch before committing to the full direction.",
+      actionLabel: hasSample ? undefined : "Go to Guided Rewrite Run",
+      href: hasSample ? undefined : `/books/${input.bookId}/critic-quality#guided-rewrite-run`,
     },
     {
       key: "sample_review",
@@ -158,7 +160,9 @@ export function getRewriteReadiness(input: {
       status: strategyApproved ? "ready" : hasReviewedSample ? "recommended" : "blocked",
       detail: strategyApproved
         ? "The selected settings have been approved for ongoing batches."
-        : "Approve the strategy only after sample drafts feel right.",
+        : 'Approve the strategy only after sample drafts feel right -- click "Approve strategy" in Guided Rewrite Run, step 4.',
+      actionLabel: strategyApproved ? undefined : "Go to Guided Rewrite Run",
+      href: strategyApproved ? undefined : `/books/${input.bookId}/critic-quality#guided-rewrite-run`,
     },
     {
       key: "coverage",
@@ -167,7 +171,9 @@ export function getRewriteReadiness(input: {
       detail:
         input.untouchedParagraphCount === 0
           ? "Every eligible paragraph has rewrite coverage."
-          : `${input.untouchedParagraphCount} paragraph(s) still have no rewrite draft.`,
+          : `${input.untouchedParagraphCount} paragraph(s) still have no rewrite draft -- click "Run Next Batch" in Guided Rewrite Run, step 5, until this reaches zero.`,
+      actionLabel: input.untouchedParagraphCount === 0 ? undefined : "Go to Guided Rewrite Run",
+      href: input.untouchedParagraphCount === 0 ? undefined : `/books/${input.bookId}/critic-quality#guided-rewrite-run`,
     },
     {
       key: "drift",
@@ -176,6 +182,8 @@ export function getRewriteReadiness(input: {
       detail: hasDriftCheck
         ? "A drift check has been saved."
         : "Run drift and post-rewrite Critic checks before final export.",
+      actionLabel: hasDriftCheck ? undefined : "Go to Guided Rewrite Run",
+      href: hasDriftCheck ? undefined : `/books/${input.bookId}/critic-quality#guided-rewrite-run`,
     },
     {
       key: "export",
