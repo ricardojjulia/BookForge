@@ -270,3 +270,75 @@ function blockedDetails(items: RewriteReadinessItem[], keys: string[]) {
 function isBlockedReadinessItem(item: RewriteReadinessItem | undefined): item is RewriteReadinessItem {
   return Boolean(item) && item?.status === "blocked";
 }
+
+export type NextStepGuidance = {
+  stepNumber: number;
+  stepLabel: string;
+  message: string;
+  ctaLabel: string;
+  ctaHref: string;
+};
+
+// Step labels/order mirror GuidedRewriteRun's 7-step map exactly (see
+// rewrite-execution-panel.tsx) -- this exists so a user landing on the page
+// gets one sentence telling them where they are and what to do next,
+// instead of a stack of unconnected panels they have to interpret themselves.
+const STEP_LABELS = [
+  "Prepare",
+  "Run a sample batch",
+  "Review the sample",
+  "Approve your strategy",
+  "Run full spread batches",
+  "Run Critic again",
+  "Export",
+];
+
+export function getNextStepGuidance(readiness: RewriteReadiness, bookId: string): NextStepGuidance {
+  const currentStep = ([1, 2, 3, 4, 5, 6, 7] as const).find((step) => readiness.stepStatus[step] !== "ready") ?? 7;
+  const stepLabel = STEP_LABELS[currentStep - 1];
+  const blockers = readiness.stepBlockers[currentStep] || [];
+
+  if (currentStep === 7 && readiness.stepStatus[7] === "ready") {
+    return {
+      stepNumber: 7,
+      stepLabel: "Done",
+      message: "Every step is complete. This book is ready for final export.",
+      ctaLabel: "Open Final Builder",
+      ctaHref: `/books/${bookId}/final-manuscript`,
+    };
+  }
+  if (currentStep === 1) {
+    return {
+      stepNumber: 1,
+      stepLabel,
+      message: blockers.length ? blockers.join(" ") : "Finish preparation before running a sample batch.",
+      ctaLabel: "Go to Planning Gate",
+      ctaHref: `/books/${bookId}/critic-quality#planning-gate`,
+    };
+  }
+  if (currentStep === 3) {
+    return {
+      stepNumber: 3,
+      stepLabel,
+      message: "A sample batch has run. Review the drafts and accept or reject them before approving a strategy.",
+      ctaLabel: "Review Drafts",
+      ctaHref: `/books/${bookId}/revisions`,
+    };
+  }
+  if (currentStep === 7) {
+    return {
+      stepNumber: 7,
+      stepLabel,
+      message: blockers.length ? blockers.join(" ") : "Run a drift check, then export the final manuscript.",
+      ctaLabel: "Go to Guided Rewrite Run",
+      ctaHref: `/books/${bookId}/critic-quality#guided-rewrite-run`,
+    };
+  }
+  return {
+    stepNumber: currentStep,
+    stepLabel,
+    message: blockers.length ? blockers.join(" ") : `Next: ${stepLabel.toLowerCase()}.`,
+    ctaLabel: "Go to Guided Rewrite Run",
+    ctaHref: `/books/${bookId}/critic-quality#guided-rewrite-run`,
+  };
+}

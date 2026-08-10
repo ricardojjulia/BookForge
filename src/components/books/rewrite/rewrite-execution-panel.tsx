@@ -1569,7 +1569,7 @@ function GuidedRewriteRun({
   const activeIndex = mode === "wizard" ? Math.max(0, Math.min(6, workflow.current_step - 1, detectedActiveIndex)) : detectedActiveIndex;
 
   return (
-    <Paper withBorder radius="md" p="lg" bg="#fbfaf8">
+    <Paper id="guided-rewrite-run" withBorder radius="md" p="lg" bg="#fbfaf8">
       <Stack>
         <Group justify="space-between" align="flex-start">
           <div>
