@@ -23,6 +23,28 @@ type PendingTask = {
   kind?: "single" | "auto-review";
 };
 
+type RemoteJobRow = {
+  id: string;
+  mode: string;
+  status: string;
+  progress: {
+    taskName: string;
+    currentUnit: string;
+    totalUnits: number;
+    attempted: number;
+    successful: number;
+    failed: number;
+    skipped: number;
+    startedAt?: string | null;
+    lastHeartbeatAt?: string | null;
+  } | null;
+  // Computed once, at poll time (inside the effect, not during render) --
+  // elapsedSeconds must come from somewhere, and calling Date.now() directly
+  // in a function invoked from the render body is an impure-during-render
+  // violation this codebase's lint rules reject.
+  elapsedSecondsAtPoll?: number;
+};
+
 type ModelStatusResponse = {
   connected: boolean;
   qualityProfile: string;
@@ -151,6 +173,69 @@ export function BookActions({
     if (!detailedQueuePrefHydrated.current) return;
     window.localStorage.setItem("bookforge.alwaysShowDetailedQueue", alwaysShowDetailedQueue ? "1" : "0");
   }, [alwaysShowDetailedQueue]);
+
+  // The `queue`/`loading` state above only knows about work THIS tab
+  // started -- reload the page, open a second tab, or come back after the
+  // request that started a job finished loading, and the button reverts to
+  // a plain label with no way to tell a real server-side job is still
+  // running, inviting a duplicate click. Poll the same real job data the
+  // Jobs panel uses so the buttons themselves reflect ground truth, not
+  // just this tab's own memory of what it clicked.
+  const [remoteActiveJobs, setRemoteActiveJobs] = useState<RemoteJobRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      try {
+        const result = await fetchJson<{ content?: { jobs?: RemoteJobRow[] } }>(
+          `/api/books/${bookId}/jobs`,
+          { cache: "no-store" },
+          "Poll active jobs",
+        );
+        if (!cancelled) {
+          const now = Date.now();
+          const active = (result.content?.jobs || [])
+            .filter((job) => job.status === "running" || job.status === "queued")
+            .map((job) => ({
+              ...job,
+              elapsedSecondsAtPoll: job.progress?.startedAt
+                ? Math.max(0, Math.floor((now - new Date(job.progress.startedAt).getTime()) / 1000))
+                : 0,
+            }));
+          setRemoteActiveJobs(active);
+        }
+      } catch {
+        // Transient poll failures shouldn't clear what we already know.
+      }
+    }
+    void poll();
+    const intervalId = window.setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [bookId]);
+
+  function findRemoteJob(mode: string) {
+    return remoteActiveJobs.find((job) => job.mode === mode) || null;
+  }
+
+  function remoteJobAsQueueState(job: RemoteJobRow): AiJobQueueState {
+    const progress = job.progress;
+    const totalUnits = progress?.totalUnits || 1;
+    const completedUnits = Math.min(totalUnits, (progress?.successful || 0) + (progress?.failed || 0));
+    return {
+      currentTask: progress?.taskName || job.mode,
+      currentUnit: progress?.currentUnit || "",
+      totalUnits,
+      completedUnits,
+      successfulUnits: progress?.successful || 0,
+      failedUnits: progress?.failed || 0,
+      skippedUnits: progress?.skipped || 0,
+      elapsedSeconds: job.elapsedSecondsAtPoll || 0,
+      estimatedSecondsRemaining: null,
+      status: "running",
+    };
+  }
 
   async function getModelStatus(): Promise<ModelStatusResponse> {
     return fetchJson<ModelStatusResponse>(
@@ -1174,21 +1259,33 @@ export function BookActions({
                 Turn the planned chapter shells from your architecture into actual manuscript prose. Do this first — the tools below (critic, rewrite, export) all need drafted chapters to work with.
               </Text>
             </div>
-            <Button
-              fullWidth
-              color="orange"
-              loading={loading === "preflight:generate-draft" || loading === `/api/books/${bookId}/generate-draft`}
-              onClick={() => openPreflight("generate-draft")}
-            >
-              Generate Planned Draft ({Math.min(plannedChapterCount, 3)} of {plannedChapterCount})
-            </Button>
-            <Text size="xs" c="dimmed">
-              This opens AI Task Preflight. Click Proceed in that dialog to start chapter generation.
-            </Text>
-            <AiJobQueueInlineStatus
-              job={queue}
-              visible={loading === "preflight:generate-draft" || loading === `/api/books/${bookId}/generate-draft`}
-            />
+            {(() => {
+              const localActive = loading === "preflight:generate-draft" || loading === `/api/books/${bookId}/generate-draft`;
+              const remoteJob = findRemoteJob("creation_draft_generation");
+              const remoteOnly = Boolean(remoteJob) && !localActive;
+              return (
+                <>
+                  <Button
+                    fullWidth
+                    color="orange"
+                    loading={localActive}
+                    disabled={remoteOnly}
+                    onClick={() => openPreflight("generate-draft")}
+                  >
+                    {remoteOnly
+                      ? "Already running -- see progress below"
+                      : `Generate Planned Draft (${Math.min(plannedChapterCount, 3)} of ${plannedChapterCount})`}
+                  </Button>
+                  <Text size="xs" c="dimmed">
+                    This opens AI Task Preflight. Click Proceed in that dialog to start chapter generation.
+                  </Text>
+                  <AiJobQueueInlineStatus
+                    job={localActive ? queue : remoteJob ? remoteJobAsQueueState(remoteJob) : queue}
+                    visible={localActive || Boolean(remoteJob)}
+                  />
+                </>
+              );
+            })()}
           </Stack>
         </Paper>
       )}
@@ -1198,37 +1295,54 @@ export function BookActions({
           title="Prepare Context"
           description="Build reusable manuscript context before revision."
         >
-          <Button
-            color="grape"
-            fullWidth
-            loading={loading === "preflight:book-bible" || loading === `/api/books/${bookId}/analyze`}
-            onClick={() => requestTask("book-bible")}
-          >
-            Generate Manuscript Blueprint
-          </Button>
-          <AiJobQueueInlineStatus
-            job={queue}
-            visible={loading === "preflight:book-bible" || loading === `/api/books/${bookId}/analyze`}
-          />
-          <Button
-            fullWidth
-            variant="light"
-            color="teal"
-            loading={
-              loading === "preflight:chapter-summaries" ||
-              loading === `/api/books/${bookId}/chapters/summarize`
-            }
-            onClick={() => requestTask("chapter-summaries")}
-          >
-            Generate Chapter Summaries
-          </Button>
-          <Text size="xs" c="dimmed">
-            This opens AI Task Preflight. Click Proceed in that dialog to start summary generation.
-          </Text>
-          <AiJobQueueInlineStatus
-            job={queue}
-            visible={loading === "preflight:chapter-summaries" || loading === `/api/books/${bookId}/chapters/summarize`}
-          />
+          {(() => {
+            const localActive = loading === "preflight:book-bible" || loading === `/api/books/${bookId}/analyze`;
+            const remoteJob = findRemoteJob("manuscript_blueprint");
+            const remoteOnly = Boolean(remoteJob) && !localActive;
+            return (
+              <>
+                <Button
+                  color="grape"
+                  fullWidth
+                  loading={localActive}
+                  disabled={remoteOnly}
+                  onClick={() => requestTask("book-bible")}
+                >
+                  {remoteOnly ? "Already running -- see progress below" : "Generate Manuscript Blueprint"}
+                </Button>
+                <AiJobQueueInlineStatus
+                  job={localActive ? queue : remoteJob ? remoteJobAsQueueState(remoteJob) : queue}
+                  visible={localActive || Boolean(remoteJob)}
+                />
+              </>
+            );
+          })()}
+          {(() => {
+            const localActive = loading === "preflight:chapter-summaries" || loading === `/api/books/${bookId}/chapters/summarize`;
+            const remoteJob = findRemoteJob("chapter_summaries");
+            const remoteOnly = Boolean(remoteJob) && !localActive;
+            return (
+              <>
+                <Button
+                  fullWidth
+                  variant="light"
+                  color="teal"
+                  loading={localActive}
+                  disabled={remoteOnly}
+                  onClick={() => requestTask("chapter-summaries")}
+                >
+                  {remoteOnly ? "Already running -- see progress below" : "Generate Chapter Summaries"}
+                </Button>
+                <Text size="xs" c="dimmed">
+                  This opens AI Task Preflight. Click Proceed in that dialog to start summary generation.
+                </Text>
+                <AiJobQueueInlineStatus
+                  job={localActive ? queue : remoteJob ? remoteJobAsQueueState(remoteJob) : queue}
+                  visible={localActive || Boolean(remoteJob)}
+                />
+              </>
+            );
+          })()}
         </ActionPanel>
 
         <ActionPanel
@@ -1241,31 +1355,51 @@ export function BookActions({
             onChange={(value) => setLens((value as CriticLens) || "revision_priorities")}
             data={Object.entries(criticLenses).map(([value, item]) => ({ value, label: item.label }))}
           />
-          <Button
-            fullWidth
-            variant="light"
-            color="grape"
-            loading={loading === "preflight:critic" || loading === `/api/books/${bookId}/critic`}
-            onClick={() => requestTask("critic")}
-          >
-            Run Selected Critic Lens
-          </Button>
-          <AiJobQueueInlineStatus
-            job={queue}
-            visible={loading === "preflight:critic" || loading === `/api/books/${bookId}/critic`}
-          />
-          <Button
-            fullWidth
-            color="grape"
-            loading={loading === "preflight:critic-all" || loading === `/api/books/${bookId}/critic/all`}
-            onClick={() => requestTask("critic-all")}
-          >
-            Run All Critic Lenses
-          </Button>
-          <AiJobQueueInlineStatus
-            job={queue}
-            visible={loading === "preflight:critic-all" || loading === `/api/books/${bookId}/critic/all`}
-          />
+          {(() => {
+            const localActive = loading === "preflight:critic" || loading === `/api/books/${bookId}/critic`;
+            const remoteJob = findRemoteJob("bookforge_critic");
+            const remoteOnly = Boolean(remoteJob) && !localActive;
+            return (
+              <>
+                <Button
+                  fullWidth
+                  variant="light"
+                  color="grape"
+                  loading={localActive}
+                  disabled={remoteOnly}
+                  onClick={() => requestTask("critic")}
+                >
+                  {remoteOnly ? "Already running -- see progress below" : "Run Selected Critic Lens"}
+                </Button>
+                <AiJobQueueInlineStatus
+                  job={localActive ? queue : remoteJob ? remoteJobAsQueueState(remoteJob) : queue}
+                  visible={localActive || Boolean(remoteJob)}
+                />
+              </>
+            );
+          })()}
+          {(() => {
+            const localActive = loading === "preflight:critic-all" || loading === `/api/books/${bookId}/critic/all`;
+            const remoteJob = findRemoteJob("bookforge_critic_batch");
+            const remoteOnly = Boolean(remoteJob) && !localActive;
+            return (
+              <>
+                <Button
+                  fullWidth
+                  color="grape"
+                  loading={localActive}
+                  disabled={remoteOnly}
+                  onClick={() => requestTask("critic-all")}
+                >
+                  {remoteOnly ? "Already running -- see progress below" : "Run All Critic Lenses"}
+                </Button>
+                <AiJobQueueInlineStatus
+                  job={localActive ? queue : remoteJob ? remoteJobAsQueueState(remoteJob) : queue}
+                  visible={localActive || Boolean(remoteJob)}
+                />
+              </>
+            );
+          })()}
         </ActionPanel>
 
         <ActionPanel
