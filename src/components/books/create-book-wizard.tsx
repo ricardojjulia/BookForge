@@ -103,8 +103,26 @@ const TONE_OPTIONS = [
   "Devotional",
 ];
 
-export function CreateBookWizard() {
+type ExistingCreationProject = {
+  id: string;
+  workingTitle: string;
+  idea: string;
+  genre: string | null;
+  audience: string | null;
+  language: string | null;
+  targetPages: number;
+  tone: string;
+  boundaries: string;
+  mode: CreationMode;
+  dialogDensity: string;
+  updatedAt: string;
+  concept: ConceptPass | null;
+  architecture: ChapterArchitecture | null;
+};
+
+export function CreateBookWizard({ existingProject }: { existingProject?: ExistingCreationProject | null }) {
   const router = useRouter();
+  const [resumeChoice, setResumeChoice] = useState<"pending" | "resolved">(existingProject ? "pending" : "resolved");
   const [workingTitle, setWorkingTitle] = useState("");
   const [idea, setIdea] = useState("");
   const [genre, setGenre] = useState<string | null>("Literary nonfiction");
@@ -129,6 +147,27 @@ export function CreateBookWizard() {
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [statusColor, setStatusColor] = useState<"blue" | "teal" | "yellow" | "red">("blue");
+
+  function resumeExistingProject() {
+    if (!existingProject) return;
+    setCreationProjectId(existingProject.id);
+    setWorkingTitle(existingProject.workingTitle);
+    setIdea(existingProject.idea);
+    if (existingProject.genre) setGenre(existingProject.genre);
+    if (existingProject.audience) setAudience(existingProject.audience);
+    if (existingProject.language) setLanguage(existingProject.language);
+    setTargetPages(existingProject.targetPages);
+    setTone(existingProject.tone);
+    setBoundaries(existingProject.boundaries);
+    setMode(existingProject.mode);
+    if (existingProject.dialogDensity) setDialogDensity(existingProject.dialogDensity as DialogDensity);
+    if (existingProject.concept) {
+      setConcept(existingProject.concept);
+      setConceptSavedAt(existingProject.updatedAt);
+    }
+    if (existingProject.architecture) setArchitecture(existingProject.architecture);
+    setResumeChoice("resolved");
+  }
 
   const runModelPreflight = useCallback(async () => {
     setLoading(true);
@@ -348,6 +387,35 @@ export function CreateBookWizard() {
         ? "concept"
         : "intake";
   const stageProgress = getCreationStageProgress(currentStage);
+
+  if (resumeChoice === "pending" && existingProject) {
+    const hasArchitecture = Boolean(existingProject.architecture);
+    const hasConcept = Boolean(existingProject.concept);
+    return (
+      <Paper withBorder radius="md" p="xl" bg="#fffdf8">
+        <Stack>
+          <Title order={3}>Resume in-progress book?</Title>
+          <Text c="dimmed" size="sm">
+            You have an unfinished project, <strong>{existingProject.workingTitle || "Untitled"}</strong>, last updated{" "}
+            {new Date(existingProject.updatedAt).toLocaleString()}.
+            {hasArchitecture
+              ? " It already has a generated chapter architecture ready to review and accept -- no need to regenerate anything."
+              : hasConcept
+                ? " It already has a generated concept pass ready to review."
+                : " It has your intake details saved, but no concept has been generated yet."}
+          </Text>
+          <Group>
+            <Button color="teal" onClick={resumeExistingProject}>
+              Resume &quot;{existingProject.workingTitle || "Untitled"}&quot;
+            </Button>
+            <Button variant="light" color="gray" onClick={() => setResumeChoice("resolved")}>
+              Start a new book instead
+            </Button>
+          </Group>
+        </Stack>
+      </Paper>
+    );
+  }
 
   return (
     <Stack>
