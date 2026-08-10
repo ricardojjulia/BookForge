@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { AnimatePresence, motion } from "framer-motion";
 import { Alert, Badge, Box, Button, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { WORDS_PER_PAGE } from "@/lib/manuscript/page-estimate";
@@ -75,36 +76,94 @@ function chipBorder(status: string) {
   return "var(--mantine-color-teal-4)";
 }
 
+function PartProgressRing({ progress, color }: { progress: number; color: string }) {
+  const size = 44;
+  const strokeWidth = 4;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  return (
+    <Box style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={size / 2} cy={size / 2} r={radius} stroke="var(--mantine-color-gray-2)" strokeWidth={strokeWidth} fill="none" />
+        <motion.circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={color}
+          strokeWidth={strokeWidth}
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          initial={{ strokeDashoffset: circumference }}
+          animate={{ strokeDashoffset: circumference * (1 - progress) }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </svg>
+      <Text
+        size="9px"
+        fw={800}
+        style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
+      >
+        {Math.round(progress * 100)}%
+      </Text>
+    </Box>
+  );
+}
+
 function ChapterChip({
   chapter,
   status,
   selected,
+  index,
   onClick,
 }: {
   chapter: ArchChapter;
   status: string;
   selected: boolean;
+  index: number;
   onClick: () => void;
 }) {
   return (
-    <Box
-      onClick={onClick}
-      title={chapter.title || `Chapter ${chapter.chapterNumber}`}
-      className={classes.chapterChip}
-      style={{
-        width: 36,
-        height: 36,
-        borderRadius: 8,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontWeight: 700,
-        fontSize: 13,
-        background: chipBg(status),
-        border: `2px solid ${selected ? "var(--mantine-color-grape-6)" : chipBorder(status)}`,
-      }}
-    >
-      {chapter.chapterNumber}
+    <Box style={{ position: "relative" }}>
+      {selected && (
+        <motion.div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: -4,
+            borderRadius: 10,
+            border: "1px solid var(--mantine-color-grape-4)",
+          }}
+          animate={{ scale: [1, 1.12, 1], opacity: [0.6, 0.15, 0.6] }}
+          transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+        />
+      )}
+      <motion.div
+        onClick={onClick}
+        title={chapter.title || `Chapter ${chapter.chapterNumber}`}
+        className={classes.chapterChip}
+        initial={{ opacity: 0, scale: 0.7 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ delay: index * 0.03, duration: 0.2, ease: "easeOut" }}
+        whileHover={{ scale: 1.12, y: -2 }}
+        whileTap={{ scale: 0.94 }}
+        style={{
+          position: "relative",
+          width: 36,
+          height: 36,
+          borderRadius: 8,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontWeight: 700,
+          fontSize: 13,
+          background: chipBg(status),
+          border: `2px solid ${selected ? "var(--mantine-color-grape-6)" : chipBorder(status)}`,
+        }}
+      >
+        {chapter.chapterNumber}
+      </motion.div>
     </Box>
   );
 }
@@ -214,6 +273,7 @@ function PartSection({
   const archChapters: ArchChapter[] = Array.isArray(part.chapters) ? part.chapters : [];
   const drafted = archChapters.filter((c) => chapterStatus(dbChapters, c.chapterNumber ?? 0) === "draft").length;
   const selectedChapter = selected != null ? archChapters[selected] : null;
+  const progress = archChapters.length ? drafted / archChapters.length : 0;
 
   return (
     <Box mb="sm">
@@ -226,9 +286,7 @@ function PartSection({
             {part.title || `Part ${partIndex + 1}`}
           </Text>
         </Group>
-        <Badge size="xs" variant="light" color={drafted === archChapters.length ? "green" : "yellow"} style={{ flexShrink: 0 }}>
-          {drafted}/{archChapters.length}
-        </Badge>
+        <PartProgressRing progress={progress} color={progress >= 1 ? "var(--mantine-color-green-6)" : "var(--mantine-color-yellow-6)"} />
       </Group>
       {part.purpose && (
         <Text size="xs" c="dimmed" lineClamp={1} mb={6}>
@@ -242,18 +300,30 @@ function PartSection({
             chapter={chapter}
             status={chapterStatus(dbChapters, chapter.chapterNumber ?? 0)}
             selected={selected === i}
+            index={i}
             onClick={() => setSelected((current) => (current === i ? null : i))}
           />
         ))}
       </Group>
-      {selectedChapter && (
-        <ChapterDetail
-          chapter={selectedChapter}
-          status={chapterStatus(dbChapters, selectedChapter.chapterNumber ?? 0)}
-          bookId={bookId}
-          dbChapterId={dbChapters.find((c) => c.chapter_number === selectedChapter.chapterNumber)?.id ?? null}
-        />
-      )}
+      <AnimatePresence initial={false}>
+        {selectedChapter && (
+          <motion.div
+            key={selected}
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+            style={{ overflow: "hidden" }}
+          >
+            <ChapterDetail
+              chapter={selectedChapter}
+              status={chapterStatus(dbChapters, selectedChapter.chapterNumber ?? 0)}
+              bookId={bookId}
+              dbChapterId={dbChapters.find((c) => c.chapter_number === selectedChapter.chapterNumber)?.id ?? null}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </Box>
   );
 }
