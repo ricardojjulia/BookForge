@@ -1694,10 +1694,20 @@ function GuidedRewriteRun({
         {overrideError && <Alert color="red">{overrideError}</Alert>}
 
         {queue.status !== "idle" && (
-          <Alert color="grape" variant="light">
+          <Alert color={queue.status !== "running" && queue.status !== "paused" && queue.successfulUnits === 0 && queue.failedUnits > 0 ? "red" : "grape"} variant="light">
             <Group justify="space-between" mb={4}>
               <Text fw={800} size="sm">
-                {queue.status === "running" ? "Working: " : queue.status === "paused" ? "Paused: " : "Stopped: "}
+                {queue.status === "running"
+                  ? "Working: "
+                  : queue.status === "paused"
+                    ? "Paused: "
+                    : queue.successfulUnits === 0 && queue.failedUnits > 0
+                      ? "Failed: "
+                      : queue.failedUnits > 0
+                        ? `Finished with ${queue.failedUnits} failure(s): `
+                        : queue.status === "cancelled"
+                          ? "Cancelled: "
+                          : "Done: "}
                 {queue.currentTask || "Rewrite batch"}
               </Text>
               <Text size="xs" c="dimmed">
