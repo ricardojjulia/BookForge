@@ -154,18 +154,16 @@ export function RewriteExecutionPanel({
   }) {
     if (!hasPlan) return;
     const targetChapter = overrides.chapterId ? rewriteCoverage.find((c) => c.chapterId === overrides.chapterId) : undefined;
-    // Skip the confirm() prompt for a single targeted chapter — the button
-    // itself ("Rewrite this chapter") already makes the scope and intent
-    // unambiguous, and window.confirm is unreliable here: browsers silently
-    // auto-dismiss repeated confirm()/alert() calls on a page after a few of
-    // them fire, with no visible dialog and no error — it just looks like
-    // the button does nothing.
-    if (!overrides.chapterId) {
-      const confirmed = window.confirm(
-        "Execute draft rewrite versions now? Original manuscript text will not be overwritten.",
-      );
-      if (!confirmed) return;
-    }
+    // No confirm() prompt here, for any caller -- every button that reaches
+    // this function (Execute Rewrite, Run Sample Batch, Run Next Batch,
+    // "Rewrite this chapter") already makes the scope and intent
+    // unambiguous from its own label plus the surrounding step/section
+    // text, and window.confirm is unreliable regardless: browsers silently
+    // auto-dismiss repeated confirm()/alert() calls on a page after a few
+    // of them fire, with no visible dialog and no error -- it just looks
+    // like the button does nothing. This action is also non-destructive
+    // (draft revisions only; original manuscript text is never
+    // overwritten), so there's nothing here that needs an extra gate.
     const chapterRemaining = targetChapter ? Math.max(0, targetChapter.totalParagraphs - targetChapter.rewrittenParagraphs) : undefined;
     const requestedMaxUnits = overrides.maxUnits ?? chapterRemaining ?? Number(maxUnits || eligibleParagraphCount);
     const totalUnits = chapterRemaining ?? Math.min(requestedMaxUnits, eligibleParagraphCount || requestedMaxUnits || 1);
@@ -506,6 +504,7 @@ export function RewriteExecutionPanel({
           workflow={workflowState}
           readiness={readiness}
           hasPlan={hasPlan}
+          queue={queue}
           touchedChapters={rewriteCoverage.filter((chapter) => chapter.rewrittenParagraphs > 0).length}
           totalChapters={rewriteCoverage.filter((chapter) => chapter.totalParagraphs > 0).length}
           untouchedParagraphCount={untouchedParagraphCount}
@@ -1472,6 +1471,7 @@ function GuidedRewriteRun({
   workflow,
   readiness,
   hasPlan,
+  queue,
   touchedChapters,
   totalChapters,
   untouchedParagraphCount,
@@ -1494,6 +1494,7 @@ function GuidedRewriteRun({
   workflow: RewriteWorkflowRow;
   readiness: RewriteReadiness;
   hasPlan: boolean;
+  queue: AiJobQueueState;
   touchedChapters: number;
   totalChapters: number;
   untouchedParagraphCount: number;
@@ -1691,6 +1692,35 @@ function GuidedRewriteRun({
           </Alert>
         )}
         {overrideError && <Alert color="red">{overrideError}</Alert>}
+
+        {queue.status !== "idle" && (
+          <Alert color={queue.status !== "running" && queue.status !== "paused" && queue.successfulUnits === 0 && queue.failedUnits > 0 ? "red" : "grape"} variant="light">
+            <Group justify="space-between" mb={4}>
+              <Text fw={800} size="sm">
+                {queue.status === "running"
+                  ? "Working: "
+                  : queue.status === "paused"
+                    ? "Paused: "
+                    : queue.successfulUnits === 0 && queue.failedUnits > 0
+                      ? "Failed: "
+                      : queue.failedUnits > 0
+                        ? `Finished with ${queue.failedUnits} failure(s): `
+                        : queue.status === "cancelled"
+                          ? "Cancelled: "
+                          : "Done: "}
+                {queue.currentTask || "Rewrite batch"}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {queue.completedUnits}/{queue.totalUnits}
+              </Text>
+            </Group>
+            <Progress
+              value={queue.totalUnits ? (queue.completedUnits / queue.totalUnits) * 100 : 0}
+              animated={queue.status === "running"}
+              color="grape"
+            />
+          </Alert>
+        )}
 
         <Stack gap={0}>
           {steps.map((step, index) => {
