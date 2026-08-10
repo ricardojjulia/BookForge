@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import { Alert, Badge, Box, Button, Checkbox, Group, NumberInput, Paper, Progress, SimpleGrid, Stack, Text, Textarea, Title } from "@mantine/core";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -1413,6 +1414,58 @@ function getCampaignGuidance({
   };
 }
 
+function StepNode({
+  number,
+  done,
+  active,
+  blocked,
+}: {
+  number: number;
+  done: boolean;
+  active: boolean;
+  blocked: boolean;
+}) {
+  const background = done ? "var(--mantine-color-green-6)" : active ? "var(--mantine-color-grape-6)" : "white";
+  const border = done
+    ? "var(--mantine-color-green-6)"
+    : active
+      ? "var(--mantine-color-grape-6)"
+      : blocked
+        ? "var(--mantine-color-red-5)"
+        : "var(--mantine-color-gray-4)";
+  const textColor = done || active ? "white" : "var(--mantine-color-gray-7)";
+
+  return (
+    <Box style={{ position: "relative", flexShrink: 0 }}>
+      {active && (
+        <motion.div
+          aria-hidden
+          style={{ position: "absolute", inset: -5, borderRadius: 999, border: "1px solid var(--mantine-color-grape-4)" }}
+          animate={{ scale: [1, 1.18, 1], opacity: [0.6, 0.1, 0.6] }}
+          transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+        />
+      )}
+      <Box
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 999,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background,
+          border: `2px solid ${border}`,
+          color: textColor,
+          fontWeight: 800,
+          fontSize: 12,
+        }}
+      >
+        {done ? "✓" : number}
+      </Box>
+    </Box>
+  );
+}
+
 function GuidedRewriteRun({
   bookId,
   mode,
@@ -1639,101 +1692,123 @@ function GuidedRewriteRun({
         )}
         {overrideError && <Alert color="red">{overrideError}</Alert>}
 
-        <SimpleGrid cols={{ base: 1, md: 2 }}>
+        <Stack gap={0}>
           {steps.map((step, index) => {
             const active = mode === "wizard" && index === activeIndex;
             const stepNumber = index + 1;
             const blockers = readiness.stepBlockers[stepNumber] || [];
             const overrideActive = Boolean(activeOverrides[stepNumber]);
+            const isLast = index === steps.length - 1;
             return (
-              <Paper
-                key={step.label}
-                withBorder
-                radius="md"
-                p="md"
-                bg={step.done ? "#eefbf4" : active ? "#f3ecff" : "white"}
-                style={{ borderColor: active ? "#9c36b5" : undefined }}
-              >
-                <Stack gap="xs">
-                  <Group justify="space-between" align="flex-start">
-                    <div>
-                      <Text size="xs" c="dimmed" tt="uppercase" fw={800}>
-                        Step {index + 1}
-                      </Text>
-                      <Text fw={900}>{step.label}</Text>
-                    </div>
-                    <Badge color={step.done ? "green" : readinessColor(step.readiness)} variant="light">
-                      {step.done ? "Done" : readinessLabel(step.readiness)}
-                    </Badge>
-                  </Group>
-                  <Text size="sm" c="dimmed">
-                    {step.detail}
-                  </Text>
-                  {mode === "wizard" && step.action}
-                  {mode === "wizard" && overrideActive && (
-                    <Badge color="orange" variant="light" w="fit-content">
-                      Override active
-                    </Badge>
-                  )}
-                  {mode === "wizard" && !step.done && blockers.length > 0 && (
-                    <Alert color={overrideActive ? "orange" : "red"} variant="light" p="xs">
-                      <Text size="xs" fw={800}>
-                        {overrideActive ? "Override recorded for:" : "Blocked because:"}
-                      </Text>
-                      {blockers.slice(0, 2).map((reason) => (
-                        <Text key={reason} size="xs">
-                          {reason}
-                        </Text>
-                      ))}
-                      {!overrideActive && stepNumber > 1 && (
-                        <Stack gap={6} mt="xs">
-                          <Checkbox
-                            size="xs"
-                            label="Advanced override"
-                            checked={overrideReasons[stepNumber] !== undefined}
-                            onChange={(event) =>
-                              setOverrideReasons((current) => {
-                                const next = { ...current };
-                                if (event.currentTarget.checked) next[stepNumber] = "";
-                                else delete next[stepNumber];
-                                return next;
-                              })
-                            }
-                          />
-                          {overrideReasons[stepNumber] !== undefined && (
-                            <>
-                              <Textarea
-                                size="xs"
-                                minRows={2}
-                                placeholder="Why are you intentionally bypassing this gate?"
-                                value={overrideReasons[stepNumber]}
-                                onChange={(event) =>
-                                  setOverrideReasons((current) => ({
-                                    ...current,
-                                    [stepNumber]: event.currentTarget.value,
-                                  }))
-                                }
-                              />
-                              <Button
-                                size="xs"
-                                color="orange"
-                                variant="light"
-                                loading={overrideSaving === stepNumber}
-                                onClick={() => activateOverride(stepNumber, step.label)}
-                              >
-                                Activate Override
-                              </Button>
-                            </>
-                          )}
-                        </Stack>
-                      )}
-                    </Alert>
+              <Group key={step.label} align="stretch" gap="sm" wrap="nowrap">
+                <Stack gap={0} align="center" style={{ width: 28, flexShrink: 0 }}>
+                  <StepNode
+                    number={stepNumber}
+                    done={step.done}
+                    active={active}
+                    blocked={!step.done && step.readiness === "blocked"}
+                  />
+                  {!isLast && (
+                    <Box
+                      style={{
+                        width: 2,
+                        flex: 1,
+                        minHeight: 16,
+                        margin: "2px 0",
+                        background: step.done ? "var(--mantine-color-green-4)" : "var(--mantine-color-gray-3)",
+                      }}
+                    />
                   )}
                 </Stack>
-              </Paper>
+                <Paper
+                  withBorder
+                  radius="md"
+                  p="md"
+                  mb="sm"
+                  bg={step.done ? "#eefbf4" : active ? "#f3ecff" : "white"}
+                  style={{ borderColor: active ? "#9c36b5" : undefined, flex: 1 }}
+                >
+                  <Stack gap="xs">
+                    <Group justify="space-between" align="flex-start">
+                      <div>
+                        <Text size="xs" c="dimmed" tt="uppercase" fw={800}>
+                          Step {index + 1}
+                        </Text>
+                        <Text fw={900}>{step.label}</Text>
+                      </div>
+                      <Badge color={step.done ? "green" : readinessColor(step.readiness)} variant="light">
+                        {step.done ? "Done" : readinessLabel(step.readiness)}
+                      </Badge>
+                    </Group>
+                    <Text size="sm" c="dimmed">
+                      {step.detail}
+                    </Text>
+                    {mode === "wizard" && step.action}
+                    {mode === "wizard" && overrideActive && (
+                      <Badge color="orange" variant="light" w="fit-content">
+                        Override active
+                      </Badge>
+                    )}
+                    {mode === "wizard" && !step.done && blockers.length > 0 && (
+                      <Alert color={overrideActive ? "orange" : "red"} variant="light" p="xs">
+                        <Text size="xs" fw={800}>
+                          {overrideActive ? "Override recorded for:" : "Blocked because:"}
+                        </Text>
+                        {blockers.slice(0, 2).map((reason) => (
+                          <Text key={reason} size="xs">
+                            {reason}
+                          </Text>
+                        ))}
+                        {!overrideActive && stepNumber > 1 && (
+                          <Stack gap={6} mt="xs">
+                            <Checkbox
+                              size="xs"
+                              label="Advanced override"
+                              checked={overrideReasons[stepNumber] !== undefined}
+                              onChange={(event) =>
+                                setOverrideReasons((current) => {
+                                  const next = { ...current };
+                                  if (event.currentTarget.checked) next[stepNumber] = "";
+                                  else delete next[stepNumber];
+                                  return next;
+                                })
+                              }
+                            />
+                            {overrideReasons[stepNumber] !== undefined && (
+                              <>
+                                <Textarea
+                                  size="xs"
+                                  minRows={2}
+                                  placeholder="Why are you intentionally bypassing this gate?"
+                                  value={overrideReasons[stepNumber]}
+                                  onChange={(event) =>
+                                    setOverrideReasons((current) => ({
+                                      ...current,
+                                      [stepNumber]: event.currentTarget.value,
+                                    }))
+                                  }
+                                />
+                                <Button
+                                  size="xs"
+                                  color="orange"
+                                  variant="light"
+                                  loading={overrideSaving === stepNumber}
+                                  onClick={() => activateOverride(stepNumber, step.label)}
+                                >
+                                  Activate Override
+                                </Button>
+                              </>
+                            )}
+                          </Stack>
+                        )}
+                      </Alert>
+                    )}
+                  </Stack>
+                </Paper>
+              </Group>
             );
           })}
-        </SimpleGrid>
+        </Stack>
 
         <SimpleGrid cols={{ base: 1, md: 4 }}>
           <CampaignMetric label="Chapters sampled" value={`${touchedChapters}/${totalChapters || 0}`} />
