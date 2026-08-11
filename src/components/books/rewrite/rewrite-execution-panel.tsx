@@ -1776,7 +1776,7 @@ function GuidedRewriteRun({
                     <Text size="sm" c="dimmed">
                       {step.detail}
                     </Text>
-                    {mode === "wizard" && step.action}
+                    {step.action}
                     {mode === "wizard" && overrideActive && (
                       <Badge color="orange" variant="light" w="fit-content">
                         Override active
