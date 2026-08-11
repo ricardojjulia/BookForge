@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Divider, Group, Modal, Paper, Select, SimpleGrid, Stack, Switch, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -174,6 +174,25 @@ export function BookActions({
     window.localStorage.setItem("bookforge.alwaysShowDetailedQueue", alwaysShowDetailedQueue ? "1" : "0");
   }, [alwaysShowDetailedQueue]);
 
+  // Read inside the poll interval below without restarting that interval
+  // every time `loading` changes -- the interval only needs the CURRENT
+  // value at poll time, not a reason to re-subscribe.
+  const loadingRef = useRef<string | null>(null);
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
+
+  const activeLocalJobMode = useCallback((): string | null => {
+    const current = loadingRef.current;
+    if (!current) return null;
+    if (current === "preflight:book-bible" || current === `/api/books/${bookId}/analyze`) return "manuscript_blueprint";
+    if (current === "preflight:chapter-summaries" || current === `/api/books/${bookId}/chapters/summarize`) return "chapter_summaries";
+    if (current === "preflight:critic" || current === `/api/books/${bookId}/critic`) return "bookforge_critic";
+    if (current === "preflight:critic-all" || current === `/api/books/${bookId}/critic/all`) return "bookforge_critic_batch";
+    if (current === "preflight:generate-draft" || current === `/api/books/${bookId}/generate-draft`) return "creation_draft_generation";
+    return null;
+  }, [bookId]);
+
   // The `queue`/`loading` state above only knows about work THIS tab
   // started -- reload the page, open a second tab, or come back after the
   // request that started a job finished loading, and the button reverts to
@@ -202,6 +221,56 @@ export function BookActions({
                 : 0,
             }));
           setRemoteActiveJobs(active);
+
+          // The big "AI Job Queue" panel used to be driven entirely by a
+          // client-side SIMULATION of progress (elapsed time divided by the
+          // pre-run guess) -- it could never reflect the server splitting a
+          // call into more sub-calls than planned, and its self-referential
+          // "average so far" math grew without bound once a call ran longer
+          // than its estimate (found live: "estimated time left" climbing
+          // forever instead of counting down). Once a real job row with real
+          // progress exists for whatever task this tab is currently running,
+          // replace the simulated numbers with the real ones.
+          const matchedMode = activeLocalJobMode();
+          const matchedJob = matchedMode ? active.find((job) => job.mode === matchedMode) : null;
+          if (matchedJob) {
+            const progress = matchedJob.progress;
+            const totalUnits = Math.max(1, progress?.totalUnits || 1);
+            const successfulUnits = progress?.successful || 0;
+            const failedUnits = progress?.failed || 0;
+            const skippedUnits = progress?.skipped || 0;
+            const completedUnits = Math.min(totalUnits, successfulUnits + failedUnits);
+            const elapsedSeconds = matchedJob.elapsedSecondsAtPoll || 0;
+            const observedCompletions = successfulUnits + failedUnits;
+            setQueue((current) => {
+              const perUnit =
+                observedCompletions >= 1
+                  ? Math.max(1, elapsedSeconds / observedCompletions)
+                  : current.estimatedSecondsPerCall || 20;
+              const remainingUnits = Math.max(0, totalUnits - completedUnits);
+              const secondsIntoCurrentUnit = Math.max(0, elapsedSeconds - completedUnits * perUnit);
+              return {
+                ...current,
+                currentTask: progress?.taskName || current.currentTask,
+                currentUnit: progress?.currentUnit || current.currentUnit,
+                totalUnits,
+                completedUnits,
+                successfulUnits,
+                failedUnits,
+                skippedUnits,
+                elapsedSeconds,
+                estimatedSecondsPerCall: perUnit,
+                currentCallElapsedSeconds: secondsIntoCurrentUnit,
+                currentCallProgress: Math.min(0.97, secondsIntoCurrentUnit / perUnit),
+                nextCallSeconds: remainingUnits > 0 ? Math.max(0, Math.ceil(perUnit - secondsIntoCurrentUnit)) : null,
+                estimatedSecondsRemaining: Math.ceil(remainingUnits * perUnit),
+                // Real completions exist now -- stop letting the fallback
+                // client-side ticker (below) simulate progress over this.
+                estimatedProgress: observedCompletions < 1,
+                status: "running",
+              };
+            });
+          }
         }
       } catch {
         // Transient poll failures shouldn't clear what we already know.
@@ -213,7 +282,7 @@ export function BookActions({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [bookId]);
+  }, [bookId, activeLocalJobMode]);
 
   function findRemoteJob(mode: string) {
     return remoteActiveJobs.find((job) => job.mode === mode) || null;
@@ -1219,32 +1288,43 @@ export function BookActions({
         if (
           current.status !== "running" ||
           !current.startedAt ||
-          !current.estimatedSecondsPerCall
+          !current.estimatedSecondsPerCall ||
+          // Real server progress has taken over (see the polling effect
+          // above) -- don't fight it with a simulated guess.
+          !current.estimatedProgress
         ) {
           return current;
         }
 
         const elapsedSeconds = Math.max(0, Math.floor((Date.now() - current.startedAt) / 1000));
-        const estimatedCompleted = Math.min(
-          Math.max(0, current.totalUnits - 1),
-          Math.floor(elapsedSeconds / current.estimatedSecondsPerCall),
-        );
-        const secondsIntoCurrentCall = elapsedSeconds % current.estimatedSecondsPerCall;
-        const currentCallElapsedSeconds =
-          current.totalUnits <= 1 ? elapsedSeconds : secondsIntoCurrentCall;
+        const perCall = current.estimatedSecondsPerCall;
+        const estimatedCompleted = Math.min(Math.max(0, current.totalUnits - 1), Math.floor(elapsedSeconds / perCall));
+        // Linear, not modulo -- a modulo wraps back to a small value once a
+        // call overruns its estimate, which used to make the current-call
+        // progress bar suddenly jump backwards instead of honestly showing
+        // "this is taking longer than expected."
+        const secondsIntoCurrentCall = Math.max(0, elapsedSeconds - estimatedCompleted * perCall);
+        const currentCallElapsedSeconds = current.totalUnits <= 1 ? elapsedSeconds : secondsIntoCurrentCall;
         const currentCallProgress =
           current.totalUnits <= 1
-            ? Math.min(0.94, elapsedSeconds / current.estimatedSecondsPerCall)
-            : Math.min(0.98, secondsIntoCurrentCall / current.estimatedSecondsPerCall);
+            ? Math.min(0.97, elapsedSeconds / perCall)
+            : Math.min(0.97, secondsIntoCurrentCall / perCall);
         const nextCallSeconds =
           current.totalUnits <= 1 || estimatedCompleted >= current.totalUnits - 1
             ? null
-            : Math.max(0, Math.ceil(current.estimatedSecondsPerCall - secondsIntoCurrentCall));
-        const averageSecondsPerCall =
-          estimatedCompleted >= 2 ? Math.max(1, elapsedSeconds / estimatedCompleted) : current.estimatedSecondsPerCall;
-        const remainingCalls = Math.max(0, current.totalUnits - estimatedCompleted);
-        const estimatedSecondsRemaining =
-          estimatedCompleted >= 2 ? Math.ceil(remainingCalls * averageSecondsPerCall) : null;
+            : Math.max(0, Math.ceil(perCall - secondsIntoCurrentCall));
+        // The remaining-time estimate is always shown (no more "calibrating"
+        // wait for 2 calls to finish) and it's now grounded in the STABLE
+        // original per-call estimate rather than re-averaging elapsed time
+        // against itself -- that self-referential math is what caused
+        // "estimated time left" to climb forever once a call ran long: once
+        // estimatedCompleted froze at its cap, the "average" kept inflating
+        // every tick because only its numerator (elapsed) kept growing.
+        // Here, once a call overruns, currentCallRemaining just clamps to 0
+        // instead of feeding back into the estimate.
+        const remainingCallsAfterCurrent = Math.max(0, current.totalUnits - estimatedCompleted - 1);
+        const currentCallRemaining = Math.max(0, perCall - secondsIntoCurrentCall);
+        const estimatedSecondsRemaining = Math.ceil(remainingCallsAfterCurrent * perCall + currentCallRemaining);
 
         return {
           ...current,
