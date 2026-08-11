@@ -59,7 +59,17 @@ export function createRevisionJobHeartbeat(
   intervalMs = 30000,
 ): RevisionJobHeartbeat {
   let latestSettings = settings;
-  let latestProgress = buildJobProgress(progress);
+  // Must merge with the job's existing progress (taskName, startedAt, etc.)
+  // here, not just build from the small per-tick patch passed in -- this
+  // function is recreated fresh for every unit in a batch (see
+  // generate-draft/route.ts's per-chapter loop), and the first background
+  // tick 30s later used to silently reset taskName back to "AI task" and
+  // startedAt to null, because the OLD code below merged
+  // extractJobProgress(latestSettings) UNDER this value, letting it clobber
+  // the real fields instead of only contributing the new patch fields.
+  // Found live: the job's displayed task name and elapsed time flickered
+  // between correct and reset every ~30s during a long chapter generation.
+  let latestProgress = buildJobProgress({ ...extractJobProgress(settings), ...progress });
   let stopped = false;
 
   const touch = async (progressPatch: Partial<AiJobProgress> = {}) => {
