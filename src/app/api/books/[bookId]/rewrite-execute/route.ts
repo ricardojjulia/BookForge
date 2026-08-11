@@ -15,6 +15,13 @@ import { clampStrategySettings, getRewriteStrategy, rewriteStrategies } from "@/
 import { getExistingRevisionState, shouldSkipParagraph, type ExistingRevisionRow } from "@/lib/rewrite/eligibility";
 import { createClient } from "@/lib/supabase/server";
 
+// Same low cost tier as the default rewrite model (deepseek/deepseek-v4-pro)
+// but a different provider -- see the "Rewrite-pass alternate to DeepSeek V4
+// Pro" entry in src/lib/ai/model-catalog.ts. Used as a same-cost retry
+// target when the primary cloud model fails a rewrite completion, instead
+// of just repeating the model that already failed.
+const REWRITE_FALLBACK_MODEL = "google/gemini-2.5-flash";
+
 const schema = z.object({
   jobId: z.string().uuid().optional(),
   serverManaged: z.boolean().optional(),
@@ -510,6 +517,16 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       let parsed: unknown = null;
       let revisedText = "";
       for (let completionAttempt = 1; completionAttempt <= maxCompletionAttempts; completionAttempt += 1) {
+        // Retrying a failed cloud call against the SAME model wastes a full
+        // generation attempt for very little chance of a different outcome
+        // -- the failure mode (e.g. deepseek-v4-pro's empty-completion bug)
+        // is usually correlated with that specific model, not the prompt.
+        // Found live: 25.6% of a real day's rewrite calls came back
+        // completely empty, most from a model repeating its own failure.
+        // Switch to a different cloud model starting on the second attempt
+        // instead of just repeating the first one.
+        const useFallbackModel =
+          completionAttempt > 1 && preparedModel.isCloud && REWRITE_FALLBACK_MODEL !== model;
         const completion = await createManagedChatCompletion(
           client,
           preparedModel,
@@ -518,6 +535,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             top_p: settings.topP,
             max_tokens: 1800,
             messages: [{ role: "user", content: prompt }],
+            ...(useFallbackModel ? { model: REWRITE_FALLBACK_MODEL } : {}),
           },
           undefined,
           telemetryContext,
