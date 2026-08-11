@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { Alert, Badge, Box, Button, Checkbox, Group, NumberInput, Paper, Progress, SimpleGrid, Stack, Text, Textarea, Title } from "@mantine/core";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AiJobQueue, type AiJobQueueState } from "@/components/ai/ai-job-queue";
+import { AiJobQueue, AiJobQueueInlineStatus, type AiJobQueueState } from "@/components/ai/ai-job-queue";
 import { fetchJson } from "@/lib/http/fetch-json";
 import type { RewriteCampaignRow, RewriteCampaignStats } from "@/lib/rewrite/campaigns";
 import type { RewriteReadiness, RewriteReadinessStatus } from "@/lib/rewrite/readiness";
@@ -556,6 +556,7 @@ export function RewriteExecutionPanel({
             Review Draft Revisions
           </Button>
         </Group>
+        <AiJobQueueInlineStatus job={queue} visible={loading} />
 
         <Alert color={hasPlan ? "blue" : "yellow"}>
           {hasPlan

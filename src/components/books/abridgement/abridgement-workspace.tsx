@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Alert, Badge, Button, Group, NumberInput, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { useRouter } from "next/navigation";
+import { GenerationProgressAlert } from "@/components/ai/generation-progress-alert";
 import { fetchJson } from "@/lib/http/fetch-json";
 
 type Plan = {
@@ -116,6 +117,13 @@ export function AbridgementWorkspace({ bookId, plan, suggestions }: { bookId: st
         </Group>
         {message && <Alert color="green" mt="md">{message}</Alert>}
         {error && <Alert color="red" mt="md">{error}</Alert>}
+        <GenerationProgressAlert
+          active={loading === "plan"}
+          message="Generating abridgement plan..."
+          detail="typically takes 30-60 seconds"
+          estimatedSeconds={40}
+          color="grape"
+        />
         {plan?.summary && <Alert color="blue" mt="md">{plan.summary}</Alert>}
       </Paper>
 

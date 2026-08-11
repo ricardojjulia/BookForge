@@ -5,6 +5,7 @@ import { Alert, Badge, Button, Group, Modal, Paper, ScrollArea, Stack, Text, Tit
 import { IconSparkles } from "@tabler/icons-react";
 import { useDisclosure } from "@mantine/hooks";
 import { useRouter } from "next/navigation";
+import { GenerationProgressAlert } from "@/components/ai/generation-progress-alert";
 import { fetchJson } from "@/lib/http/fetch-json";
 
 type SceneEditorChapter = {
@@ -248,6 +249,13 @@ export function SceneEditorPanel({
                         </Button>
                       </Group>
                     </Group>
+
+                    <GenerationProgressAlert
+                      active={loadingId === `suggest:${chapter.id}`}
+                      message="Suggesting scene splits..."
+                      estimatedSeconds={20}
+                      color="grape"
+                    />
 
                     {chapterSuggestions.length > 0 && (
                       <Stack gap="xs" mb="sm">

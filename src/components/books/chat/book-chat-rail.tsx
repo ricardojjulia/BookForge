@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Badge, Button, Group, Loader, Paper, ScrollArea, Stack, Text, Textarea, Title } from "@mantine/core";
 import Link from "next/link";
+import { GenerationProgressAlert } from "@/components/ai/generation-progress-alert";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 
@@ -463,6 +464,18 @@ export function BookChatRail({ bookId }: { bookId: string }) {
             <Button size="xs" color="orange" variant="light" loading={runningTool === "critic_all"} onClick={() => runTool("critic_all")}>Run Critic Batch</Button>
             <Button size="xs" color="blue" variant="light" loading={runningTool === "humanize_guidance"} onClick={() => runTool("humanize_guidance")}>Run Humanize Guidance</Button>
             </Group>
+            <GenerationProgressAlert
+              active={runningTool !== null}
+              message={
+                runningTool === "rewrite_plan"
+                  ? "Running rewrite plan..."
+                  : runningTool === "critic_all"
+                    ? "Running all critic lenses..."
+                    : "Generating humanized guidance..."
+              }
+              estimatedSeconds={runningTool === "critic_all" ? 45 : 30}
+              color="teal"
+            />
           </Stack>
         )}
 

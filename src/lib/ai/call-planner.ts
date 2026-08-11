@@ -22,6 +22,12 @@ export function estimateAiCallPlan(input: {
   chapterCount: number;
   sceneCount: number;
   paragraphCount: number;
+  // Real median seconds-per-unit from completed jobs of this same task,
+  // pooled across all users (see src/lib/ai/estimation-history.ts). The
+  // formula below only knows local LM Studio token throughput, so it's
+  // systematically wrong for cloud providers -- prefer real outcomes once
+  // enough of them exist.
+  historicalSecondsPerCall?: number | null;
 }) {
   const modelSizeB = getModelSizeB(input.selectedModel);
   const quantization = getQuantization(input.selectedModel);
@@ -32,7 +38,9 @@ export function estimateAiCallPlan(input: {
   const usableContextTokens = Math.max(800, Math.floor(rawUsableContext * speedBias));
   const targetTokensPerCall = Math.max(700, Math.floor(usableContextTokens * taskContextShare(input.task)));
   const expectedCalls = Math.max(1, Math.ceil(estimatedInputTokens / targetTokensPerCall));
-  const estimatedSecondsPerCall = estimateSecondsPerCall(targetTokensPerCall, modelSizeB, quantization);
+  const usingHistoricalEstimate = Boolean(input.historicalSecondsPerCall);
+  const estimatedSecondsPerCall =
+    input.historicalSecondsPerCall || estimateSecondsPerCall(targetTokensPerCall, modelSizeB, quantization);
   const estimatedTotalSeconds = Math.ceil(estimatedSecondsPerCall * expectedCalls);
   const unitStrategy = pickUnitStrategy(input, targetTokensPerCall);
 
@@ -68,7 +76,9 @@ export function estimateAiCallPlan(input: {
       `usableContextTokens = rawUsableContext * speedBias = ${usableContextTokens}`,
       `targetTokensPerCall = usableContextTokens * taskShare(${input.task}) = ${targetTokensPerCall}`,
       `expectedCalls = ceil(estimatedInputTokens / targetTokensPerCall) = ${expectedCalls}`,
-      `estimatedSecondsPerCall = local throughput estimate(${modelSizeB || "unknown"}B, ${quantization || "unknown"}) = ${estimatedSecondsPerCall}`,
+      usingHistoricalEstimate
+        ? `estimatedSecondsPerCall = real median from past completed runs of this task = ${estimatedSecondsPerCall}`
+        : `estimatedSecondsPerCall = local throughput estimate(${modelSizeB || "unknown"}B, ${quantization || "unknown"}) = ${estimatedSecondsPerCall} (no history yet for this task)`,
       `estimatedTotalSeconds = estimatedSecondsPerCall * expectedCalls = ${estimatedTotalSeconds}`,
     ].join("\n"),
   } satisfies AiCallPlan;

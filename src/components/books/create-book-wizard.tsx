@@ -20,6 +20,7 @@ import {
 } from "@mantine/core";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { GenerationProgressAlert } from "@/components/ai/generation-progress-alert";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { DIALOG_DENSITY_LABELS, DIALOG_DENSITY_LEVELS, type DialogDensity } from "@/lib/dialogue-density";
 import { estimateWordsForPages } from "@/lib/manuscript/page-estimate";
@@ -103,8 +104,26 @@ const TONE_OPTIONS = [
   "Devotional",
 ];
 
-export function CreateBookWizard() {
+type ExistingCreationProject = {
+  id: string;
+  workingTitle: string;
+  idea: string;
+  genre: string | null;
+  audience: string | null;
+  language: string | null;
+  targetPages: number;
+  tone: string;
+  boundaries: string;
+  mode: CreationMode;
+  dialogDensity: string;
+  updatedAt: string;
+  concept: ConceptPass | null;
+  architecture: ChapterArchitecture | null;
+};
+
+export function CreateBookWizard({ existingProject }: { existingProject?: ExistingCreationProject | null }) {
   const router = useRouter();
+  const [resumeChoice, setResumeChoice] = useState<"pending" | "resolved">(existingProject ? "pending" : "resolved");
   const [workingTitle, setWorkingTitle] = useState("");
   const [idea, setIdea] = useState("");
   const [genre, setGenre] = useState<string | null>("Literary nonfiction");
@@ -129,6 +148,42 @@ export function CreateBookWizard() {
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [statusColor, setStatusColor] = useState<"blue" | "teal" | "yellow" | "red">("blue");
+
+  function resumeExistingProject() {
+    if (!existingProject) return;
+    setCreationProjectId(existingProject.id);
+    setWorkingTitle(existingProject.workingTitle);
+    setIdea(existingProject.idea);
+    if (existingProject.genre) setGenre(existingProject.genre);
+    if (existingProject.audience) setAudience(existingProject.audience);
+    if (existingProject.language) setLanguage(existingProject.language);
+    setTargetPages(existingProject.targetPages);
+    setTone(existingProject.tone);
+    setBoundaries(existingProject.boundaries);
+    setMode(existingProject.mode);
+    if (existingProject.dialogDensity) setDialogDensity(existingProject.dialogDensity as DialogDensity);
+    if (existingProject.concept) {
+      setConcept(existingProject.concept);
+      setConceptSavedAt(existingProject.updatedAt);
+    }
+    if (existingProject.architecture) setArchitecture(existingProject.architecture);
+    setResumeChoice("resolved");
+  }
+
+  // A single blocking LLM call (concept: ~10-30s, architecture: can run
+  // 60-90s+ for a full book) with only a static "this can take a bit"
+  // message is easy to mistake for a hang. Each trigger button below renders
+  // its own GenerationProgressAlert right next to itself (not a shared alert
+  // scrolled away elsewhere), since the page has three separate action
+  // groups (generate concept / accept concept / accept architecture) spread
+  // across different Paper sections.
+  const activeStep: "concept" | "architecture" | "accepting" | null = conceptLoading
+    ? "concept"
+    : architectureLoading
+      ? "architecture"
+      : acceptingArchitecture
+        ? "accepting"
+        : null;
 
   const runModelPreflight = useCallback(async () => {
     setLoading(true);
@@ -166,7 +221,7 @@ export function CreateBookWizard() {
     setArchitectureLoading(true);
     setError("");
     setStatusColor("blue");
-    setStatusMessage("Generating chapter architecture... This can take a bit.");
+    setStatusMessage("Generating chapter architecture... This can take 60-90 seconds for a full book.");
     try {
       const result = await fetchJson<{ content?: { architecture?: ChapterArchitecture } }>(
         "/api/creation/architecture",
@@ -348,6 +403,35 @@ export function CreateBookWizard() {
         ? "concept"
         : "intake";
   const stageProgress = getCreationStageProgress(currentStage);
+
+  if (resumeChoice === "pending" && existingProject) {
+    const hasArchitecture = Boolean(existingProject.architecture);
+    const hasConcept = Boolean(existingProject.concept);
+    return (
+      <Paper withBorder radius="md" p="xl" bg="#fffdf8">
+        <Stack>
+          <Title order={3}>Resume in-progress book?</Title>
+          <Text c="dimmed" size="sm">
+            You have an unfinished project, <strong>{existingProject.workingTitle || "Untitled"}</strong>, last updated{" "}
+            {new Date(existingProject.updatedAt).toLocaleString()}.
+            {hasArchitecture
+              ? " It already has a generated chapter architecture ready to review and accept -- no need to regenerate anything."
+              : hasConcept
+                ? " It already has a generated concept pass ready to review."
+                : " It has your intake details saved, but no concept has been generated yet."}
+          </Text>
+          <Group>
+            <Button color="teal" onClick={resumeExistingProject}>
+              Resume &quot;{existingProject.workingTitle || "Untitled"}&quot;
+            </Button>
+            <Button variant="light" color="gray" onClick={() => setResumeChoice("resolved")}>
+              Start a new book instead
+            </Button>
+          </Group>
+        </Stack>
+      </Paper>
+    );
+  }
 
   return (
     <Stack>
@@ -584,6 +668,13 @@ export function CreateBookWizard() {
               Back to Dashboard
             </Button>
           </Group>
+          <GenerationProgressAlert
+            active={activeStep === "concept"}
+            message="Generating concept pass..."
+            detail="typically takes 10-30 seconds"
+            estimatedSeconds={20}
+            color="grape"
+          />
         </Stack>
       </Paper>
 
@@ -636,6 +727,13 @@ export function CreateBookWizard() {
                 Regenerate Concept
               </Button>
             </Group>
+            <GenerationProgressAlert
+              active={activeStep === "architecture"}
+              message="Generating chapter architecture..."
+              detail="a full book's architecture typically takes 60-90 seconds"
+              estimatedSeconds={75}
+              color="teal"
+            />
           </Stack>
         </Paper>
       )}
@@ -716,6 +814,13 @@ export function CreateBookWizard() {
                 Regenerate Architecture
               </Button>
             </Group>
+            <GenerationProgressAlert
+              active={activeStep === "accepting"}
+              message="Accepting architecture and creating your book..."
+              detail="typically takes a few seconds"
+              estimatedSeconds={8}
+              color="teal"
+            />
           </Stack>
         </Paper>
       )}

@@ -11,6 +11,7 @@ import { BookConceptPanel } from "@/components/books/book-concept-panel";
 import { ArchitectureRoadmapPanel } from "@/components/books/architecture-roadmap-panel";
 import { getBookCriticReports } from "@/lib/books/book-data";
 import { getBookAuthorDisplay } from "@/lib/books/status";
+import { detectAndHealStaleJobs } from "@/lib/ai/job-state";
 import { computeCriticProgress } from "@/lib/critic/progress";
 import { getRewriteReadiness } from "@/lib/rewrite/readiness";
 import type { RewriteWorkflowRow } from "@/lib/rewrite/workflows";
@@ -159,6 +160,24 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // The stale-job heal sweep (detectAndHealStaleJobs) only ran when someone
+  // happened to poll /api/books/[bookId]/jobs -- e.g. the Studio page's live
+  // job panel. A job whose server-side process died (a killed dev server, a
+  // dropped connection) sat at status="running" with a dead heartbeat
+  // indefinitely if nobody reopened that specific panel. The Book Hub is the
+  // page everyone actually lands on, so run the same sweep here too.
+  if (user) {
+    const { data: activeJobs } = await supabase
+      .from("revision_jobs")
+      .select("id,mode,status,settings,created_at")
+      .eq("book_id", bookId)
+      .in("status", ["running", "queued"]);
+    if (activeJobs?.length) {
+      await detectAndHealStaleJobs(supabase, user.id, activeJobs);
+    }
+  }
+
   const { data: userSettings } = user
     ? await supabase.from("user_settings").select("onboarding_completed_steps").eq("user_id", user.id).maybeSingle()
     : { data: null };

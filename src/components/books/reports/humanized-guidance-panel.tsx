@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Alert, Badge, Button, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { useRouter } from "next/navigation";
+import { GenerationProgressAlert } from "@/components/ai/generation-progress-alert";
 import { fetchJson } from "@/lib/http/fetch-json";
 
 type Report = {
@@ -60,6 +61,13 @@ export function HumanizedGuidancePanel({ bookId, reports }: { bookId: string; re
           </Group>
         </Group>
         {error && <Alert color="red">{error}</Alert>}
+        <GenerationProgressAlert
+          active={loading}
+          message="Generating humanized guidance..."
+          detail="typically takes 20-40 seconds"
+          estimatedSeconds={30}
+          color="grape"
+        />
         {!content ? (
           <Text c="dimmed">No humanized guidance yet. Run this after Critic or drift reports exist.</Text>
         ) : (

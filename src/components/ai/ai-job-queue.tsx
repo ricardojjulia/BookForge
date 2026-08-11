@@ -331,6 +331,43 @@ function QueueField({ label, value }: { label: string; value: string | number })
   );
 }
 
+/**
+ * A one-line progress readout for a specific task, meant to render right
+ * next to the button that started it. `AiJobQueue` above shows full detail
+ * but is normally placed in a separate panel further down the page, which
+ * makes long-running work look stalled to anyone who doesn't scroll down.
+ */
+export function AiJobQueueInlineStatus({ job, visible }: { job: AiJobQueueState; visible: boolean }) {
+  if (!visible || job.status === "idle") return null;
+
+  const progress = job.totalUnits ? Math.round((job.completedUnits / job.totalUnits) * 100) : 0;
+
+  return (
+    <Paper withBorder radius="md" p="sm" bg="#f8f4ff">
+      <Group justify="space-between" mb={4}>
+        <Text size="sm" fw={600}>
+          {job.status === "running"
+            ? `Working: ${job.currentUnit || job.currentTask}`
+            : job.status === "paused"
+              ? "Paused"
+              : job.status === "complete"
+                ? "Done"
+                : "Stopped"}
+        </Text>
+        <Badge color={statusColor(job.status)} size="sm">{job.status}</Badge>
+      </Group>
+      <Progress value={progress} animated={job.status === "running"} color="grape" size="sm" />
+      <Text size="xs" c="dimmed" mt={4}>
+        {formatDuration(job.elapsedSeconds || 0)} elapsed
+        {job.status === "running" && job.estimatedSecondsRemaining != null
+          ? ` -- about ${formatDuration(job.estimatedSecondsRemaining)} left`
+          : ""}
+        {" -- "}{job.completedUnits}/{job.totalUnits} done
+      </Text>
+    </Paper>
+  );
+}
+
 function statusColor(status: AiJobQueueState["status"]) {
   if (status === "running") return "green";
   if (status === "paused") return "yellow";
