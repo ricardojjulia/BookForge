@@ -252,6 +252,11 @@ export function BookActions({
               return {
                 ...current,
                 currentTask: progress?.taskName || current.currentTask,
+                // Keep the stable mode key regardless of whether the server
+                // sent a taskName this tick -- code like onRetryFailed below
+                // matches on this, never on the human-readable currentTask
+                // label (which the server and client don't always agree on).
+                mode: matchedMode || current.mode,
                 currentUnit: progress?.currentUnit || current.currentUnit,
                 totalUnits,
                 completedUnits,
@@ -294,6 +299,7 @@ export function BookActions({
     const completedUnits = Math.min(totalUnits, (progress?.successful || 0) + (progress?.failed || 0));
     return {
       currentTask: progress?.taskName || job.mode,
+      mode: job.mode,
       currentUnit: progress?.currentUnit || "",
       totalUnits,
       completedUnits,
@@ -568,6 +574,15 @@ export function BookActions({
     void openPreflight(task);
   }
 
+  function modeForApiPath(path: string): string | undefined {
+    if (path.endsWith("/generate-draft")) return "creation_draft_generation";
+    if (path.endsWith("/chapters/summarize")) return "chapter_summaries";
+    if (path.endsWith("/critic/all")) return "bookforge_critic_batch";
+    if (path.endsWith("/critic")) return "bookforge_critic";
+    if (path.endsWith("/analyze")) return "manuscript_blueprint";
+    return undefined;
+  }
+
   async function run(path: string, body: unknown, preflight: AiTaskPreflightData | null) {
     setLoading(path);
     setOutput("");
@@ -577,6 +592,7 @@ export function BookActions({
     const startedAt = Date.now();
     setQueue({
       currentTask: taskName,
+      mode: modeForApiPath(path),
       currentUnit: unitLabel(totalUnits),
       totalUnits,
       completedUnits: 0,
@@ -842,6 +858,7 @@ export function BookActions({
     setOutput("");
     setQueue({
       currentTask: "Generate Planned Draft",
+      mode: "creation_draft_generation",
       currentUnit: `Queued ${totalUnits} planned chapter(s)`,
       totalUnits,
       completedUnits: 0,
@@ -959,6 +976,7 @@ export function BookActions({
     setOutput("");
     setQueue({
       currentTask: "Generate Chapter Summaries",
+      mode: "chapter_summaries",
       currentUnit: `Queued ${totalUnits} chapter summary call(s)`,
       totalUnits,
       completedUnits: 0,
@@ -1068,6 +1086,7 @@ export function BookActions({
     setOutput("");
     setQueue({
       currentTask: "Generate Manuscript Blueprint",
+      mode: "manuscript_blueprint",
       currentUnit: `Queued ${totalUnits} blueprint chunk(s)`,
       totalUnits,
       completedUnits: 0,
@@ -1179,6 +1198,7 @@ export function BookActions({
     setOutput("");
     setQueue({
       currentTask: "Run all BookForge Critic lenses",
+      mode: "bookforge_critic_batch",
       currentUnit: `Queued ${totalUnits} Critic lens call(s)`,
       totalUnits,
       completedUnits: 0,
@@ -1559,19 +1579,26 @@ export function BookActions({
           onResume={() => setQueue((current) => ({ ...current, status: "running" }))}
           onCancel={() => setQueue((current) => ({ ...current, status: "cancelled" }))}
           onRetryFailed={() => {
-            if (queue.currentTask === "Generate Planned Draft") {
+            // Match on the stable mode key, never the human-readable
+            // currentTask label -- the server's real progress.taskName and
+            // the client's button label don't always agree (e.g. server
+            // says "Creation Draft Generation", the button says "Generate
+            // Planned Draft"), which silently broke Retry Failed for
+            // exactly that task once real server progress started
+            // overwriting currentTask here.
+            if (queue.mode === "creation_draft_generation") {
               void runQueuedGenerateDraft(null);
               return;
             }
-            if (queue.currentTask === "Generate Chapter Summaries") {
+            if (queue.mode === "chapter_summaries") {
               void runQueuedChapterSummaries(null);
               return;
             }
-            if (queue.currentTask === "Generate Manuscript Blueprint") {
+            if (queue.mode === "manuscript_blueprint") {
               void runQueuedBlueprint(null);
               return;
             }
-            if (queue.currentTask === "Run all BookForge Critic lenses") {
+            if (queue.mode === "bookforge_critic_batch") {
               void runQueuedCriticAll(null, { stage: "baseline" });
               return;
             }

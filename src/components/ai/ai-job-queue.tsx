@@ -5,6 +5,15 @@ import { motion } from "framer-motion";
 
 export type AiJobQueueState = {
   currentTask: string;
+  // Stable machine key (the revision_jobs `mode` value, e.g.
+  // "creation_draft_generation") for matching this task programmatically --
+  // `currentTask` is a human-readable label that can come from either the
+  // client's own preflight data or the server's real progress.taskName, and
+  // those two strings don't always agree (found live: the server calls it
+  // "Creation Draft Generation", the button says "Generate Planned Draft"),
+  // so code that needs to know WHICH task this is (e.g. Retry Failed) must
+  // never match against currentTask.
+  mode?: string;
   currentUnit: string;
   totalUnits: number;
   completedUnits: number;
