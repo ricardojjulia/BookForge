@@ -291,7 +291,9 @@ export async function createManagedChatCompletion(
       const { outcome, signature } = classifyLmStudioError(error);
       void recordModelCallEvent(telemetryContext.supabase, {
         userId: telemetryContext.userId,
-        model: telemetryContext.model,
+        // No response came back to read the real model from -- the best
+        // available signal is what this attempt actually requested.
+        model: params.model || telemetryContext.model,
         task: telemetryContext.task,
         contextLength: prepared.runtimeLimits.configuredContextTokens,
         outcome,
@@ -333,7 +335,13 @@ function recordCompletionOutcome(
   const result = validateOutcome ? validateOutcome(content) : defaultValidateOutcome(content);
   void recordModelCallEvent(telemetryContext.supabase, {
     userId: telemetryContext.userId,
-    model: telemetryContext.model,
+    // telemetryContext.model is captured once at model-selection time and
+    // never updated -- a per-call `model` override (e.g. a retry falling
+    // back to a different model after an empty completion) was previously
+    // always attributed to the ORIGINAL model regardless of which one
+    // actually served the request. completion.model is the API response's
+    // own record of what really ran; prefer it.
+    model: completion.model || telemetryContext.model,
     task: telemetryContext.task,
     contextLength: prepared.runtimeLimits.configuredContextTokens,
     outcome: result.outcome,
