@@ -446,7 +446,7 @@ export function CreateBookWizard({ existingProject }: { existingProject?: Existi
           <Progress value={stageProgress} color={stageProgress >= 100 ? "teal" : "blue"} />
           <SimpleGrid cols={{ base: 2, md: 4 }} spacing="xs">
             {CREATION_STAGES.map((stage) => {
-              const complete = getCreationStageProgress(stage.id) <= stageProgress;
+              const complete = getCreationStageProgress(stage.id) < stageProgress;
               const active = stage.id === currentStage;
               return (
                 <Paper
@@ -496,7 +496,7 @@ export function CreateBookWizard({ existingProject }: { existingProject?: Existi
           <SimpleGrid cols={{ base: 1, md: 2 }}>
             <TextInput
               label="Working title"
-              placeholder="Lo que pudo haber sido"
+              placeholder={language === "Spanish" ? "El título va aquí" : "Insert title here"}
               value={workingTitle}
               onChange={(event) => setWorkingTitle(event.currentTarget.value)}
             />
