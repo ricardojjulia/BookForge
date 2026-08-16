@@ -129,6 +129,14 @@ function isChapterStartLine(line: string, lines: string[], index: number) {
   const beforeColon = line.slice(0, line.indexOf(":"));
   if (/[.!?…]\s+\S/.test(beforeColon)) return false;
 
+  // A real "Aphorism: elaboration" chapter heading sits on its own
+  // paragraph. Without this, a hard-wrapped source line that happens to be
+  // short and contain a colon -- common when an author's own prose uses the
+  // same "label: elaboration" construction mid-paragraph -- gets mistaken
+  // for a heading, because the next wrapped line of that same sentence
+  // reads as plausible "chapter body" to followingBodyWordCount below.
+  if (lines[index + 1]?.trim()) return false;
+
   if (followingBodyWordCount(lines, index) < 35) return false;
 
   const previousBody = lines

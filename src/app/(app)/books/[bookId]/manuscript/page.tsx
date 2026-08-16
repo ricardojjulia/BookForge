@@ -29,7 +29,7 @@ export default async function ManuscriptPage({ params }: { params: Promise<{ boo
       .order("chapter_number"),
     supabase
       .from("paragraphs")
-      .select("id,chapter_id,scene_id,paragraph_number,original_text,is_locked")
+      .select("id,chapter_id,scene_id,paragraph_number,original_text,accepted_text,is_locked")
       .eq("book_id", bookId)
       .order("paragraph_number"),
     supabase

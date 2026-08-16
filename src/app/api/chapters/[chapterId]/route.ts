@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { criticLenses } from "@/lib/critic/prompts";
+import { renumberChapters } from "@/lib/manuscript/renumber-chapters";
 import { createClient } from "@/lib/supabase/server";
 
 const schema = z.object({
@@ -63,21 +64,7 @@ export async function DELETE(_: Request, context: { params: Promise<{ chapterId:
     const { error: deleteError } = await supabase.from("chapters").delete().eq("id", chapterId);
     if (deleteError) throw deleteError;
 
-    const now = new Date().toISOString();
-    const { data: remaining, error: remainingError } = await supabase
-      .from("chapters")
-      .select("id")
-      .eq("book_id", chapter.book_id)
-      .order("chapter_number");
-    if (remainingError) throw remainingError;
-
-    for (const [index, item] of (remaining || []).entries()) {
-      const { error } = await supabase
-        .from("chapters")
-        .update({ chapter_number: index + 1, updated_at: now })
-        .eq("id", item.id);
-      if (error) throw error;
-    }
+    await renumberChapters(supabase, chapter.book_id);
 
     return NextResponse.json({ content: { deleted: true, chapterId } });
   } catch (error) {

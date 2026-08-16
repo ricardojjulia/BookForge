@@ -20,11 +20,23 @@ import { applyRewritePlanDefaults } from "@/lib/rewrite/plan-defaults";
 import { buildRewritePlanPrompt } from "@/lib/rewrite/plan-prompt";
 import { createClient } from "@/lib/supabase/server";
 
+const CRITIC_LENS_VALUES = [
+  "story_structure",
+  "prose_quality",
+  "continuity",
+  "character_depth",
+  "market_fit",
+  "contemporary_view",
+  "revision_priorities",
+  "dialogue_density",
+] as const;
+
 const schema = z.object({
   jobId: z.string().uuid().optional(),
   serverManaged: z.boolean().optional(),
   metadataSnapshotId: z.string().uuid().optional(),
   metadataBranchName: z.string().min(1).max(80).optional(),
+  focusLenses: z.array(z.enum(CRITIC_LENS_VALUES)).min(1).max(CRITIC_LENS_VALUES.length).optional(),
 });
 
 function getErrorMessage(error: unknown) {
@@ -99,6 +111,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           settings: {
             unit: "rewrite_plan",
             metadataSelectionSource,
+            focusLenses: body.focusLenses || null,
             progress: buildJobProgress({
               taskName: "Generate Rewrite Architect plan",
               currentUnit: status === "queued" ? "Queued" : "Preparing rewrite plan context",
@@ -203,9 +216,14 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           .from("coherence_reports")
           .select("report_type,created_at,content")
           .eq("book_id", bookId)
-          .like("report_type", "critic:%")
+          // Include post-rewrite reports too, not just baseline ones -- a
+          // Critic run after a rewrite is the freshest signal available for
+          // planning the *next* rewrite, and skipping it here made every
+          // rewrite plan permanently seeded from whatever baseline existed
+          // before the book was ever touched.
+          .or("report_type.like.critic:%,report_type.like.critic_post:%")
           .order("created_at", { ascending: false })
-          .limit(30),
+          .limit(60),
         supabase.from("scenes").select("id", { count: "exact", head: true }).eq("book_id", bookId),
         supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId),
       ]);
@@ -254,6 +272,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         rewriteModelSelection,
         chapters: chapters || [],
         criticReports: reports || [],
+        focusLenses: body.focusLenses,
         promptCharBudget: preparedModel.runtimeLimits.promptCharBudget,
       });
 
@@ -290,6 +309,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             unitStrategy: "summaries",
           },
           sourceCriticReports: reports?.length || 0,
+          focusLenses: body.focusLenses || null,
           rewriteModelSelection,
           plannerModelSelection: modelSelection,
           lmStudioRuntimeLimits: preparedModel.runtimeLimits,

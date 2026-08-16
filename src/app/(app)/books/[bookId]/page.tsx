@@ -5,6 +5,7 @@ import { VoiceCapturePanel } from "@/components/books/voice-capture-panel";
 import { DeleteBookButton } from "@/components/books/delete-book-button";
 import { LiveProcessBanner } from "@/components/books/jobs/live-process-banner";
 import { CriticScoreboard } from "@/components/books/reports/critic-scoreboard";
+import { FocusedRewritePanel } from "@/components/books/rewrite/focused-rewrite-panel";
 import { getBookCommandCenter, WorkflowCommandCenter } from "@/components/books/workflow-command-center";
 import { BookPipelineWizard } from "@/components/onboarding/book-pipeline-wizard";
 import { BookConceptPanel } from "@/components/books/book-concept-panel";
@@ -296,6 +297,8 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
       />
 
       <CriticScoreboard reports={reports || []} />
+
+      <FocusedRewritePanel bookId={bookId} />
 
       {rewriteWorkflow && rewriteWorkflow.mode !== "chooser" && (
         <Paper withBorder radius="md" p="lg" bg="#f8f0ff" mb="xl">

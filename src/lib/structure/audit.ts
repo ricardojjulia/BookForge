@@ -15,6 +15,7 @@ export type StructureAuditParagraph = {
   chapter_id: string;
   paragraph_number: number;
   original_text: string;
+  accepted_text?: string | null;
 };
 
 export type StructureIssue = {
@@ -24,6 +25,12 @@ export type StructureIssue = {
   description: string;
   chapterId?: string;
   chapterNumber?: number;
+  // True when no amount of "Expand this chapter" (which only lengthens
+  // existing paragraphs' text) can ever clear this issue, because the
+  // trigger is paragraph count, not word count -- rewriting the same N
+  // paragraphs longer still leaves N paragraphs. Merging is the only repair
+  // action that actually changes paragraph count today.
+  blockedByParagraphCount?: boolean;
 };
 
 export function auditBookStructure(chapters: StructureAuditChapter[], paragraphs: StructureAuditParagraph[]) {
@@ -49,7 +56,13 @@ export function auditBookStructure(chapters: StructureAuditChapter[], paragraphs
     }
 
     const chapterParagraphs = paragraphsByChapter[chapter.id] || [];
-    const wordCount = chapterParagraphs.reduce((sum, paragraph) => sum + countWords(paragraph.original_text), 0);
+    // Word count must reflect the current text, not the pre-rewrite import
+    // — otherwise a chapter that's just been expanded/shortened keeps
+    // showing its old evaluation forever, since original_text never changes.
+    const wordCount = chapterParagraphs.reduce(
+      (sum, paragraph) => sum + countWords(paragraph.accepted_text || paragraph.original_text),
+      0,
+    );
     const titleLooksLikeMatter = looksLikeFrontMatter(chapter.title);
 
     const isPlannedCreationShell =
@@ -69,13 +82,17 @@ export function auditBookStructure(chapters: StructureAuditChapter[], paragraphs
         chapterNumber: chapter.chapter_number,
       });
     } else if (chapterParagraphs.length === 0 || wordCount < 20) {
+      const blockedByParagraphCount = chapterParagraphs.length === 0;
       issues.push({
         id: `empty-${chapter.id}`,
         severity: "high",
         title: "Empty or title-only chapter",
-        description: "This chapter has very little body text and may be front matter, a duplicate heading, or a parsing artifact.",
+        description: blockedByParagraphCount
+          ? "This chapter has no paragraphs at all, so there is nothing for Expand to lengthen. Generate a draft (if planned) or merge it into a neighboring chapter."
+          : "This chapter has very little body text and may be front matter, a duplicate heading, or a parsing artifact.",
         chapterId: chapter.id,
         chapterNumber: chapter.chapter_number,
+        blockedByParagraphCount,
       });
     } else if (titleLooksLikeMatter && chapter.section_type === "body") {
       issues.push({
@@ -87,13 +104,17 @@ export function auditBookStructure(chapters: StructureAuditChapter[], paragraphs
         chapterNumber: chapter.chapter_number,
       });
     } else if (chapterParagraphs.length <= 2 || wordCount < 120) {
+      const blockedByParagraphCount = chapterParagraphs.length <= 2;
       issues.push({
         id: `short-${chapter.id}`,
         severity: "medium",
         title: "Very short chapter",
-        description: "This chapter is unusually short. Check whether it should be merged with a neighboring chapter.",
+        description: blockedByParagraphCount
+          ? `Only ${chapterParagraphs.length} paragraph(s) here -- lengthening their text with Expand can't change that count. Merge with a neighboring chapter to actually resolve this.`
+          : "This chapter is unusually short on words. Expand this chapter to lengthen its existing paragraphs, or merge it with a neighboring chapter.",
         chapterId: chapter.id,
         chapterNumber: chapter.chapter_number,
+        blockedByParagraphCount,
       });
     }
 

@@ -12,11 +12,16 @@ type RewritePlanPromptInput = {
   rewriteModelSelection?: unknown;
   chapters: Array<{ chapter_number: number; title: string | null; summary: string | null }>;
   criticReports: Array<{ report_type: string; created_at: string; content: Record<string, unknown> | null }>;
+  focusLenses?: CriticLens[];
   promptCharBudget?: number;
 };
 
 export function buildRewritePlanPrompt(input: RewritePlanPromptInput) {
-  const latestCritics = getLatestCritics(input.criticReports);
+  const allLatestCritics = getLatestCritics(input.criticReports);
+  const focusLenses = input.focusLenses?.length ? input.focusLenses : null;
+  const latestCritics = focusLenses
+    ? allLatestCritics.filter((critic) => focusLenses.includes(critic.lens as CriticLens))
+    : allLatestCritics;
   const budget = splitPromptBudget(input.promptCharBudget || 32000);
 
   return `You are BookForge Rewrite Architect.
@@ -36,7 +41,15 @@ ${input.targetAudience || "Not specified"}
 
 DIALOGUE DENSITY:
 ${describeDialogueDensity(input.dialogDensity)}
-
+${
+  focusLenses
+    ? `
+FOCUS CRITICS FOR THIS REWRITE:
+${focusLenses.map((lens) => criticLenses[lens].label).join(", ")}
+Prioritize fixes tied to these lenses above everything else. Only touch other aspects of the prose when necessary to preserve coherence.
+`
+    : ""
+}
 MANUSCRIPT BLUEPRINT:
 ${compactJson(input.manuscriptBlueprint || {}, budget.blueprint)}
 
@@ -162,14 +175,21 @@ Rules:
 - If a rewrite would improve prose but damage coherence, the plan must reject that rewrite and preserve coherence.
 - Add validation checkpoints after each phase and before the final manuscript build.
 - Include a final phase that reruns all BookForge Critic lenses after the rewrite.
-- The user remains in control: revisions must be saved as versions and accepted/rejected by the author.`;
+- The user remains in control: revisions must be saved as versions and accepted/rejected by the author.${
+    focusLenses
+      ? `\n- This rewrite cycle is scoped to the focus critics listed above -- do not chase improvements unrelated to those lenses.`
+      : ""
+  }`;
 }
 
 function getLatestCritics(reports: RewritePlanPromptInput["criticReports"]) {
   const map = new Map<CriticLens, Record<string, unknown>>();
 
   for (const report of reports) {
-    const lens = report.report_type.replace(/^critic:/, "") as CriticLens;
+    // Reports arrive newest-first, and a post-rewrite report is just as
+    // valid a "latest state" signal as a baseline one -- stripping either
+    // prefix lets the freshest report of either type win per lens below.
+    const lens = report.report_type.replace(/^critic(?:_post)?:/, "") as CriticLens;
     if (!(lens in criticLenses) || map.has(lens)) continue;
     const content = report.content || {};
     map.set(lens, {

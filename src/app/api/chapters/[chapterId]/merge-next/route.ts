@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { renumberChapters } from "@/lib/manuscript/renumber-chapters";
 import { createClient } from "@/lib/supabase/server";
 
 type ChapterRow = {
@@ -128,20 +129,7 @@ export async function PATCH(_: Request, context: { params: Promise<{ chapterId: 
     const { error: deleteNextError } = await supabase.from("chapters").delete().eq("id", next.id);
     if (deleteNextError) throw deleteNextError;
 
-    const { data: remainingChapters, error: remainingError } = await supabase
-      .from("chapters")
-      .select("id")
-      .eq("book_id", current.book_id)
-      .order("chapter_number");
-    if (remainingError) throw remainingError;
-
-    for (const [index, item] of (remainingChapters || []).entries()) {
-      const { error } = await supabase
-        .from("chapters")
-        .update({ chapter_number: index + 1, updated_at: now })
-        .eq("id", item.id);
-      if (error) throw error;
-    }
+    await renumberChapters(supabase, current.book_id);
 
     return NextResponse.json({ content: { merged: true, chapterId: current.id } });
   } catch (error) {
