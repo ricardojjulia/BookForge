@@ -115,6 +115,12 @@ export async function runCriticLens(input: {
   stage?: CriticStage;
   preloadedContext?: CriticRunContext;
   modelExecution?: CriticModelExecution;
+  /**
+   * Only meaningful when stage is "post_rewrite". Also saves this same
+   * evaluation as a critic:{lens} baseline row so it seeds the *next*
+   * rewrite plan instead of being a dead end (see plan-prompt.ts).
+   */
+  alsoRefreshBaseline?: boolean;
 }) {
   const stage = input.stage || "baseline";
   const context =
@@ -209,6 +215,15 @@ export async function runCriticLens(input: {
     content,
   });
   if (reportError) throw reportError;
+
+  if (stage === "post_rewrite" && input.alsoRefreshBaseline) {
+    const { error: baselineError } = await input.supabase.from("coherence_reports").insert({
+      book_id: input.bookId,
+      report_type: `critic:${input.lens}`,
+      content,
+    });
+    if (baselineError) throw baselineError;
+  }
 
   return content;
 }

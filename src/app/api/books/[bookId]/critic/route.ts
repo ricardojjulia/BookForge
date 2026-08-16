@@ -26,6 +26,7 @@ const schema = z.object({
     ])
     .default("revision_priorities"),
   stage: z.enum(["baseline", "post_rewrite"]).default("baseline"),
+  refreshBaseline: z.boolean().optional(),
   jobId: z.string().uuid().optional(),
   serverManaged: z.boolean().optional(),
 });
@@ -43,7 +44,7 @@ function getErrorMessage(error: unknown) {
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
   try {
     const { bookId } = await context.params;
-    const { lens, stage, jobId: requestedJobId, serverManaged } = schema.parse(await readJsonBody(request));
+    const { lens, stage, refreshBaseline, jobId: requestedJobId, serverManaged } = schema.parse(await readJsonBody(request));
     const supabase = await createClient();
     const {
       data: { user },
@@ -183,7 +184,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     let content;
     try {
-      content = await runCriticLens({ supabase, bookId, userId: user.id, lens, stage });
+      content = await runCriticLens({ supabase, bookId, userId: user.id, lens, stage, alsoRefreshBaseline: refreshBaseline });
     } catch (criticError) {
       const message = getErrorMessage(criticError);
       await supabase

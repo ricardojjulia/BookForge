@@ -22,6 +22,12 @@ const lensDescriptions: Record<CriticLens, string> = {
   dialogue_density: "Dialogue density vs. author's setting",
 };
 
+// Reports newer than this render as "just updated" -- a colored border plus
+// a relative-time badge instead of the plain date -- so a critic re-run
+// (e.g. Focused Rewrite's Re-evaluate stage) is noticeable here even after
+// its own completion message has scrolled away or been dismissed.
+const RECENT_THRESHOLD_MS = 15 * 60 * 1000;
+
 export function CriticScoreboard({ reports }: { reports: CriticReport[] }) {
   // `reports` here is often the book's raw, unfiltered coherence_reports
   // feed (rewrite_execution, rewrite_plan, drift checks, etc. included) --
@@ -29,6 +35,7 @@ export function CriticScoreboard({ reports }: { reports: CriticReport[] }) {
   // number larger than the 8 possible lenses could ever produce.
   const criticReports = reports.filter((report) => isCriticReportType(report.report_type));
   const latestByLens = getLatestReportByLens(criticReports);
+  const now = Date.now();
 
   return (
     <Paper withBorder radius="md" p="xl" bg="white">
@@ -48,9 +55,18 @@ export function CriticScoreboard({ reports }: { reports: CriticReport[] }) {
           const score = extractCriticScore(report?.content);
           const analyzed = Boolean(report);
           const scored = typeof score === "number";
+          const ageMs = report ? now - Date.parse(report.created_at) : Infinity;
+          const isRecent = ageMs < RECENT_THRESHOLD_MS;
 
           return (
-            <Paper key={lens} withBorder radius="md" p="md" bg="#fbfaf8">
+            <Paper
+              key={lens}
+              withBorder
+              radius="md"
+              p="md"
+              bg="#fbfaf8"
+              style={isRecent ? { borderColor: "var(--mantine-color-grape-5)", borderWidth: 2 } : undefined}
+            >
               <Group wrap="nowrap" align="center">
                 <RingProgress
                   size={92}
@@ -79,7 +95,12 @@ export function CriticScoreboard({ reports }: { reports: CriticReport[] }) {
                     <Badge size="sm" color={scored ? scoreColor(score) : analyzed ? "grape" : "gray"} variant="light">
                       {scored ? "Evaluated" : analyzed ? "Analyzed, no score" : "Not analyzed yet"}
                     </Badge>
-                    {report && (
+                    {report && isRecent && (
+                      <Badge size="sm" color="grape" variant="filled">
+                        Updated {formatRecency(ageMs)}
+                      </Badge>
+                    )}
+                    {report && !isRecent && (
                       <Text size="xs" c="dimmed">
                         {new Date(report.created_at).toLocaleDateString()}
                       </Text>
@@ -109,6 +130,12 @@ function getLatestReportByLens(reports: CriticReport[]) {
 
 function getLensFromReportType(reportType: string) {
   return reportType.replace(/^critic_post:/, "").replace(/^critic:/, "") as CriticLens;
+}
+
+function formatRecency(ageMs: number) {
+  const minutes = Math.floor(ageMs / 60_000);
+  if (minutes < 1) return "just now";
+  return `${minutes}m ago`;
 }
 
 function scoreColor(score: number) {

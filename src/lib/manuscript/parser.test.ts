@@ -25,6 +25,30 @@ describe("isChapterStartLine (via parseManuscript)", () => {
     expect(result.chapters).toHaveLength(1);
   });
 
+  it("does not treat a hard-wrapped 'label: elaboration' sentence as a chapter heading", () => {
+    // Regression coverage for a real imported book where the author's own
+    // prose style uses short "label: elaboration" aphorisms mid-paragraph
+    // (e.g. "seductive narrative: that marriage is a destination..."), and
+    // the source file's hard line-wraps happened to break right after the
+    // colon's opening clause -- with no sentence-ending punctuation before
+    // the colon, the earlier "complete sentence before the colon" guard
+    // doesn't catch it. The giveaway is that a real heading is followed by
+    // a blank line; this wrapped sentence continues on the very next line.
+    const filler = Array.from({ length: 40 }, (_, i) => `Body sentence number ${i} continues the scene.`).join(" ");
+    const text = [
+      `${filler}`,
+      "",
+      "seductive narrative: that marriage is a destination. We believe that once the vows are",
+      "spoken, the rings find their home on our fingers, and the ink dries on the license.",
+      "",
+      `${filler}`,
+    ].join("\n");
+
+    const result = parseManuscript(text, "Test Book");
+
+    expect(result.chapters).toHaveLength(1);
+  });
+
   it("still detects a genuine standalone heading with a colon", () => {
     const filler = Array.from({ length: 40 }, (_, i) => `Body sentence number ${i} continues the scene.`).join(" ");
     const text = [

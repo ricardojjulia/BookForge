@@ -9,7 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { CriticLens } from "@/lib/types";
 
 const schema = z.object({
-  stage: z.enum(["baseline", "post_rewrite"]).default("post_rewrite"),
+  stage: z.enum(["baseline", "post_rewrite"]).default("baseline"),
   jobId: z.string().uuid().optional(),
   serverManaged: z.boolean().optional(),
   metadataSnapshotId: z.string().uuid().optional(),

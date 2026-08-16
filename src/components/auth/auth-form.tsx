@@ -40,9 +40,9 @@ export function AuthForm() {
   return (
     <Paper withBorder radius="md" p="xl" maw={460} w="100%">
       <Stack>
-        <Title order={2}>{mode === "signin" ? "Login" : "Create account"}</Title>
+        <Title order={2}>{mode === "signin" ? "Welcome to BookForge" : "Create account"}</Title>
         <Text c="dimmed">
-          Your manuscript is stored in Supabase. AI revision runs locally through LM Studio.
+          Your manuscript stays private, and AI revision can run entirely on your own machine.
         </Text>
         {error && <Alert color="red">{error}</Alert>}
         <TextInput label="Email" value={email} onChange={(event) => setEmail(event.currentTarget.value)} />

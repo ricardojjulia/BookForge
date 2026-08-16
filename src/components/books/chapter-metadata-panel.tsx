@@ -5,11 +5,43 @@ import { Alert, Badge, Button, Checkbox, Group, Modal, Paper, Select, Stack, Tex
 import { useDisclosure } from "@mantine/hooks";
 import { useRouter } from "next/navigation";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { RewritePlanActions } from "@/components/books/rewrite/rewrite-plan-actions";
+import { runServerManagedJob } from "@/lib/rewrite/run-server-managed-job";
 import { auditBookStructure, type StructureAuditChapter, type StructureAuditParagraph } from "@/lib/structure/audit";
 
 type ChapterMetadata = StructureAuditChapter & {
   summary?: string | null;
 };
+
+// Which single action is in flight, if any. Scoped per-action rather than
+// one shared boolean so running Expand doesn't visually freeze every other
+// button in this modal (including Save) for its whole duration.
+type ActiveAction = "delete" | "draft" | "expand" | "shorten" | "merge" | "save" | null;
+
+// rewrite-execute only ever creates pending revision_versions drafts -- it
+// never writes paragraphs.accepted_text itself (that's a deliberate separate
+// step elsewhere, e.g. the reviewable Revisions page). Expand/Shorten here
+// have no review step of their own, so without this the chapter's rewrite
+// silently never reaches the manuscript no matter how many times you click.
+async function acceptChapterRevisions(bookId: string, chapterId: string) {
+  const result = await fetchJson<{ content?: { accepted?: number } }>(
+    `/api/books/${bookId}/revisions/accept-all`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chapterId }),
+    },
+    "Apply chapter rewrite",
+  );
+  return result.content?.accepted || 0;
+}
+
+function describeJobProgress(job: { progress: { currentUnit?: string | null; totalUnits?: number; attempted?: number } | null }) {
+  const totalUnits = job.progress?.totalUnits || 0;
+  const attempted = job.progress?.attempted || 0;
+  const currentUnit = job.progress?.currentUnit || "Working";
+  return totalUnits > 1 ? `${currentUnit} (${attempted}/${totalUnits})` : currentUnit;
+}
 
 export function ChapterMetadataPanel({
   bookId,
@@ -23,24 +55,29 @@ export function ChapterMetadataPanel({
   const router = useRouter();
   const [opened, { open, close }] = useDisclosure(false);
   const [selectedId, setSelectedId] = useState(chapters[0]?.id || "");
-  const [loading, setLoading] = useState(false);
+  const [activeAction, setActiveAction] = useState<ActiveAction>(null);
+  const [progressText, setProgressText] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmMerge, setConfirmMerge] = useState(false);
   const [repairsApplied, setRepairsApplied] = useState<string[]>([]);
+  const loading = activeAction !== null;
   const issues = useMemo(() => auditBookStructure(chapters, paragraphs), [chapters, paragraphs]);
   const sortedChapters = useMemo(() => [...chapters].sort((a, b) => a.chapter_number - b.chapter_number), [chapters]);
   const selected = chapters.find((chapter) => chapter.id === selectedId) || chapters[0] || null;
   const selectedIssues = selected ? issues.filter((issue) => issue.chapterId === selected.id) : [];
   const hasIssueType = (prefix: string) => selectedIssues.some((issue) => issue.id.startsWith(prefix));
+  const expandBlockedByParagraphCount = selectedIssues.some(
+    (issue) => (issue.id.startsWith("short-") || issue.id.startsWith("empty-")) && issue.blockedByParagraphCount,
+  );
   const nextChapter = selected
     ? sortedChapters.find((chapter) => chapter.chapter_number > selected.chapter_number) || null
     : null;
 
   async function deleteChapter() {
     if (!selected) return;
-    setLoading(true);
+    setActiveAction("delete");
     setMessage("");
     setError("");
     try {
@@ -52,13 +89,13 @@ export function ChapterMetadataPanel({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to delete chapter.");
     } finally {
-      setLoading(false);
+      setActiveAction(null);
     }
   }
 
   async function generateChapterDraft() {
     if (!selected) return;
-    setLoading(true);
+    setActiveAction("draft");
     setMessage("");
     setError("");
     try {
@@ -81,86 +118,90 @@ export function ChapterMetadataPanel({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to generate this chapter.");
     } finally {
-      setLoading(false);
+      setActiveAction(null);
     }
   }
 
   async function expandChapter() {
     if (!selected) return;
-    setLoading(true);
+    setActiveAction("expand");
+    setProgressText("Queuing chapter rewrite...");
     setMessage("");
     setError("");
     try {
-      const result = await fetchJson<{ content?: { rewritten?: number; attempted?: number; skipped?: number } }>(
+      const job = await runServerManagedJob(
+        bookId,
         `/api/books/${bookId}/rewrite-execute`,
         {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            chapterId: selected.id,
-            strategyId: "creative_enhancement",
-            rewriteExistingDrafts: true,
-            rewriteAccepted: true,
-            forceTinyParagraphs: true,
-          }),
+          chapterId: selected.id,
+          strategyId: "creative_enhancement",
+          rewriteExistingDrafts: true,
+          rewriteAccepted: true,
+          forceTinyParagraphs: true,
         },
         "Expand chapter",
+        (row) => setProgressText(describeJobProgress(row)),
       );
-      const rewritten = result.content?.rewritten || 0;
+      const rewritten = job.progress?.successful || 0;
       if (rewritten > 0) {
-        setRepairsApplied((prev) => [...prev, `Expanded Chapter ${selected.chapter_number} (${rewritten} paragraph(s) rewritten)`]);
+        setProgressText("Applying rewritten paragraphs...");
+        const applied = await acceptChapterRevisions(bookId, selected.id);
+        setRepairsApplied((prev) => [...prev, `Expanded Chapter ${selected.chapter_number} (${applied} paragraph(s) rewritten and applied)`]);
       } else {
         setError(
-          `No paragraphs were rewritten (${result.content?.attempted || 0} attempted, ${result.content?.skipped || 0} skipped). This chapter may have no eligible paragraphs, or generate a Rewrite Architect plan first.`,
+          `No paragraphs were rewritten (${job.progress?.attempted || 0} attempted, ${job.progress?.skipped || 0} skipped). This chapter may have no eligible paragraphs, or generate a Rewrite Architect plan first.`,
         );
       }
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to expand this chapter.");
     } finally {
-      setLoading(false);
+      setActiveAction(null);
+      setProgressText("");
     }
   }
 
   async function shortenChapter() {
     if (!selected) return;
-    setLoading(true);
+    setActiveAction("shorten");
+    setProgressText("Queuing chapter rewrite...");
     setMessage("");
     setError("");
     try {
-      const result = await fetchJson<{ content?: { rewritten?: number; attempted?: number; skipped?: number } }>(
+      const job = await runServerManagedJob(
+        bookId,
         `/api/books/${bookId}/rewrite-execute`,
         {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            chapterId: selected.id,
-            strategyId: "downsize_abridge",
-            rewriteExistingDrafts: true,
-            rewriteAccepted: true,
-          }),
+          chapterId: selected.id,
+          strategyId: "downsize_abridge",
+          rewriteExistingDrafts: true,
+          rewriteAccepted: true,
         },
         "Shorten chapter",
+        (row) => setProgressText(describeJobProgress(row)),
       );
-      const rewritten = result.content?.rewritten || 0;
+      const rewritten = job.progress?.successful || 0;
       if (rewritten > 0) {
-        setRepairsApplied((prev) => [...prev, `Shortened Chapter ${selected.chapter_number} (${rewritten} paragraph(s) rewritten)`]);
+        setProgressText("Applying rewritten paragraphs...");
+        const applied = await acceptChapterRevisions(bookId, selected.id);
+        setRepairsApplied((prev) => [...prev, `Shortened Chapter ${selected.chapter_number} (${applied} paragraph(s) rewritten and applied)`]);
       } else {
         setError(
-          `No paragraphs were rewritten (${result.content?.attempted || 0} attempted, ${result.content?.skipped || 0} skipped). This chapter may have no eligible paragraphs, or generate a Rewrite Architect plan first.`,
+          `No paragraphs were rewritten (${job.progress?.attempted || 0} attempted, ${job.progress?.skipped || 0} skipped). This chapter may have no eligible paragraphs, or generate a Rewrite Architect plan first.`,
         );
       }
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to shorten this chapter.");
     } finally {
-      setLoading(false);
+      setActiveAction(null);
+      setProgressText("");
     }
   }
 
   async function mergeChapter() {
     if (!selected) return;
-    setLoading(true);
+    setActiveAction("merge");
     setMessage("");
     setError("");
     try {
@@ -174,13 +215,13 @@ export function ChapterMetadataPanel({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to merge this chapter.");
     } finally {
-      setLoading(false);
+      setActiveAction(null);
     }
   }
 
   async function saveChapter(formData: FormData) {
     if (!selected) return;
-    setLoading(true);
+    setActiveAction("save");
     setMessage("");
     setError("");
     try {
@@ -213,7 +254,7 @@ export function ChapterMetadataPanel({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to save chapter metadata.");
     } finally {
-      setLoading(false);
+      setActiveAction(null);
     }
   }
 
@@ -275,9 +316,14 @@ export function ChapterMetadataPanel({
                 </Text>
               ) : (
                 selectedIssues.map((issue) => (
-                  <Text key={issue.id} size="sm">
-                    {issue.title}
-                  </Text>
+                  <div key={issue.id}>
+                    <Text size="sm" fw={700}>
+                      {issue.title}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      {issue.description}
+                    </Text>
+                  </div>
                 ))
               )}
             </Paper>
@@ -290,17 +336,38 @@ export function ChapterMetadataPanel({
               </Text>
               <Group gap="xs">
                 {hasIssueType("planned-") && (
-                  <Button size="xs" color="teal" variant="light" loading={loading} onClick={generateChapterDraft}>
+                  <Button
+                    size="xs"
+                    color="teal"
+                    variant="light"
+                    loading={activeAction === "draft"}
+                    disabled={loading && activeAction !== "draft"}
+                    onClick={generateChapterDraft}
+                  >
                     Generate chapter draft
                   </Button>
                 )}
-                {(hasIssueType("short-") || hasIssueType("empty-")) && (
-                  <Button size="xs" color="teal" variant="light" loading={loading} onClick={expandChapter}>
+                {(hasIssueType("short-") || hasIssueType("empty-")) && !expandBlockedByParagraphCount && (
+                  <Button
+                    size="xs"
+                    color="teal"
+                    variant="light"
+                    loading={activeAction === "expand"}
+                    disabled={loading && activeAction !== "expand"}
+                    onClick={expandChapter}
+                  >
                     Expand this chapter
                   </Button>
                 )}
                 {hasIssueType("long-") && (
-                  <Button size="xs" color="teal" variant="light" loading={loading} onClick={shortenChapter}>
+                  <Button
+                    size="xs"
+                    color="teal"
+                    variant="light"
+                    loading={activeAction === "shorten"}
+                    disabled={loading && activeAction !== "shorten"}
+                    onClick={shortenChapter}
+                  >
                     Shorten this chapter
                   </Button>
                 )}
@@ -311,7 +378,7 @@ export function ChapterMetadataPanel({
                       <Text size="sm" c="red" fw={700}>
                         Merge into &quot;{nextChapter.title || `Chapter ${nextChapter.chapter_number}`}&quot;? This chapter&apos;s text will be combined and it will no longer exist on its own.
                       </Text>
-                      <Button size="xs" color="red" loading={loading} onClick={mergeChapter}>
+                      <Button size="xs" color="red" loading={activeAction === "merge"} disabled={loading && activeAction !== "merge"} onClick={mergeChapter}>
                         Yes, merge
                       </Button>
                       <Button size="xs" variant="subtle" color="dark" onClick={() => setConfirmMerge(false)}>
@@ -324,9 +391,29 @@ export function ChapterMetadataPanel({
                     </Button>
                   ))}
               </Group>
-              <Text size="xs" c="dimmed" mt={6}>
-                Expand/shorten use the saved Rewrite Architect plan and run as a real rewrite pass — they need a plan generated first.
-              </Text>
+              {(activeAction === "expand" || activeAction === "shorten") && progressText && (
+                <Text size="xs" c="teal" fw={600} mt={6}>
+                  {progressText}
+                </Text>
+              )}
+              {expandBlockedByParagraphCount ? (
+                <Text size="xs" c="orange" fw={600} mt={6}>
+                  This chapter has too few paragraphs for Expand to fix — lengthening existing text can&apos;t add paragraphs. Merge is the only
+                  repair action available for this issue.
+                </Text>
+              ) : (
+                <>
+                  <Text size="xs" c="dimmed" mt={6}>
+                    Expand/shorten use the saved Rewrite Architect plan and run as a real rewrite pass — they need a plan generated first.
+                  </Text>
+                  <Paper withBorder radius="sm" p="sm" mt="xs" bg="white">
+                    <Text size="xs" fw={700} mb={4}>
+                      No plan yet, or it&apos;s stale? Generate one here, then retry Expand/Shorten above.
+                    </Text>
+                    <RewritePlanActions bookId={bookId} />
+                  </Paper>
+                </>
+              )}
               {repairsApplied.length > 0 && (
                 <Stack gap={2} mt="sm">
                   <Text size="sm" fw={700} c="teal">
@@ -381,7 +468,7 @@ export function ChapterMetadataPanel({
                       <Text size="sm" c="red" fw={700}>
                         Permanently delete this chapter?
                       </Text>
-                      <Button size="xs" color="red" loading={loading} onClick={deleteChapter}>
+                      <Button size="xs" color="red" loading={activeAction === "delete"} disabled={loading && activeAction !== "delete"} onClick={deleteChapter}>
                         Yes, delete
                       </Button>
                       <Button size="xs" variant="subtle" color="dark" onClick={() => setConfirmDelete(false)}>
@@ -399,9 +486,16 @@ export function ChapterMetadataPanel({
                       Delete chapter
                     </Button>
                   )}
-                  <Button color="grape" loading={loading} type="submit">
-                    {repairsApplied.length > 0 ? "Save & Apply Repairs" : "Save Chapter Metadata"}
-                  </Button>
+                  <Stack gap={2} align="flex-end">
+                    <Button color="grape" loading={activeAction === "save"} disabled={loading && activeAction !== "save"} type="submit">
+                      {repairsApplied.length > 0 ? "Save & Apply Repairs" : "Save Chapter Metadata"}
+                    </Button>
+                    <Text size="xs" c="dimmed" ta="right" maw={260}>
+                      {repairsApplied.length > 0
+                        ? "Repairs above already ran — this saves title/notes and clears stale scores so you know to rerun them."
+                        : "Saves title, section type, and notes only — it does not rewrite chapter text."}
+                    </Text>
+                  </Stack>
                 </Group>
               </Stack>
             </form>
