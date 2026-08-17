@@ -26,9 +26,11 @@ function getErrorMessage(error: unknown) {
 }
 
 export async function POST(request: Request) {
+  const supabase = await createClient();
+  let projectId: string | null = null;
+
   try {
     const body = schema.parse(await request.json());
-    const supabase = await createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -41,6 +43,7 @@ export async function POST(request: Request) {
       .eq("owner_id", user.id)
       .single();
     if (projectError) throw projectError;
+    projectId = project.id;
 
     await supabase
       .from("creation_plan_versions")
@@ -59,6 +62,13 @@ export async function POST(request: Request) {
       .select("id,created_at")
       .single();
     if (conceptError) throw conceptError;
+
+    // Mark the project "generating" before the LLM call (which can run
+    // 30s-2min+ for a full architecture) rather than leaving status at
+    // whatever it already was until success -- otherwise a dropped
+    // connection or failed completion left no durable signal an attempt was
+    // even in flight, let alone that it failed (see the catch block below).
+    await supabase.from("creation_projects").update({ status: "generating", updated_at: new Date().toISOString() }).eq("id", project.id);
 
     const targetPages = Number(project.target_pages || 120);
     const estimatedWords = estimateWordsForPages(targetPages);
@@ -160,6 +170,17 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    if (projectId) {
+      const { data: currentProject } = await supabase.from("creation_projects").select("metadata").eq("id", projectId).maybeSingle();
+      await supabase
+        .from("creation_projects")
+        .update({
+          status: "failed",
+          metadata: { ...((currentProject?.metadata as Record<string, unknown>) || {}), lastError: getErrorMessage(error) },
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", projectId);
+    }
     console.error("Creation architecture failed", error);
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }

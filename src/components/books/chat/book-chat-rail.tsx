@@ -40,6 +40,18 @@ type ThreadListPayload = {
 
 type ProposalType = "update_metadata" | "create_revision_draft";
 type ProposalApplyStatus = "applied" | "replayed";
+
+// Server responses aren't guaranteed to carry a message id this component
+// hasn't already appended -- apply's idempotent-replay path in particular
+// can legitimately return the SAME toolMessage id twice (a double-click, or
+// a slow request that's still in flight when the guard state resets), and a
+// blind spread would render two <Paper key={message.id}> siblings sharing a
+// key. Append-by-id keeps this list safe regardless of which caller races.
+function appendMessagesById(current: ChatMessage[], incoming: ChatMessage[]) {
+  const existingIds = new Set(current.map((message) => message.id));
+  const deduped = incoming.filter((message) => !existingIds.has(message.id));
+  return [...current, ...deduped];
+}
 const CHAT_SETUP_DOCS_URL = "https://github.com/ricardojjulia/BookForge/blob/main/supabase/migrations/202607270001_chat_workspace.sql";
 
 export function BookChatRail({ bookId }: { bookId: string }) {
@@ -192,7 +204,7 @@ export function BookChatRail({ bookId }: { bookId: string }) {
 
       setMessages((current) => {
         const withoutOptimistic = current.filter((item) => item.id !== optimisticId);
-        return [...withoutOptimistic, response.userMessage, response.assistantMessage];
+        return appendMessagesById(withoutOptimistic, [response.userMessage, response.assistantMessage]);
       });
 
       const refreshed = await fetchJson<{ threads: ChatThread[] }>(`/api/books/${bookId}/chat/threads`, undefined, "Refresh chat threads");
@@ -229,7 +241,7 @@ export function BookChatRail({ bookId }: { bookId: string }) {
         "Run chat workflow tool",
       );
 
-      setMessages((current) => [...current, response.userMessage, response.assistantMessage]);
+      setMessages((current) => appendMessagesById(current, [response.userMessage, response.assistantMessage]));
 
       const refreshed = await fetchJson<{ threads: ChatThread[] }>(`/api/books/${bookId}/chat/threads`, undefined, "Refresh chat threads");
       setThreads(refreshed.threads || []);
@@ -258,7 +270,7 @@ export function BookChatRail({ bookId }: { bookId: string }) {
         "Apply proposal",
       );
 
-      setMessages((current) => [...current, response.toolMessage]);
+      setMessages((current) => appendMessagesById(current, [response.toolMessage]));
       setProposalApplyStatus((current) => ({
         ...current,
         [proposalId]: response.idempotent ? "replayed" : "applied",
@@ -349,12 +361,18 @@ export function BookChatRail({ bookId }: { bookId: string }) {
               <Group justify="flex-end" mt="sm">
                 <Button
                   size="xs"
-                  color="teal"
+                  color={applyStatus ? "gray" : "teal"}
+                  variant={applyStatus ? "light" : "filled"}
                   loading={applyingProposalId === String(proposal.id || "")}
-                  disabled={!proposal.id || (proposalType === "update_metadata" && !rows.length) || (proposalType === "create_revision_draft" && !draftRows.length)}
+                  disabled={
+                    Boolean(applyStatus) ||
+                    !proposal.id ||
+                    (proposalType === "update_metadata" && !rows.length) ||
+                    (proposalType === "create_revision_draft" && !draftRows.length)
+                  }
                   onClick={() => applyProposal(message.id, proposalId, proposalType)}
                 >
-                  Apply
+                  {applyStatus ? "Applied" : "Apply"}
                 </Button>
               </Group>
             </Paper>

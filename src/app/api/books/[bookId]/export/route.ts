@@ -212,44 +212,63 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           }),
         },
       })
-      .select("id")
+      .select("id,metadata")
       .single();
     if (exportError) throw exportError;
 
-    const storagePath = `${user.id}/${bookId}/${exportRow.id}.${file.extension}`;
-    const { error: uploadError } = await supabase.storage.from("exports").upload(storagePath, file.body, {
-      contentType: file.contentType,
-      upsert: true,
-    });
-    if (uploadError) throw uploadError;
+    // Once this row exists, every subsequent failure must mark it "failed"
+    // with a reason rather than let it sit at "pending" forever -- the
+    // outer catch below only logs and returns a response to this request;
+    // it never touches a row already created here, so a client disconnect
+    // or an upload/update failure previously left no durable signal that
+    // the export never actually finished.
+    try {
+      const storagePath = `${user.id}/${bookId}/${exportRow.id}.${file.extension}`;
+      const { error: uploadError } = await supabase.storage.from("exports").upload(storagePath, file.body, {
+        contentType: file.contentType,
+        upsert: true,
+      });
+      if (uploadError) throw uploadError;
 
-    const { error: updateError } = await supabase
-      .from("exports")
-      .update({
-        storage_path: storagePath,
-        status: "completed",
-        completed_at: new Date().toISOString(),
-      })
-      .eq("id", exportRow.id);
-    if (updateError) throw updateError;
+      const { error: updateError } = await supabase
+        .from("exports")
+        .update({
+          storage_path: storagePath,
+          status: "completed",
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", exportRow.id);
+      if (updateError) throw updateError;
 
-    await markBookExported(supabase, bookId);
+      await markBookExported(supabase, bookId);
 
-    const { data: signedUrl } = await supabase.storage.from("exports").createSignedUrl(storagePath, 60 * 10);
+      const { data: signedUrl } = await supabase.storage.from("exports").createSignedUrl(storagePath, 60 * 10);
 
-    return NextResponse.json({
-      content: {
-        exportId: exportRow.id,
-        format: options.format,
-        storagePath,
-        signedUrl: signedUrl?.signedUrl || null,
-        sourceMode: options.sourceMode,
-        paragraphCount: exportParagraphs.length,
-        abridgedMode: options.abridgedMode,
-        approvedCutCount: approvedCuts?.count || 0,
-        chapterCount: exportChapters.length,
-      },
-    });
+      return NextResponse.json({
+        content: {
+          exportId: exportRow.id,
+          format: options.format,
+          storagePath,
+          signedUrl: signedUrl?.signedUrl || null,
+          sourceMode: options.sourceMode,
+          paragraphCount: exportParagraphs.length,
+          abridgedMode: options.abridgedMode,
+          approvedCutCount: approvedCuts?.count || 0,
+          chapterCount: exportChapters.length,
+        },
+      });
+    } catch (finalizeError) {
+      const message = getErrorMessage(finalizeError);
+      await supabase
+        .from("exports")
+        .update({
+          status: "failed",
+          completed_at: new Date().toISOString(),
+          metadata: { ...(exportRow as { metadata?: Record<string, unknown> }).metadata, error: message },
+        })
+        .eq("id", exportRow.id);
+      throw finalizeError;
+    }
   } catch (error) {
     console.error("Final manuscript export failed", error);
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });

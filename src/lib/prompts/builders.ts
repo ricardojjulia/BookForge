@@ -1,3 +1,4 @@
+import { describeDialogueDensity } from "@/lib/dialogue-density";
 import type { RewriteStrategy } from "@/lib/rewrite/strategies";
 
 export function buildBookBiblePrompt(text: string, options?: { maxSampleChars?: number }) {
@@ -79,6 +80,7 @@ export function buildFullBookRewriteUnitPrompt(input: {
   rewriteStrategy?: RewriteStrategy | null;
   authorInstructions?: string | null;
   voiceProfile?: unknown;
+  dialogDensity?: string | null;
   paragraphNumber: number;
   text: string;
 }) {
@@ -103,6 +105,10 @@ ${input.rewriteStrategy ? formatRewriteStrategy(input.rewriteStrategy) : "Use th
 
 AUTHOR STRATEGY INSTRUCTIONS:
 ${input.authorInstructions || "No extra author instructions for this run."}
+
+DIALOGUE DENSITY TARGET:
+${describeDialogueDensity(input.dialogDensity)}
+If this paragraph's content naturally supports it (a scene with interacting characters, not pure narration/description/internal reflection), nudge its dialogue-to-narration balance toward this target. Never force dialogue into a paragraph where it would feel unnatural or damage coherence.
 
 CURRENT CHAPTER:
 ${input.chapterTitle}
@@ -147,6 +153,7 @@ Rules:
 - Preserve the author's language when the manuscript is not in English.
 - Improve prose, clarity, rhythm, emotional force, and specificity only when it does not damage coherence.
 - Follow the selected rewrite strategy and its limits for expansion, voice preservation, readability, literary intensity, contemporary-view emphasis, and continuity strictness.
+- Where natural for this paragraph's content, move its dialogue-to-narration balance toward the DIALOGUE DENSITY TARGET above; do not force it where it doesn't fit.
 - Treat the required context packet as binding. Preserve accepted prior revisions, locked passages, continuity facts, Critic priorities, and chapter directives.
 - If a packet field is marked unavailable, do not invent it. Preserve the original text and flag uncertainty in continuityWarnings.
 - If improving the paragraph would require changing a fact or continuity, preserve the original and put the concern in continuityWarnings.

@@ -70,6 +70,14 @@ export function HumanizedGuidancePanel({ bookId, reports }: { bookId: string; re
         />
         {!content ? (
           <Text c="dimmed">No humanized guidance yet. Run this after Critic or drift reports exist.</Text>
+        ) : content.status === "generating" ? (
+          <Alert color="grape" title="Still generating">
+            A humanize guidance run is in progress (started elsewhere, or this page was reloaded mid-run). Refresh in a bit to check on it.
+          </Alert>
+        ) : content.status === "failed" ? (
+          <Alert color="red" title="Last attempt failed">
+            {stringValue(content.error) || "The last humanize guidance run failed. Try again."}
+          </Alert>
         ) : (
           <Stack>
             {stringValue(content.headline) && <Title order={3}>{stringValue(content.headline)}</Title>}

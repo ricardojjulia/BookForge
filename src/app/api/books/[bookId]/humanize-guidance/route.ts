@@ -21,13 +21,31 @@ function getErrorMessage(error: unknown) {
 }
 
 export async function POST(_: Request, context: { params: Promise<{ bookId: string }> }) {
+  const supabase = await createClient();
+  let placeholderReportId: string | null = null;
+  let bookId: string | null = null;
+
   try {
-    const { bookId } = await context.params;
-    const supabase = await createClient();
+    ({ bookId } = await context.params);
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
+    // Insert a durable placeholder before the LLM call (30s+) rather than
+    // only writing a row on success -- previously a dropped connection or a
+    // failed completion left nothing behind at all, and the panel's "latest
+    // humanized_guidance report" would silently keep showing stale content
+    // from whatever the last successful run was, with no sign a new attempt
+    // was ever made. Finalized or marked failed in place below, so the panel
+    // always reflects the most recent attempt, not just the last success.
+    const { data: placeholder, error: placeholderError } = await supabase
+      .from("coherence_reports")
+      .insert({ book_id: bookId, report_type: "humanized_guidance", content: { status: "generating" } })
+      .select("id")
+      .single();
+    if (placeholderError) throw placeholderError;
+    placeholderReportId = placeholder.id;
 
     const { data: reports, error: reportsError } = await supabase
       .from("coherence_reports")
@@ -110,15 +128,26 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
       },
     };
 
-    const { error: insertError } = await supabase.from("coherence_reports").insert({
-      book_id: bookId,
-      report_type: "humanized_guidance",
-      content,
-    });
+    // coherence_reports has no UPDATE policy under RLS (INSERT/SELECT/DELETE
+    // only) -- confirmed live: an .update() against the placeholder row
+    // above returns success with zero rows actually changed, no error
+    // surfaced. This table's established convention everywhere else in the
+    // app is insert-new-row-and-read-latest, never mutate in place, so
+    // finalize the same way: a fresh row that supersedes the placeholder as
+    // the newest "humanized_guidance" report (reports are always read
+    // ordered by created_at desc), leaving the placeholder as inert history.
+    const { error: insertError } = await supabase.from("coherence_reports").insert({ book_id: bookId, report_type: "humanized_guidance", content });
     if (insertError) throw insertError;
 
     return NextResponse.json({ content });
   } catch (error) {
+    if (placeholderReportId && bookId) {
+      await supabase.from("coherence_reports").insert({
+        book_id: bookId,
+        report_type: "humanized_guidance",
+        content: { status: "failed", error: getErrorMessage(error) },
+      });
+    }
     console.error("Humanize guidance failed", error);
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
