@@ -569,7 +569,16 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           includeFrontMatter: true,
           includeBackMatter: true,
         }));
-        exportId = (result.exportId as string | undefined) || (result.export as { id?: string } | undefined)?.id || exportId;
+        // /export isn't in supportsServerManagedHandoff's list, so callStage
+        // returns its raw response body as-is -- {content: {exportId, ...}}
+        // -- not a queue-stage's {jobId, ...} shape. Reading result.exportId
+        // /result.export directly (neither exists on this response) always
+        // fell through to the previous exportId, silently leaving the job's
+        // export_id null even when the export genuinely succeeded -- found
+        // live: a real completed export existed in the exports table with
+        // no auto_review_jobs row ever pointing at it.
+        const exportContent = result.content as { exportId?: string } | undefined;
+        exportId = exportContent?.exportId || exportId;
         await addStage(stage, "Export completed.", { exportId });
       } else if (stage === "mark_finished") {
         await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/mark-finished`, { exportId }));
