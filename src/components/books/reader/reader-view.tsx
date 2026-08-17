@@ -2,11 +2,22 @@
 
 import { useEffect, useState } from "react";
 import { ActionIcon, Badge, Button, Group, Paper, Stack, Text, Textarea, Title, Tooltip } from "@mantine/core";
-import { IconCheck, IconMessage, IconArrowsExchange } from "@tabler/icons-react";
+import { IconCheck, IconMessage, IconArrowsExchange, IconPencil } from "@tabler/icons-react";
+import { notifications } from "@mantine/notifications";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { versionFromDate } from "@/lib/creativewriter-ui/dashboard";
+import { createClient } from "@/lib/supabase/client";
 
 type Chapter = { id: string; chapter_number: number; title: string | null };
-type Paragraph = { id: string; chapter_id: string; paragraph_number: number; original_text: string | null; accepted_text: string | null };
+type Paragraph = {
+  id: string;
+  chapter_id: string;
+  paragraph_number: number;
+  original_text: string | null;
+  accepted_text: string | null;
+  current_text: string | null;
+  updated_at: string | null;
+};
 type Annotation = { id: string; paragraph_id: string | null; note: string; resolved: boolean; created_at: string };
 
 type Props = {
@@ -29,6 +40,8 @@ export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, in
   const [posting, setPosting] = useState<string | null>(null);
   const [comparing, setComparing] = useState<Record<string, boolean>>({});
   const [reverting, setReverting] = useState<string | null>(null);
+  const [editDrafts, setEditDrafts] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<string | null>(null);
 
   // Imperative (not React state) because scrollIntoView is already
   // imperative here, and the highlight is a transient visual effect on the
@@ -54,6 +67,70 @@ export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, in
       setComparing((prev) => { const next = { ...prev }; delete next[paragraphId]; return next; });
     } finally {
       setReverting(null);
+    }
+  }
+
+  async function saveEdit(paragraphId: string) {
+    const paragraph = paragraphs.find((p) => p.id === paragraphId);
+    const draftText = editDrafts[paragraphId];
+    if (!paragraph || draftText === undefined) return;
+    setSaving(paragraphId);
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        notifications.show({ color: "red", title: "Save failed", message: "Authentication required." });
+        return;
+      }
+      const baseVersion = versionFromDate(paragraph.updated_at);
+      const idSuffix = `${paragraphId}-${Date.now()}`;
+      const result = await fetchJson<{
+        content?: { conflicts?: unknown[] };
+        error?: string;
+      }>("/api/creativewriter/sync/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project: {
+            localProjectId: `cloud-${bookId}`,
+            accountId: user.id,
+            bookforgeBookId: bookId,
+            linkedAt: new Date().toISOString(),
+          },
+          changes: [
+            {
+              id: `reader-edit-${idSuffix}`,
+              projectId: `cloud-${bookId}`,
+              entityType: "paragraph",
+              entityId: paragraphId,
+              operation: "update",
+              payload: { currentText: draftText },
+              baseVersion,
+              localVersion: baseVersion + 1,
+              idempotencyKey: `reader-edit-${idSuffix}`,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        }),
+      }, "Save paragraph edit");
+
+      if (result.content?.conflicts?.length) {
+        notifications.show({
+          color: "yellow",
+          title: "Cloud changed first",
+          message: "This paragraph changed elsewhere since you started editing. Refresh to see the latest version.",
+        });
+        return;
+      }
+
+      const now = new Date().toISOString();
+      setParagraphs((prev) => prev.map((p) => (p.id === paragraphId ? { ...p, current_text: draftText, updated_at: now } : p)));
+      setEditDrafts((prev) => { const next = { ...prev }; delete next[paragraphId]; return next; });
+      notifications.show({ color: "green", title: "Saved", message: "Paragraph updated." });
+    } catch (error) {
+      notifications.show({ color: "red", title: "Save failed", message: error instanceof Error ? error.message : "Unable to save edit." });
+    } finally {
+      setSaving(null);
     }
   }
 
@@ -102,9 +179,10 @@ export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, in
             Chapter {chapter.chapter_number}{chapter.title ? `: ${chapter.title}` : ""}
           </Title>
           {(paragraphsByChapter[chapter.id] || []).map((para) => {
-            const text = para.accepted_text || para.original_text || "";
+            const text = para.current_text || para.accepted_text || para.original_text || "";
             const paraAnnotations = byParagraph[para.id] || [];
             const isAnnotating = para.id in drafts;
+            const isEditing = para.id in editDrafts;
             const hasAlternateVersion = Boolean(para.accepted_text && para.accepted_text !== para.original_text);
             const isComparing = Boolean(comparing[para.id]);
             return (
@@ -116,7 +194,33 @@ export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, in
                 style={{ borderRadius: 6, transition: "background-color 0.4s ease" }}
               >
                 <Group align="flex-start" wrap="nowrap" gap="xs">
-                  <Text style={{ flex: 1, lineHeight: 1.8 }}>{text}</Text>
+                  {isEditing ? (
+                    <Textarea
+                      style={{ flex: 1 }}
+                      value={editDrafts[para.id]}
+                      onChange={(e) => {
+                        const value = e.currentTarget.value;
+                        setEditDrafts((prev) => ({ ...prev, [para.id]: value }));
+                      }}
+                      autosize
+                      minRows={2}
+                      autoFocus
+                    />
+                  ) : (
+                    <Text style={{ flex: 1, lineHeight: 1.8 }}>{text}</Text>
+                  )}
+                  {!isEditing && (
+                    <Tooltip label="Edit this paragraph" withArrow>
+                      <ActionIcon
+                        size="sm"
+                        variant="subtle"
+                        color="dark"
+                        onClick={() => setEditDrafts((prev) => ({ ...prev, [para.id]: text }))}
+                      >
+                        <IconPencil size={14} />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
                   {hasAlternateVersion && (
                     <Tooltip label={isComparing ? "Hide original" : "This paragraph was rewritten — compare with original"} withArrow>
                       <ActionIcon
@@ -144,6 +248,28 @@ export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, in
                     </ActionIcon>
                   </Tooltip>
                 </Group>
+
+                {isEditing && (
+                  <Group gap="xs">
+                    <Button
+                      size="xs"
+                      color="grape"
+                      loading={saving === para.id}
+                      onClick={() => saveEdit(para.id)}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="subtle"
+                      color="gray"
+                      disabled={saving === para.id}
+                      onClick={() => setEditDrafts((prev) => { const next = { ...prev }; delete next[para.id]; return next; })}
+                    >
+                      Cancel
+                    </Button>
+                  </Group>
+                )}
 
                 {isComparing && hasAlternateVersion && (
                   <Paper withBorder radius="sm" p="sm" bg="#f4faf9">
