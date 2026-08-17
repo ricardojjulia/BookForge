@@ -32,7 +32,7 @@ export default async function ReaderPage({
   const [{ data: book }, { data: chapters }, { data: paragraphs }, { data: annotations }] = await Promise.all([
     getBookCore(supabase, bookId),
     supabase.from("chapters").select("id,chapter_number,title").eq("book_id", bookId).order("chapter_number"),
-    supabase.from("paragraphs").select("id,chapter_id,paragraph_number,original_text,accepted_text").eq("book_id", bookId).order("paragraph_number"),
+    supabase.from("paragraphs").select("id,chapter_id,paragraph_number,original_text,accepted_text,current_text,updated_at").eq("book_id", bookId).order("paragraph_number"),
     supabase.from("reader_annotations").select("id,paragraph_id,note,resolved,created_at").eq("book_id", bookId).order("created_at", { ascending: false }),
   ]);
 
