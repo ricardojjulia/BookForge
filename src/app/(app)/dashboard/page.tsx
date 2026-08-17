@@ -77,11 +77,32 @@ export default async function DashboardPage() {
     anthropic: "Anthropic",
     google: "Google Gemini",
   };
-  const aiEngine = hasCloud
-    ? providerLabels[settings?.llm_provider ?? ""] ?? "Cloud provider"
-    : hasLmStudio
+  // execution_mode is the actual source of truth for which engine a call
+  // will use -- llm_api_key_secret_id merely means a cloud key was saved at
+  // some point and is never cleared on switching modes, so checking "does a
+  // cloud key exist" instead of "what mode is active" showed the cloud
+  // provider forever even after the user explicitly switched to local.
+  const cloudLabel = providerLabels[settings?.llm_provider ?? ""] ?? "Cloud provider";
+  const aiEngine =
+    settings?.execution_mode === "local"
       ? "LM Studio"
-      : "Not configured";
+      : settings?.execution_mode === "cloud"
+        ? hasCloud
+          ? cloudLabel
+          : "Not configured"
+        : settings?.execution_mode === "auto"
+          ? hasCloud && hasLmStudio
+            ? `Auto (${cloudLabel} + LM Studio)`
+            : hasCloud
+              ? cloudLabel
+              : hasLmStudio
+                ? "LM Studio"
+                : "Not configured"
+          : hasCloud
+            ? cloudLabel
+            : hasLmStudio
+              ? "LM Studio"
+              : "Not configured";
 
   return (
     <Container size="xl">

@@ -509,6 +509,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         rewriteStrategy,
         authorInstructions: body.authorInstructions,
         voiceProfile: (bible as { voice_profile?: unknown } | null)?.voice_profile,
+        dialogDensity: book?.dialog_density,
         paragraphNumber: paragraph.paragraph_number,
         text: paragraph.original_text,
       });

@@ -36,13 +36,24 @@ function getErrorMessage(error: unknown) {
 }
 
 export async function POST(request: Request) {
+  const supabase = await createClient();
+  let project: Awaited<ReturnType<typeof upsertCreationProject>> | null = null;
+
   try {
     const body = schema.parse(await request.json());
-    const supabase = await createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
+    // Create/update the durable project row BEFORE the LLM call (which can
+    // take 30-90s) rather than after it succeeds -- previously, a dropped
+    // connection or a slow/failed completion mid-call left no record this
+    // generation was ever attempted, since nothing was written until full
+    // success. Now a "generating" row always exists first, and the catch
+    // block below can mark it "failed" with a reason instead of the
+    // attempt just silently vanishing.
+    project = await upsertCreationProject(supabase, user.id, body, "generating");
 
     const estimatedWords = estimateWordsForPages(body.targetPages);
     const expectedChapters = Math.max(6, Math.min(24, Math.round(body.targetPages / 8)));
@@ -105,7 +116,15 @@ export async function POST(request: Request) {
     content.lmStudioWarnings = preparedModel.warnings;
     content.modelSelection = modelSelection;
 
-    const project = await upsertCreationProject(supabase, user.id, body);
+    const { data: finalizedProject, error: finalizeError } = await supabase
+      .from("creation_projects")
+      .update({ status: "concept", updated_at: new Date().toISOString() })
+      .eq("id", project.id)
+      .select("*")
+      .single();
+    if (finalizeError) throw finalizeError;
+    project = finalizedProject;
+
     const { data: version, error: versionError } = await supabase
       .from("creation_plan_versions")
       .insert({
@@ -126,6 +145,16 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    if (project) {
+      await supabase
+        .from("creation_projects")
+        .update({
+          status: "failed",
+          metadata: { ...((project as { metadata?: Record<string, unknown> }).metadata || {}), lastError: getErrorMessage(error) },
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", project.id);
+    }
     console.error("Creation concept failed", error);
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
@@ -135,6 +164,7 @@ async function upsertCreationProject(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
   body: z.infer<typeof schema>,
+  status: "generating" | "concept" = "concept",
 ) {
   const payload = {
     owner_id: userId,
@@ -148,7 +178,7 @@ async function upsertCreationProject(
     boundaries: body.boundaries || null,
     creation_mode: body.creationMode,
     dialog_density: body.dialogDensity,
-    status: "concept",
+    status,
     updated_at: new Date().toISOString(),
   };
 

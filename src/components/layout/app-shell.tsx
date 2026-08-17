@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Anchor, AppShell as MantineAppShell, Button, Group, Text, ThemeIcon } from "@mantine/core";
 import { IconBook2 } from "@tabler/icons-react";
 import { createClient } from "@/lib/supabase/client";
+import { GlobalJobIndicator } from "@/components/layout/global-job-indicator";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -66,6 +67,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Anchor>
             {email ? (
               <Group gap="xs">
+                <GlobalJobIndicator />
                 <Text size="sm" c="dimmed">
                   {email}
                 </Text>

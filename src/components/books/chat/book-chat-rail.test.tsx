@@ -389,7 +389,8 @@ describe("BookChatRail", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Applied")).toBeInTheDocument();
+      expect(screen.getAllByText("Applied")).toHaveLength(2); // status badge + the button itself
+      expect(screen.getByRole("button", { name: "Applied" })).toBeDisabled();
     });
   });
 
