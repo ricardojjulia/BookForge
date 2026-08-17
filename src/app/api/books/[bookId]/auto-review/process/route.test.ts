@@ -177,10 +177,16 @@ describe("POST /api/books/[bookId]/auto-review/process", () => {
     let criticsCheckCalls = 0;
     let queuedJobCounter = 0;
     const criticPostCallsByLens: Record<string, number> = {};
+    let markFinishedPayload: Record<string, unknown> | null = null;
 
     const fetchSpy = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       const payload = init?.body ? JSON.parse(String(init.body)) : {};
+
+      if (url.includes("/mark-finished")) {
+        markFinishedPayload = payload;
+        return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
 
       if (url.includes("/auto-review/critics-check")) {
         criticsCheckCalls += 1;
@@ -204,11 +210,15 @@ describe("POST /api/books/[bookId]/auto-review/process", () => {
       }
 
       if (url.includes("/export")) {
-        return new Response(JSON.stringify({ exportId: "export-1" }), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-
-      if (url.includes("/mark-finished")) {
-        return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+        // Matches the real export route's actual response shape ({content:
+        // {exportId, ...}}) -- the previous top-level {exportId} mock here
+        // let a real bug ship silently: production code read result.exportId
+        // directly, which is undefined against the real route's response,
+        // so exportId was always null end to end even on a fully successful
+        // run. These tests never asserted on the value, only that the call
+        // succeeded, so nothing caught it. See mark-finished payload
+        // assertion below for the actual regression check.
+        return new Response(JSON.stringify({ content: { exportId: "export-1" } }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 
       // rewrite-execute, auto-revision, drift-check: generic queue-then-run handoff.
@@ -241,6 +251,15 @@ describe("POST /api/books/[bookId]/auto-review/process", () => {
     const payload = await response.json();
     expect(response.status, JSON.stringify(payload)).toBe(200);
     expect(payload.ok).toBe(true);
+
+    // Regression check for the real bug found live: mark-finished must
+    // receive the actual exportId the export stage produced, not null --
+    // production code was reading the wrong field off the export response
+    // and silently threading `exportId: null` through, which made
+    // mark-finished revert the book to "draft" even after a fully
+    // successful review (see export mock comment above).
+    expect((markFinishedPayload as { exportId?: string } | null)?.exportId).toBe("export-1");
+    expect((payload as { exportId?: string }).exportId).toBe("export-1");
 
     // The quality gate failed once, so every post-rewrite stage must run
     // twice (once per iteration) -- this is what the stage-order bug broke:
@@ -356,7 +375,15 @@ describe("POST /api/books/[bookId]/auto-review/process", () => {
       }
 
       if (url.includes("/export")) {
-        return new Response(JSON.stringify({ exportId: "export-1" }), { status: 200, headers: { "Content-Type": "application/json" } });
+        // Matches the real export route's actual response shape ({content:
+        // {exportId, ...}}) -- the previous top-level {exportId} mock here
+        // let a real bug ship silently: production code read result.exportId
+        // directly, which is undefined against the real route's response,
+        // so exportId was always null end to end even on a fully successful
+        // run. These tests never asserted on the value, only that the call
+        // succeeded, so nothing caught it. See mark-finished payload
+        // assertion below for the actual regression check.
+        return new Response(JSON.stringify({ content: { exportId: "export-1" } }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 
       if (url.includes("/mark-finished")) {
@@ -514,7 +541,15 @@ describe("POST /api/books/[bookId]/auto-review/process", () => {
       }
 
       if (url.includes("/export")) {
-        return new Response(JSON.stringify({ exportId: "export-1" }), { status: 200, headers: { "Content-Type": "application/json" } });
+        // Matches the real export route's actual response shape ({content:
+        // {exportId, ...}}) -- the previous top-level {exportId} mock here
+        // let a real bug ship silently: production code read result.exportId
+        // directly, which is undefined against the real route's response,
+        // so exportId was always null end to end even on a fully successful
+        // run. These tests never asserted on the value, only that the call
+        // succeeded, so nothing caught it. See mark-finished payload
+        // assertion below for the actual regression check.
+        return new Response(JSON.stringify({ content: { exportId: "export-1" } }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 
       if (url.includes("/mark-finished")) {
@@ -665,7 +700,15 @@ describe("POST /api/books/[bookId]/auto-review/process", () => {
       }
 
       if (url.includes("/export")) {
-        return new Response(JSON.stringify({ exportId: "export-1" }), { status: 200, headers: { "Content-Type": "application/json" } });
+        // Matches the real export route's actual response shape ({content:
+        // {exportId, ...}}) -- the previous top-level {exportId} mock here
+        // let a real bug ship silently: production code read result.exportId
+        // directly, which is undefined against the real route's response,
+        // so exportId was always null end to end even on a fully successful
+        // run. These tests never asserted on the value, only that the call
+        // succeeded, so nothing caught it. See mark-finished payload
+        // assertion below for the actual regression check.
+        return new Response(JSON.stringify({ content: { exportId: "export-1" } }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 
       if (url.includes("/mark-finished")) {
