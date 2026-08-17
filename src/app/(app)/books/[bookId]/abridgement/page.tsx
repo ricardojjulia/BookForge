@@ -18,7 +18,7 @@ export default async function AbridgementPage({ params }: { params: Promise<{ bo
 
   const { bookId } = await params;
   const supabase = await createClient();
-  const [{ data: book, error }, { data: plan }, { data: suggestions }] = await Promise.all([
+  const [{ data: book, error }, { data: plan }, { data: suggestions, error: suggestionsError }] = await Promise.all([
     getBookCore(supabase, bookId),
     supabase
       .from("abridgement_plans")
@@ -29,7 +29,9 @@ export default async function AbridgementPage({ params }: { params: Promise<{ bo
       .maybeSingle(),
     supabase
       .from("abridgement_suggestions")
-      .select("id,suggestion_type,title,rationale,estimated_word_savings,continuity_risk,status,chapters(chapter_number,title),paragraphs(paragraph_number)")
+      .select(
+        "id,suggestion_type,title,rationale,estimated_word_savings,continuity_risk,status,chapters:chapters!abridgement_suggestions_chapter_id_fkey(chapter_number,title),paragraphs(paragraph_number)",
+      )
       .eq("book_id", bookId)
       .order("created_at", { ascending: false })
       .limit(200),
@@ -41,6 +43,10 @@ export default async function AbridgementPage({ params }: { params: Promise<{ bo
         <Alert color="red">Book not found or you do not have access.</Alert>
       </Container>
     );
+  }
+
+  if (suggestionsError) {
+    console.error("Failed to load abridgement suggestions", suggestionsError);
   }
 
   return (
