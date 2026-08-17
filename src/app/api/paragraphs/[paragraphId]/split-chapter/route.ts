@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { renumberChapters } from "@/lib/manuscript/renumber-chapters";
 import { createClient } from "@/lib/supabase/server";
 
 const schema = z.object({
@@ -175,6 +176,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ parag
       .update({ chapter_id: newChapter.id, scene_id: newScene.id })
       .in("paragraph_id", movingIds);
     if (lockUpdateError) throw lockUpdateError;
+
+    // Chapter numbers are already correct at this point (the shift-up loop
+    // above plus inserting the new chapter at the vacated number), so this
+    // is purely a title-sync pass: any shifted chapter whose title was a
+    // generic "Chapter N" placeholder needs it updated to match its new
+    // number, exactly like merge-next/DELETE already do -- this call site
+    // previously had its own bare renumbering loop that never synced titles,
+    // reintroducing that same bug for a chapter split.
+    await renumberChapters(supabase, sourceChapter.book_id);
 
     return NextResponse.json({ content: { split: true, newChapterId: newChapter.id } });
   } catch (error) {
