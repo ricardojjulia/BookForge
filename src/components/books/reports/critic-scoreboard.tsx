@@ -1,4 +1,3 @@
-import { Badge, Group, Paper, RingProgress, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { criticLenses } from "@/lib/critic/prompts";
 import { isCriticReportType } from "@/lib/critic/progress";
 import { extractCriticScore } from "@/lib/critic/score";
@@ -28,6 +27,47 @@ const lensDescriptions: Record<CriticLens, string> = {
 // its own completion message has scrolled away or been dismissed.
 const RECENT_THRESHOLD_MS = 15 * 60 * 1000;
 
+function scoreBand(score: number) {
+  if (score >= 85) return { band: "STRONG", bg: "oklch(0.94 0.05 165)", color: "oklch(0.4 0.1 165)", ring: "oklch(0.65 0.15 165)" };
+  if (score >= 70) return { band: "SOLID", bg: "oklch(0.94 0.03 250)", color: "oklch(0.45 0.09 250)", ring: "oklch(0.68 0.14 145)" };
+  return { band: "NEEDS WORK", bg: "oklch(0.95 0.06 60)", color: "oklch(0.5 0.12 60)", ring: "oklch(0.65 0.14 60)" };
+}
+
+function lensPresentation(score: number | null, analyzed: boolean) {
+  if (typeof score === "number") {
+    const b = scoreBand(score);
+    return {
+      ring: b.ring,
+      band: b.band as string | null,
+      bandBg: b.bg,
+      bandColor: b.color,
+      statusLabel: "EVALUATED",
+      statusBg: "oklch(0.94 0.05 165)",
+      statusColor: "oklch(0.4 0.1 165)",
+    };
+  }
+  if (analyzed) {
+    return {
+      ring: "oklch(0.5 0.16 275)",
+      band: null as string | null,
+      bandBg: null,
+      bandColor: null,
+      statusLabel: "ANALYZED, NO SCORE",
+      statusBg: "oklch(0.94 0.04 275)",
+      statusColor: "oklch(0.45 0.13 275)",
+    };
+  }
+  return {
+    ring: "oklch(0.85 0.005 90)",
+    band: null as string | null,
+    bandBg: null,
+    bandColor: null,
+    statusLabel: "NOT ANALYZED YET",
+    statusBg: "oklch(0.96 0.003 90)",
+    statusColor: "oklch(0.5 0.005 90)",
+  };
+}
+
 export function CriticScoreboard({ reports }: { reports: CriticReport[] }) {
   // `reports` here is often the book's raw, unfiltered coherence_reports
   // feed (rewrite_execution, rewrite_plan, drift checks, etc. included) --
@@ -37,82 +77,181 @@ export function CriticScoreboard({ reports }: { reports: CriticReport[] }) {
   const latestByLens = getLatestReportByLens(criticReports);
   const now = Date.now();
 
+  const lensRows = (Object.keys(criticLenses) as CriticLens[]).map((lens) => {
+    const report = latestByLens.get(lens);
+    const score = extractCriticScore(report?.content);
+    const analyzed = Boolean(report);
+    const scored = typeof score === "number";
+    const ageMs = report ? now - Date.parse(report.created_at) : Infinity;
+    const isRecent = ageMs < RECENT_THRESHOLD_MS;
+    return { lens, report, score: scored ? (score as number) : null, analyzed, isRecent };
+  });
+
+  const scoredRows = lensRows.filter((row) => row.score !== null);
+  const avgScore = scoredRows.length ? Math.round(scoredRows.reduce((sum, row) => sum + (row.score as number), 0) / scoredRows.length) : null;
+  const sortedByScore = [...scoredRows].sort((a, b) => (b.score as number) - (a.score as number));
+  const topRow = sortedByScore[0] || null;
+  const lowRow = sortedByScore[sortedByScore.length - 1] || null;
+
   return (
-    <Paper withBorder radius="md" p="xl" bg="white">
-      <Group justify="space-between" mb="md" align="flex-start">
+    <div style={{ background: "#fff", border: "1px solid oklch(0.92 0.003 90)", borderRadius: 12, padding: "24px 26px", marginTop: 32 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
         <div>
-          <Title order={2}>BookForge Critic</Title>
-          <Text c="dimmed">Single-value evaluation graphs appear as each lens is run.</Text>
+          <div style={{ fontSize: 19, fontWeight: 800, color: "oklch(0.2 0.005 90)" }}>BookForge Critic</div>
+          <p style={{ margin: "6px 0 0", fontSize: 13, color: "oklch(0.5 0.005 90)" }}>
+            Single-value evaluation graphs appear as each lens is run.
+          </p>
         </div>
-        <Badge color="grape" variant="light">
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: "0.02em",
+            textTransform: "uppercase",
+            padding: "4px 10px",
+            borderRadius: 6,
+            background: "oklch(0.94 0.04 275)",
+            color: "oklch(0.45 0.13 275)",
+            whiteSpace: "nowrap",
+          }}
+        >
           {criticReports.length} saved
-        </Badge>
-      </Group>
+        </span>
+      </div>
 
-      <SimpleGrid cols={{ base: 1, md: 2 }}>
-        {(Object.keys(criticLenses) as CriticLens[]).map((lens) => {
-          const report = latestByLens.get(lens);
-          const score = extractCriticScore(report?.content);
-          const analyzed = Boolean(report);
-          const scored = typeof score === "number";
-          const ageMs = report ? now - Date.parse(report.created_at) : Infinity;
-          const isRecent = ageMs < RECENT_THRESHOLD_MS;
+      {avgScore !== null && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 24 }}>
+          <div style={{ border: "1px solid oklch(0.92 0.003 90)", borderRadius: 10, padding: "18px 20px" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "oklch(0.55 0.005 90)" }}>Average score</div>
+            <div style={{ fontSize: 30, fontWeight: 800, color: "oklch(0.2 0.005 90)", marginTop: 4 }}>{avgScore}</div>
+          </div>
+          {topRow && (
+            <div style={{ border: "1px solid oklch(0.85 0.06 165)", background: "oklch(0.97 0.03 165)", borderRadius: 10, padding: "18px 20px" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "oklch(0.4 0.09 165)" }}>Strongest lens</div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "oklch(0.3 0.1 165)", marginTop: 4 }}>
+                {lensDescriptions[topRow.lens]} · {topRow.score}
+              </div>
+            </div>
+          )}
+          {lowRow && (
+            <div style={{ border: "1px solid oklch(0.85 0.08 60)", background: "oklch(0.97 0.04 60)", borderRadius: 10, padding: "18px 20px" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "oklch(0.45 0.1 60)" }}>Needs the most work</div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "oklch(0.35 0.1 60)", marginTop: 4 }}>
+                {lensDescriptions[lowRow.lens]} · {lowRow.score}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14 }}>
+        {lensRows.map(({ lens, report, score, analyzed, isRecent }) => {
+          const presentation = lensPresentation(score, analyzed);
           return (
-            <Paper
+            <div
               key={lens}
-              withBorder
-              radius="md"
-              p="md"
-              bg="#fbfaf8"
-              style={isRecent ? { borderColor: "var(--mantine-color-grape-5)", borderWidth: 2 } : undefined}
+              style={{
+                border: "1px solid oklch(0.92 0.003 90)",
+                borderLeft: `4px solid ${presentation.ring}`,
+                borderRadius: 10,
+                padding: 18,
+                display: "flex",
+                gap: 16,
+                alignItems: "flex-start",
+              }}
             >
-              <Group wrap="nowrap" align="center">
-                <RingProgress
-                  size={92}
-                  thickness={9}
-                  roundCaps
-                  sections={[
-                    {
-                      value: scored ? score : 100,
-                      color: scored ? scoreColor(score) : analyzed ? "grape" : "gray.3",
-                    },
-                  ]}
-                  label={
-                    <Text ta="center" fw={900} size="sm">
-                      {scored ? score : "--"}
-                    </Text>
-                  }
-                />
-                <Stack gap={4} style={{ flex: 1 }}>
-                  <Text fw={800} lh={1.15}>
-                    {lensDescriptions[lens]}
-                  </Text>
-                  <Text size="xs" c="dimmed" lineClamp={2}>
-                    {criticLenses[lens].instruction}
-                  </Text>
-                  <Group gap="xs">
-                    <Badge size="sm" color={scored ? scoreColor(score) : analyzed ? "grape" : "gray"} variant="light">
-                      {scored ? "Evaluated" : analyzed ? "Analyzed, no score" : "Not analyzed yet"}
-                    </Badge>
-                    {report && isRecent && (
-                      <Badge size="sm" color="grape" variant="filled">
-                        Updated {formatRecency(ageMs)}
-                      </Badge>
-                    )}
-                    {report && !isRecent && (
-                      <Text size="xs" c="dimmed">
-                        {new Date(report.created_at).toLocaleDateString()}
-                      </Text>
-                    )}
-                  </Group>
-                </Stack>
-              </Group>
-            </Paper>
+              <ScoreRing score={score} color={presentation.ring} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: "oklch(0.2 0.005 90)" }}>{lensDescriptions[lens]}</span>
+                  {presentation.band && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: "0.02em",
+                        padding: "3px 8px",
+                        borderRadius: 5,
+                        background: presentation.bandBg as string,
+                        color: presentation.bandColor as string,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {presentation.band}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 12, color: "oklch(0.5 0.005 90)", marginTop: 4, lineHeight: 1.5 }}>
+                  {criticLenses[lens].instruction}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: "0.02em",
+                      padding: "3px 8px",
+                      borderRadius: 5,
+                      background: presentation.statusBg,
+                      color: presentation.statusColor,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {presentation.statusLabel}
+                  </span>
+                  {report && isRecent && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: "0.02em",
+                        padding: "3px 8px",
+                        borderRadius: 5,
+                        background: "oklch(0.5 0.16 275)",
+                        color: "#fff",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Updated {formatRecency(now - Date.parse(report.created_at))}
+                    </span>
+                  )}
+                  {report && !isRecent && (
+                    <span style={{ fontSize: 12, color: "oklch(0.55 0.005 90)" }}>{new Date(report.created_at).toLocaleDateString()}</span>
+                  )}
+                </div>
+              </div>
+            </div>
           );
         })}
-      </SimpleGrid>
-    </Paper>
+      </div>
+    </div>
+  );
+}
+
+function ScoreRing({ score, color }: { score: number | null; color: string }) {
+  const size = 72;
+  const radius = 30;
+  const strokeWidth = 7;
+  const circumference = 2 * Math.PI * radius;
+  const dash = ((score ?? 100) / 100) * circumference;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }}>
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="oklch(0.93 0.003 90)" strokeWidth={strokeWidth} />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        fill="none"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeDasharray={`${dash.toFixed(1)} ${circumference.toFixed(1)}`}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+      />
+      <text x={size / 2} y={size / 2 + 5} textAnchor="middle" fontSize={20} fontWeight={800} fill="oklch(0.2 0.005 90)" fontFamily="Inter, sans-serif">
+        {score ?? "--"}
+      </text>
+    </svg>
   );
 }
 
@@ -136,11 +275,4 @@ function formatRecency(ageMs: number) {
   const minutes = Math.floor(ageMs / 60_000);
   if (minutes < 1) return "just now";
   return `${minutes}m ago`;
-}
-
-function scoreColor(score: number) {
-  if (score >= 82) return "green";
-  if (score >= 68) return "teal";
-  if (score >= 52) return "yellow";
-  return "red";
 }
