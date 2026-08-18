@@ -1102,17 +1102,20 @@ function ParagraphPreview({
   label: string | null;
   onClick: () => void;
 }) {
+  const fullText = paragraphDisplayText(paragraph) || "(empty paragraph)";
   return (
-    <Stack gap={2} onClick={onClick} style={{ cursor: "pointer" }}>
-      {label && (
-        <Text size="xs" fw={700} c="dimmed">
-          {label}
+    <Tooltip label={fullText} multiline w={420} withArrow openDelay={300} events={{ hover: true, focus: true, touch: false }}>
+      <Stack gap={2} onClick={onClick} style={{ cursor: "pointer" }}>
+        {label && (
+          <Text size="xs" fw={700} c="dimmed">
+            {label}
+          </Text>
+        )}
+        <Text size="sm" c="dimmed" lineClamp={3} style={{ lineHeight: 1.6 }}>
+          {fullText}
         </Text>
-      )}
-      <Text size="sm" c="dimmed" lineClamp={3} style={{ lineHeight: 1.6 }}>
-        {paragraphDisplayText(paragraph) || "(empty paragraph)"}
-      </Text>
-    </Stack>
+      </Stack>
+    </Tooltip>
   );
 }
 
