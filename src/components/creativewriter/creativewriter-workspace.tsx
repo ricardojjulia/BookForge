@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition, type CSSProperties
 import Link from "next/link";
 import { ActionIcon, Alert, Badge, Button, Container, Divider, Group, Paper, ScrollArea, SegmentedControl, Stack, Tabs, Text, Textarea, TextInput, Title, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconBook, IconCheck, IconCloudDown, IconCloudUp, IconGitMerge, IconMapPin, IconMessage, IconNotes, IconPalette, IconPin, IconPinFilled, IconRefresh, IconSearch, IconSparkles, IconUsers, IconWriting, IconX } from "@tabler/icons-react";
+import { IconBook, IconCheck, IconChevronLeft, IconChevronRight, IconCloudDown, IconCloudUp, IconGitMerge, IconMapPin, IconMessage, IconNotes, IconPalette, IconPin, IconPinFilled, IconRefresh, IconSearch, IconSparkles, IconUsers, IconWriting, IconX } from "@tabler/icons-react";
 import { versionFromDate, type CreativeWriterConflictView, type CreativeWriterWorkspaceData } from "@/lib/creativewriter-ui/dashboard";
 import { CREATIVEWRITER_RELEASE_LABEL } from "@/lib/creativewriter-ui/version";
 import type { CreativeWriterCloudChange } from "@/lib/creativewriter-sync";
@@ -88,7 +88,11 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
   );
   const [selectedParagraphId, setSelectedParagraphId] = useState(chapterParagraphs[0]?.id || data.paragraphs[0]?.id || "");
   const selectedParagraph = data.paragraphs.find((paragraph) => paragraph.id === selectedParagraphId) || chapterParagraphs[0] || data.paragraphs[0] || null;
-  const [draftText, setDraftText] = useState(selectedParagraph?.currentText || selectedParagraph?.acceptedText || "");
+  const selectedParagraphIndex = data.paragraphs.findIndex((paragraph) => paragraph.id === selectedParagraph?.id);
+  const previousParagraphPreview = selectedParagraphIndex > 0 ? data.paragraphs[selectedParagraphIndex - 1] : null;
+  const nextParagraphPreview =
+    selectedParagraphIndex >= 0 && selectedParagraphIndex < data.paragraphs.length - 1 ? data.paragraphs[selectedParagraphIndex + 1] : null;
+  const [draftText, setDraftText] = useState(paragraphDisplayText(selectedParagraph));
   const [conflictDrafts, setConflictDrafts] = useState<Record<string, string>>({});
   const [supportSearch, setSupportSearch] = useState("");
   const [commentReviewFilter, setCommentReviewFilter] = useState<CommentReviewFilter>("open");
@@ -103,9 +107,9 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
   const [message, setMessage] = useState<SyncMessage | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const dirty = selectedParagraph ? draftText !== (selectedParagraph.currentText || selectedParagraph.acceptedText || "") : false;
-  const totalWords = useMemo(() => countWords(data.paragraphs.map((paragraph) => paragraph.currentText || paragraph.acceptedText || "").join(" ")), [data.paragraphs]);
-  const chapterWords = useMemo(() => countWords(chapterParagraphs.map((paragraph) => paragraph.currentText || paragraph.acceptedText || "").join(" ")), [chapterParagraphs]);
+  const dirty = selectedParagraph ? draftText !== paragraphDisplayText(selectedParagraph) : false;
+  const totalWords = useMemo(() => countWords(data.paragraphs.map((paragraph) => paragraphDisplayText(paragraph)).join(" ")), [data.paragraphs]);
+  const chapterWords = useMemo(() => countWords(chapterParagraphs.map((paragraph) => paragraphDisplayText(paragraph)).join(" ")), [chapterParagraphs]);
   const commentsByParagraph = useMemo(() => groupReaderCommentsByParagraph(data.readerComments), [data.readerComments]);
   const selectedParagraphComments = selectedParagraph ? commentsByParagraph[selectedParagraph.id] || [] : [];
   const commentParagraphNumbers = useMemo(() => new Map(data.paragraphs.map((paragraph) => [paragraph.id, paragraph.paragraphNumber])), [data.paragraphs]);
@@ -204,14 +208,25 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
     const nextParagraph = data.paragraphs.find((paragraph) => paragraph.chapterId === chapterId) || null;
     setSelectedChapterId(chapterId);
     setSelectedParagraphId(nextParagraph?.id || "");
-    setDraftText(nextParagraph?.currentText || nextParagraph?.acceptedText || "");
+    setDraftText(paragraphDisplayText(nextParagraph));
   }
 
   function selectParagraph(paragraphId: string) {
     if (!canLeaveDraft()) return;
     const paragraph = data.paragraphs.find((item) => item.id === paragraphId) || null;
     setSelectedParagraphId(paragraphId);
-    setDraftText(paragraph?.currentText || paragraph?.acceptedText || "");
+    if (paragraph && paragraph.chapterId !== selectedChapterId) {
+      setSelectedChapterId(paragraph.chapterId);
+    }
+    setDraftText(paragraphDisplayText(paragraph));
+  }
+
+  function stepParagraph(direction: 1 | -1) {
+    const currentIndex = data.paragraphs.findIndex((paragraph) => paragraph.id === selectedParagraphId);
+    if (currentIndex === -1) return;
+    const target = data.paragraphs[currentIndex + direction];
+    if (!target) return;
+    selectParagraph(target.id);
   }
 
   function selectCommentParagraph(paragraphId: string | null) {
@@ -224,7 +239,7 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
     }
     setSelectedChapterId(paragraph.chapterId);
     setSelectedParagraphId(paragraph.id);
-    setDraftText(paragraph.currentText || paragraph.acceptedText || "");
+    setDraftText(paragraphDisplayText(paragraph));
   }
 
   function selectSuggestionParagraph(paragraphId: string | null) {
@@ -237,7 +252,7 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
     }
     setSelectedChapterId(paragraph.chapterId);
     setSelectedParagraphId(paragraph.id);
-    setDraftText(paragraph.currentText || paragraph.acceptedText || "");
+    setDraftText(paragraphDisplayText(paragraph));
   }
 
   function canLeaveDraft() {
@@ -247,7 +262,7 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
   }
 
   function discardDraft() {
-    setDraftText(selectedParagraph?.currentText || selectedParagraph?.acceptedText || "");
+    setDraftText(paragraphDisplayText(selectedParagraph));
     setMessage({ tone: "blue", text: "Local draft discarded." });
   }
 
@@ -331,7 +346,7 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
       const nextData = mergeCloudChanges(data, changes, payload.content?.project || data.project);
       const nextParagraph = nextData.paragraphs.find((paragraph) => paragraph.id === selectedParagraphId) || null;
       setData(nextData);
-      setDraftText(nextParagraph?.currentText || nextParagraph?.acceptedText || "");
+      setDraftText(paragraphDisplayText(nextParagraph));
       setMessage({ tone: "blue", text: `Pulled and merged ${changes.length} cloud changes.` });
     });
   }
@@ -401,7 +416,7 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
       return;
     }
     const bookId = data.selectedBook.id;
-    const originalText = selectedParagraph.currentText || selectedParagraph.acceptedText || "";
+    const originalTextSnapshot = paragraphDisplayText(selectedParagraph);
     setMessage(null);
     startTransition(async () => {
       const response = await fetch(`/api/books/${bookId}/suggestions`, {
@@ -410,7 +425,7 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
         body: JSON.stringify({
           chapterId: selectedParagraph.chapterId,
           paragraphId: selectedParagraph.id,
-          originalTextSnapshot: originalText,
+          originalTextSnapshot,
           suggestedText,
           rationale: suggestionRationale.trim() || undefined,
         }),
@@ -467,6 +482,7 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
         setMessage({ tone: "red", text: payload.error || "Suggestion update failed." });
         return;
       }
+      const existingParagraph = payload.paragraph ? data.paragraphs.find((paragraph) => paragraph.id === payload.paragraph.id) : null;
       setData((current) => ({
         ...current,
         contributorSuggestions: current.contributorSuggestions.map((suggestion) =>
@@ -486,7 +502,13 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
           : current.paragraphs,
       }));
       if (payload.paragraph?.id === selectedParagraphId) {
-        setDraftText(payload.paragraph.currentText || payload.paragraph.acceptedText || "");
+        setDraftText(
+          paragraphDisplayText({
+            currentText: payload.paragraph.currentText,
+            acceptedText: payload.paragraph.acceptedText,
+            originalText: existingParagraph?.originalText ?? null,
+          }),
+        );
       }
       setStaleSuggestionContexts((current) => {
         const next = { ...current };
@@ -642,14 +664,38 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                   </Group>
                 </Group>
 
-                <ScrollArea type="auto" offsetScrollbars>
-                  <SegmentedControl
-                    value={selectedParagraph?.id || ""}
-                    onChange={selectParagraph}
-                    data={chapterParagraphs.map((paragraph) => ({ label: String(paragraph.paragraphNumber), value: paragraph.id }))}
-                    disabled={!chapterParagraphs.length}
+                <Group gap="xs" wrap="nowrap">
+                  <Tooltip label="Previous paragraph" withArrow>
+                    <ActionIcon aria-label="Previous paragraph" size="lg" variant="light" color="dark" disabled={!previousParagraphPreview} onClick={() => stepParagraph(-1)}>
+                      <IconChevronLeft size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                  <ScrollArea type="auto" offsetScrollbars style={{ flex: 1 }}>
+                    <SegmentedControl
+                      value={selectedParagraph?.id || ""}
+                      onChange={selectParagraph}
+                      data={chapterParagraphs.map((paragraph) => ({ label: String(paragraph.paragraphNumber), value: paragraph.id }))}
+                      disabled={!chapterParagraphs.length}
+                    />
+                  </ScrollArea>
+                  <Tooltip label="Next paragraph" withArrow>
+                    <ActionIcon aria-label="Next paragraph" size="lg" variant="light" color="dark" disabled={!nextParagraphPreview} onClick={() => stepParagraph(1)}>
+                      <IconChevronRight size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Group>
+
+                {previousParagraphPreview && (
+                  <ParagraphPreview
+                    paragraph={previousParagraphPreview}
+                    label={
+                      previousParagraphPreview.chapterId !== selectedChapter?.id
+                        ? `Chapter ${chapterNumberById.get(previousParagraphPreview.chapterId) ?? "?"} · Paragraph ${previousParagraphPreview.paragraphNumber}`
+                        : null
+                    }
+                    onClick={() => selectParagraph(previousParagraphPreview.id)}
                   />
-                </ScrollArea>
+                )}
 
                 <Textarea
                   aria-label="CreativeWriter manuscript editor"
@@ -660,6 +706,18 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                   placeholder="Select a paragraph to begin editing."
                   leftSection={<IconWriting size={16} />}
                 />
+
+                {nextParagraphPreview && (
+                  <ParagraphPreview
+                    paragraph={nextParagraphPreview}
+                    label={
+                      nextParagraphPreview.chapterId !== selectedChapter?.id
+                        ? `Chapter ${chapterNumberById.get(nextParagraphPreview.chapterId) ?? "?"} · Paragraph ${nextParagraphPreview.paragraphNumber}`
+                        : null
+                    }
+                    onClick={() => selectParagraph(nextParagraphPreview.id)}
+                  />
+                )}
                 {selectedParagraphComments.length > 0 && (
                   <Paper withBorder radius="sm" p="sm" bg="#fff9f0">
                     <Stack gap="xs">
@@ -1016,6 +1074,33 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
 
 function countWords(value: string) {
   return value.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function paragraphDisplayText(paragraph: Pick<CreativeWriterWorkspaceData["paragraphs"][number], "currentText" | "acceptedText" | "originalText"> | null | undefined) {
+  return paragraph?.currentText || paragraph?.acceptedText || paragraph?.originalText || "";
+}
+
+function ParagraphPreview({
+  paragraph,
+  label,
+  onClick,
+}: {
+  paragraph: CreativeWriterWorkspaceData["paragraphs"][number];
+  label: string | null;
+  onClick: () => void;
+}) {
+  return (
+    <Stack gap={2} onClick={onClick} style={{ cursor: "pointer" }}>
+      {label && (
+        <Text size="xs" fw={700} c="dimmed">
+          {label}
+        </Text>
+      )}
+      <Text size="sm" c="dimmed" lineClamp={3} style={{ lineHeight: 1.6 }}>
+        {paragraphDisplayText(paragraph) || "(empty paragraph)"}
+      </Text>
+    </Stack>
+  );
 }
 
 function ColumnResizeHandle({

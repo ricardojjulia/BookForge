@@ -105,6 +105,27 @@ describe("CreativeWriter workspace data", () => {
     expect(result.paragraphs.map((paragraph) => paragraph.paragraphNumber)).toEqual([1, 2, 3]);
     expect(result.paragraphs.map((paragraph) => paragraph.sourceParagraphNumber)).toEqual([1, 2, 1]);
   });
+
+  it("carries the paragraph's original_text through to the workspace view", async () => {
+    const supabase = createDashboardSupabase({
+      paragraphRows: [
+        {
+          id: "paragraph-1",
+          chapter_id: "chapter-1",
+          scene_id: "scene-1",
+          paragraph_number: 1,
+          current_text: null,
+          accepted_text: null,
+          original_text: "Archived original text.",
+          updated_at: "2026-08-02T12:00:00.000Z",
+        },
+      ],
+    });
+
+    const result = await getCreativeWriterWorkspaceData({ supabase, accountId: "user-1" });
+
+    expect(result.paragraphs[0]?.originalText).toBe("Archived original text.");
+  });
 });
 
 function createDashboardSupabase(options: { conflictError?: unknown; sceneRows?: unknown[]; paragraphRows?: unknown[] } = {}) {

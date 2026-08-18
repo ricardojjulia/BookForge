@@ -26,6 +26,7 @@ export type CreativeWriterParagraphView = {
   sourceParagraphNumber: number;
   currentText: string | null;
   acceptedText: string | null;
+  originalText: string | null;
   updatedAt: string | null;
 };
 
@@ -202,6 +203,7 @@ type ParagraphRow = {
   paragraph_number: number;
   current_text: string | null;
   accepted_text: string | null;
+  original_text: string | null;
   updated_at: string | null;
 };
 
@@ -381,7 +383,7 @@ export async function getCreativeWriterWorkspaceData(input: {
       ),
       resolveList<ParagraphRow>(
         table(input.supabase, "paragraphs")
-          .select("id,chapter_id,scene_id,paragraph_number,current_text,accepted_text,updated_at")
+          .select("id,chapter_id,scene_id,paragraph_number,current_text,accepted_text,original_text,updated_at")
           .eq("book_id", selectedBook.id)
           .order("paragraph_number"),
       ),
@@ -597,6 +599,7 @@ function toParagraphViews(rows: ParagraphRow[], scenes: SceneRow[], chapters: Ch
         sourceParagraphNumber: row.paragraph_number,
         currentText: row.current_text,
         acceptedText: row.accepted_text,
+        originalText: row.original_text,
         updatedAt: row.updated_at,
       };
     });
