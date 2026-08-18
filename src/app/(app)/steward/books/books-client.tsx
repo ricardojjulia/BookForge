@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Alert, Badge, Button, Group, Paper, Stack, Text, TextInput } from "@mantine/core";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { StewardActionModal } from "@/components/steward/action-modal";
 
 type Book = {
   id: string;
@@ -31,9 +32,12 @@ export function StewardBooksClient({
   const [ownerId, setOwnerId] = useState(initialOwnerId);
   const [ownerEmail, setOwnerEmail] = useState(initialOwnerEmail);
   const [loading, setLoading] = useState(false);
-  const [transferLoading, setTransferLoading] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+
+  const [transferTarget, setTransferTarget] = useState<Book | null>(null);
+  const [modalLoading, setModalLoading] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
 
   async function load(query: string, ownerFilter: string | null) {
     setLoading(true);
@@ -62,26 +66,30 @@ export function StewardBooksClient({
     void load(search, null);
   }
 
-  async function transfer(event: React.MouseEvent, book: Book) {
-    event.preventDefault();
-    event.stopPropagation();
-    const newOwnerEmail = window.prompt(`Transfer "${book.title}" to which account's email?`);
-    if (!newOwnerEmail) return;
-    setTransferLoading(book.id);
+  function closeTransferModal() {
+    setTransferTarget(null);
+    setModalError(null);
+  }
+
+  async function confirmTransfer(newOwnerEmail: string) {
+    if (!transferTarget) return;
+    setModalLoading(true);
+    setModalError(null);
     setError("");
     setMessage("");
     try {
       await fetchJson(
-        `/api/steward/books/${book.id}/transfer`,
+        `/api/steward/books/${transferTarget.id}/transfer`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ newOwnerEmail }) },
         "Transfer book",
       );
-      setMessage(`"${book.title}" transferred to ${newOwnerEmail}.`);
+      setMessage(`"${transferTarget.title}" transferred to ${newOwnerEmail}.`);
+      setTransferTarget(null);
       await load(search, ownerId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to transfer book.");
+      setModalError(err instanceof Error ? err.message : "Unable to transfer book.");
     } finally {
-      setTransferLoading(null);
+      setModalLoading(false);
     }
   }
 
@@ -133,8 +141,11 @@ export function StewardBooksClient({
                 size="xs"
                 variant="light"
                 color="dark"
-                loading={transferLoading === book.id}
-                onClick={(event) => void transfer(event, book)}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setTransferTarget(book);
+                }}
               >
                 Transfer
               </Button>
@@ -142,6 +153,22 @@ export function StewardBooksClient({
           </Paper>
         ))}
       </Stack>
+
+      {transferTarget && (
+        <StewardActionModal
+          opened
+          title="Transfer book"
+          message={`Transfer "${transferTarget.title}" to a different account.`}
+          inputLabel="New owner's email"
+          inputType="email"
+          confirmLabel="Transfer"
+          confirmColor="dark"
+          loading={modalLoading}
+          error={modalError}
+          onCancel={closeTransferModal}
+          onConfirm={confirmTransfer}
+        />
+      )}
     </Stack>
   );
 }
