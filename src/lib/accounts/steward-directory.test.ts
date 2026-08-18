@@ -17,19 +17,23 @@ describe("listStewardAccounts", () => {
           }),
         },
       },
-      from: vi.fn(() => ({
-        select: vi.fn().mockReturnThis(),
-        in: vi.fn().mockResolvedValue({
-          data: [{ user_id: "user-1", status: "pending", requested_at: "2026-08-18", purge_after: "2026-09-17T00:00:00.000Z" }],
-          error: null,
-        }),
-      })),
+      from: vi.fn((table: string) =>
+        table === "profiles"
+          ? { select: vi.fn().mockResolvedValue({ data: [{ id: "user-1", platform_role: "steward" }], error: null }) }
+          : {
+              select: vi.fn().mockReturnThis(),
+              in: vi.fn().mockResolvedValue({
+                data: [{ user_id: "user-1", status: "pending", requested_at: "2026-08-18", purge_after: "2026-09-17T00:00:00.000Z" }],
+                error: null,
+              }),
+            },
+      ),
     };
 
     const result = await listStewardAccounts(admin as never);
     expect(result.accounts).toEqual([
-      { id: "user-1", email: "a@example.com", createdAt: "2026-01-01", lastSignInAt: null, bannedUntil: "2026-09-17T00:00:00.000Z", deletionStatus: "pending", purgeAfter: "2026-09-17T00:00:00.000Z" },
-      { id: "user-2", email: "b@example.com", createdAt: "2026-01-02", lastSignInAt: "2026-08-01", bannedUntil: null, deletionStatus: null, purgeAfter: null },
+      { id: "user-1", email: "a@example.com", createdAt: "2026-01-01", lastSignInAt: null, bannedUntil: "2026-09-17T00:00:00.000Z", deletionStatus: "pending", purgeAfter: "2026-09-17T00:00:00.000Z", platformRole: "steward" },
+      { id: "user-2", email: "b@example.com", createdAt: "2026-01-02", lastSignInAt: "2026-08-01", bannedUntil: null, deletionStatus: null, purgeAfter: null, platformRole: null },
     ]);
   });
 
@@ -43,7 +47,11 @@ describe("listStewardAccounts", () => {
           }),
         },
       },
-      from: vi.fn(() => ({ select: vi.fn().mockReturnThis(), in: vi.fn().mockResolvedValue({ data: [], error: null }) })),
+      from: vi.fn((table: string) =>
+        table === "profiles"
+          ? { select: vi.fn().mockResolvedValue({ data: [], error: null }) }
+          : { select: vi.fn().mockReturnThis(), in: vi.fn().mockResolvedValue({ data: [], error: null }) },
+      ),
     };
 
     const result = await listStewardAccounts(admin as never, { search: "match" });
