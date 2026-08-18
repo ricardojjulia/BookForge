@@ -27,15 +27,25 @@ export function DataFreshnessBanner({
   const hasAutoForced = useRef(false);
 
   const storageKey = `${STORAGE_PREFIX}${routeKey}`;
-  const referenceTime = useMemo(() => {
-    if (typeof window === "undefined") return new Date(fetchedAt);
+  // Anchored to fetchedAt (matching the server render) until the post-mount
+  // effect below can safely check localStorage -- reading localStorage
+  // directly in this computation ran during hydration too (window already
+  // exists there), so a returning visitor with an earlier stored reference
+  // time got a different freshness status client-side than the server had
+  // just rendered, flipping the banner's color/title on hydration.
+  const [referenceTime, setReferenceTime] = useState(() => new Date(fetchedAt));
+
+  useEffect(() => {
     const existing = window.localStorage.getItem(storageKey);
     if (!existing) {
       window.localStorage.setItem(storageKey, fetchedAt);
-      return new Date(fetchedAt);
+      return;
     }
     const parsed = new Date(existing);
-    return Number.isFinite(parsed.getTime()) ? parsed : new Date(fetchedAt);
+    if (Number.isFinite(parsed.getTime())) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setReferenceTime(parsed);
+    }
   }, [fetchedAt, storageKey]);
 
   const freshness = useMemo(

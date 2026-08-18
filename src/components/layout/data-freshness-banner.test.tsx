@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { MantineProvider } from "@mantine/core";
@@ -37,6 +37,7 @@ describe("DataFreshnessBanner", () => {
   });
 
   afterEach(() => {
+    cleanup();
     __resetFreshnessTelemetryReporterForTests();
   });
 
@@ -66,6 +67,28 @@ describe("DataFreshnessBanner", () => {
       "freshness_refresh_success",
     ]);
     expect(events[0]?.reason).toBe("manual");
+  });
+
+  it("renders fresh on the first paint and only applies an older stored reference time in an effect", async () => {
+    const routeKey = "tests:anchored";
+    const storageKey = `bookforge:freshness:${routeKey}`;
+    const staleFetchedAt = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
+    const freshFetchedAt = new Date().toISOString();
+    window.localStorage.setItem(storageKey, staleFetchedAt);
+
+    renderBanner(
+      <DataFreshnessBanner
+        routeKey={routeKey}
+        fetchedAt={freshFetchedAt}
+        staleAfterHours={24}
+        forceAfterHours={48}
+      />,
+    );
+
+    // Must resolve to the anchored (stale) reference time, not the fresh
+    // fetchedAt prop -- and must not throw a hydration mismatch getting there.
+    expect(await screen.findByText("Data is stale")).toBeInTheDocument();
+    expect(window.localStorage.getItem(storageKey)).toBe(staleFetchedAt);
   });
 
   it("triggers forced refresh once and logs forced failure fallback", async () => {
