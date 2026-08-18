@@ -79,7 +79,7 @@ export function CreativeWriterWorkspace({ initialData }: { initialData: Creative
 function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWriterWorkspaceData }) {
   const workspaceGridRef = useRef<HTMLDivElement | null>(null);
   const [data, setData] = useState(initialData);
-  const [workspaceLayout, setWorkspaceLayout] = useState<WorkspaceLayout>(() => loadWorkspaceLayout());
+  const [workspaceLayout, setWorkspaceLayout] = useState<WorkspaceLayout>(DEFAULT_WORKSPACE_LAYOUT);
   const [selectedChapterId, setSelectedChapterId] = useState(data.chapters[0]?.id || "");
   const selectedChapter = data.chapters.find((chapter) => chapter.id === selectedChapterId) || data.chapters[0] || null;
   const chapterParagraphs = useMemo(
@@ -103,7 +103,7 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
   const [staleSuggestionContexts, setStaleSuggestionContexts] = useState<Record<string, StaleSuggestionContext>>({});
   const [manualSuggestionMerges, setManualSuggestionMerges] = useState<Record<string, string>>({});
   const [suggestionReviewNotes, setSuggestionReviewNotes] = useState<Record<string, string>>({});
-  const [pinnedSupportIds, setPinnedSupportIds] = useState<string[]>(() => loadPinnedSupportIds(initialData.selectedBook?.id || ""));
+  const [pinnedSupportIds, setPinnedSupportIds] = useState<string[]>([]);
   const [message, setMessage] = useState<SyncMessage | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -146,6 +146,19 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
     () => filterContributorSuggestions(data.contributorSuggestions, supportSearch, suggestionReviewFilter, suggestionScopeFilter, suggestionParagraphNumbers, data.accountId),
     [data.accountId, data.contributorSuggestions, suggestionParagraphNumbers, suggestionReviewFilter, suggestionScopeFilter, supportSearch],
   );
+
+  // Reads localStorage only after mount (client-only) so the initial client
+  // render matches the server-rendered HTML -- reading it directly in a
+  // useState initializer runs during hydration too, when window already
+  // exists, and produced a hydration mismatch for any visitor who'd
+  // previously resized the layout or pinned a support entry. One-time sync
+  // from an external store on mount, not a cascading-render loop.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPinnedSupportIds(loadPinnedSupportIds(initialData.selectedBook?.id || ""));
+    setWorkspaceLayout(loadWorkspaceLayout());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     savePinnedSupportIds(data.selectedBook?.id || "", pinnedSupportIds);
