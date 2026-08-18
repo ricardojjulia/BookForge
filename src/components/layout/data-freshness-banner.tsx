@@ -14,12 +14,15 @@ export function DataFreshnessBanner({
   label = "Data",
   staleAfterHours = 24,
   forceAfterHours = 48,
+  variant = "alert",
 }: {
   routeKey: string;
   fetchedAt: string;
   label?: string;
   staleAfterHours?: number;
   forceAfterHours?: number;
+  /** "subtle": a single text row + outline button, no colored Alert chrome. */
+  variant?: "alert" | "subtle";
 }) {
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
@@ -123,6 +126,26 @@ export function DataFreshnessBanner({
       : freshness.status === "stale"
         ? `${label} is stale`
         : `${label} has expired`;
+
+  if (variant === "subtle") {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "10px 4px", marginBottom: 24, borderBottom: "1px solid oklch(0.92 0.003 90)", flexWrap: "wrap" }}>
+        <Text size="sm" c={freshness.status === "fresh" ? "dimmed" : color}>
+          {label} fetched <span suppressHydrationWarning>{formatAge(freshness.ageMs)}</span> ago.
+          {refreshError ? ` ${refreshError}` : ""}
+        </Text>
+        <Button
+          variant="outline"
+          color={freshness.status === "fresh" ? "grape" : color === "red" ? "orange" : color}
+          size="xs"
+          loading={refreshing}
+          onClick={() => void refreshNow("manual")}
+        >
+          Refresh now
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <Alert color={color} title={title} variant="light" mb="md">

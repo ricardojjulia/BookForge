@@ -35,15 +35,15 @@ describe("DashboardMetrics", () => {
   it("links books and AI settings to their destinations", () => {
     renderMetrics();
 
-    expect(screen.getByRole("link", { name: /Books 3/ })).toHaveAttribute("href", "#books");
-    expect(screen.getByRole("link", { name: /AI engine LM Studio/ })).toHaveAttribute("href", "/settings");
+    expect(screen.getByRole("link", { name: /3 books/ })).toHaveAttribute("href", "#books");
+    expect(screen.getByRole("link", { name: /LM Studio AI engine/ })).toHaveAttribute("href", "/settings");
   });
 
   it("requires a book choice before opening critic reports", async () => {
     const user = userEvent.setup();
     renderMetrics();
 
-    await user.click(screen.getByRole("button", { name: /Critic reports 6/ }));
+    await user.click(screen.getByRole("button", { name: /6 critic reports/ }));
     const viewReports = await screen.findByRole("button", { name: "View critic reports" });
     expect(viewReports).toBeDisabled();
 

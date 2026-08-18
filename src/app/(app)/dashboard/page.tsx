@@ -1,9 +1,8 @@
-import { Alert, Badge, Button, Container, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
-import { DeleteBookButton } from "@/components/books/delete-book-button";
+import { Alert, Button, Container, Group, Paper, Text, Title } from "@mantine/core";
+import { BookRow } from "@/components/dashboard/book-row";
 import { DashboardMetrics } from "@/components/dashboard/dashboard-metrics";
 import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { SetupWizard } from "@/components/onboarding/setup-wizard";
-import { getBookAuthorDisplay } from "@/lib/books/status";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -106,11 +105,13 @@ export default async function DashboardPage() {
 
   return (
     <Container size="xl">
-      <DataFreshnessBanner routeKey="dashboard" fetchedAt={freshnessFetchedAt} label="Dashboard data" />
-      <Group justify="space-between" mb="xl">
+      <DataFreshnessBanner routeKey="dashboard" fetchedAt={freshnessFetchedAt} label="Dashboard data" variant="subtle" />
+      <Group justify="space-between" align="flex-start" mb={8} wrap="wrap">
         <div>
-          <Title>Author Dashboard</Title>
-          <Text c="dimmed">Projects, books, revision progress, and recent critic activity.</Text>
+          <Title style={{ fontSize: 28, letterSpacing: "-0.01em" }}>My Book Room</Title>
+          <Text mt={6} style={{ fontSize: 14, color: "oklch(0.5 0.005 90)" }}>
+            Projects, books, revision progress, and recent critic activity.
+          </Text>
         </div>
         <Group>
           {needsSetup && <SetupWizard userId={user.id} completedSteps={completedSteps} needsSetup />}
@@ -130,62 +131,11 @@ export default async function DashboardPage() {
         books={bookOptions || []}
       />
 
-      <SimpleGrid id="books" cols={{ base: 1, md: 3 }} style={{ scrollMarginTop: 24 }}>
-        {books?.map((book) => {
-          const isFinished = book.status === "finished";
-          const finishedExport = finishedByBook[book.id];
-          return (
-            <Paper
-              key={book.id}
-              withBorder
-              radius="md"
-              p="lg"
-              bg={isFinished ? "#f0faf4" : "white"}
-              style={isFinished ? { borderColor: "var(--mantine-color-green-4)" } : undefined}
-            >
-              <Stack gap="xs">
-                <Group justify="space-between">
-                  <Badge color={isFinished ? "green" : "grape"} variant={isFinished ? "filled" : "light"}>
-                    {isFinished ? "FINISHED" : (book.status || "draft")}
-                  </Badge>
-                  <Badge color="teal" variant="outline">
-                    {book.genre || "Manuscript"}
-                  </Badge>
-                </Group>
-                <Title order={3}>{book.title}</Title>
-                <Text c="dimmed">{getBookAuthorDisplay(book)}</Text>
-                <Text size="xs" c="dimmed">
-                  Created {new Date(book.created_at).toLocaleDateString()} · Updated{" "}
-                  {new Date(book.updated_at).toLocaleDateString()}
-                </Text>
-                {isFinished && finishedExport && (
-                  <Button
-                    component="a"
-                    href={`/api/books/${book.id}/exports/${finishedExport.exportId}/download`}
-                    target="_blank"
-                    rel="noreferrer"
-                    color="green"
-                    leftSection={<span>↓</span>}
-                  >
-                    Download {finishedExport.format.toUpperCase()}
-                  </Button>
-                )}
-                {isFinished && (
-                  <Button component="a" href={`/books/${book.id}/publishing-lab`} color="orange" variant="light">
-                    Publishing Lab
-                  </Button>
-                )}
-                <Group mt={isFinished ? "xs" : "sm"}>
-                  <Button component="a" href={`/books/${book.id}`} variant={isFinished ? "subtle" : "light"} color="grape">
-                    {isFinished ? "Continue editing" : "Continue Editing"}
-                  </Button>
-                  <DeleteBookButton bookId={book.id} bookTitle={book.title} size="sm" />
-                </Group>
-              </Stack>
-            </Paper>
-          );
-        })}
-      </SimpleGrid>
+      <div id="books" style={{ scrollMarginTop: 24 }}>
+        {books?.map((book) => (
+          <BookRow key={book.id} book={book} finishedExport={finishedByBook[book.id]} />
+        ))}
+      </div>
 
       {!books?.length && (
         <Paper withBorder radius="md" p="xl" bg="white">
