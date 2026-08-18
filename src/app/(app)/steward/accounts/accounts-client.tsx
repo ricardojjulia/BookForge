@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Alert, Anchor, Badge, Button, Collapse, Group, Paper, PasswordInput, Stack, Text, TextInput } from "@mantine/core";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { StewardActionModal } from "@/components/steward/action-modal";
 
 type Account = {
   id: string;
@@ -16,6 +17,12 @@ type Account = {
   platformRole: string | null;
   bookCount: number;
 };
+
+type PendingAction =
+  | { type: "purge"; accountId: string; email: string | null }
+  | { type: "startDeletion"; accountId: string; email: string | null }
+  | { type: "forceDelete"; accountId: string; email: string | null }
+  | { type: "toggleRole"; accountId: string; email: string | null; grant: boolean };
 
 export function StewardAccountsClient({ initialAccounts, currentUserId }: { initialAccounts: Account[]; currentUserId: string }) {
   const [accounts, setAccounts] = useState<Account[]>(initialAccounts);
@@ -30,6 +37,10 @@ export function StewardAccountsClient({ initialAccounts, currentUserId }: { init
   const [newPassword, setNewPassword] = useState("");
   const [newDisplayName, setNewDisplayName] = useState("");
   const [creating, setCreating] = useState(false);
+
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [modalLoading, setModalLoading] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
 
   async function load(query: string) {
     setLoading(true);
@@ -109,77 +120,42 @@ export function StewardAccountsClient({ initialAccounts, currentUserId }: { init
     }
   }
 
-  async function purge(accountId: string, email: string | null) {
-    if (!window.confirm(`Permanently delete ${email || accountId} and everything they own? This cannot be undone.`)) return;
-    setActionLoading(accountId);
-    setError("");
-    setMessage("");
-    try {
-      await fetchJson(`/api/steward/accounts/${accountId}/purge`, { method: "POST" }, "Purge account");
-      setMessage("Account permanently deleted.");
-      await load(search);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to purge account.");
-    } finally {
-      setActionLoading(null);
-    }
+  function closeModal() {
+    setPendingAction(null);
+    setModalError(null);
   }
 
-  async function startDeletion(accountId: string, email: string | null) {
-    if (!window.confirm(`Start the 30-day deletion process for ${email || accountId}? This blocks their sign-in immediately.`)) return;
-    setActionLoading(accountId);
+  async function confirmPendingAction() {
+    if (!pendingAction) return;
+    setModalLoading(true);
+    setModalError(null);
+    setActionLoading(pendingAction.accountId);
     setError("");
     setMessage("");
     try {
-      await fetchJson(`/api/steward/accounts/${accountId}/delete`, { method: "POST" }, "Start account deletion");
-      setMessage("Deletion started — sign-in blocked, recoverable for 30 days.");
+      if (pendingAction.type === "purge") {
+        await fetchJson(`/api/steward/accounts/${pendingAction.accountId}/purge`, { method: "POST" }, "Purge account");
+        setMessage("Account permanently deleted.");
+      } else if (pendingAction.type === "startDeletion") {
+        await fetchJson(`/api/steward/accounts/${pendingAction.accountId}/delete`, { method: "POST" }, "Start account deletion");
+        setMessage("Deletion started — sign-in blocked, recoverable for 30 days.");
+      } else if (pendingAction.type === "forceDelete") {
+        await fetchJson(`/api/steward/accounts/${pendingAction.accountId}/force-delete`, { method: "POST" }, "Force-delete account");
+        setMessage("Account permanently deleted.");
+      } else if (pendingAction.type === "toggleRole") {
+        await fetchJson(
+          `/api/steward/accounts/${pendingAction.accountId}/role`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ platformRole: pendingAction.grant ? "steward" : null }) },
+          "Change Steward role",
+        );
+        setMessage(pendingAction.grant ? "Steward access granted." : "Steward access revoked.");
+      }
+      setPendingAction(null);
       await load(search);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to start deletion.");
+      setModalError(err instanceof Error ? err.message : "Action failed.");
     } finally {
-      setActionLoading(null);
-    }
-  }
-
-  async function forceDelete(accountId: string, email: string | null) {
-    const confirmText = window.prompt(
-      `This immediately and permanently deletes ${email || accountId} and everything they own, skipping the 30-day recovery window. This cannot be undone.\n\nType DELETE to confirm.`,
-    );
-    if (confirmText !== "DELETE") return;
-    setActionLoading(accountId);
-    setError("");
-    setMessage("");
-    try {
-      await fetchJson(`/api/steward/accounts/${accountId}/force-delete`, { method: "POST" }, "Force-delete account");
-      setMessage("Account permanently deleted.");
-      await load(search);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to delete account.");
-    } finally {
-      setActionLoading(null);
-    }
-  }
-
-  async function toggleRole(accountId: string, currentRole: string | null, email: string | null) {
-    const grant = currentRole !== "steward";
-    const confirmMessage = grant
-      ? `Grant Steward access to ${email || accountId}? They will be able to view/manage any book and other accounts.`
-      : `Revoke Steward access from ${email || accountId}?`;
-    if (!window.confirm(confirmMessage)) return;
-    setActionLoading(accountId);
-    setError("");
-    setMessage("");
-    try {
-      await fetchJson(
-        `/api/steward/accounts/${accountId}/role`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ platformRole: grant ? "steward" : null }) },
-        "Change Steward role",
-      );
-      setMessage(grant ? "Steward access granted." : "Steward access revoked.");
-      await load(search);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to change role.");
-    } finally {
+      setModalLoading(false);
       setActionLoading(null);
     }
   }
@@ -258,24 +234,47 @@ export function StewardAccountsClient({ initialAccounts, currentUserId }: { init
                         Extend 14 days
                       </Button>
                       {account.deletionStatus === "ready_for_purge" && (
-                        <Button size="xs" color="red" loading={actionLoading === account.id} onClick={() => purge(account.id, account.email)}>
+                        <Button
+                          size="xs"
+                          color="red"
+                          loading={actionLoading === account.id}
+                          onClick={() => setPendingAction({ type: "purge", accountId: account.id, email: account.email })}
+                        >
                           Purge now
                         </Button>
                       )}
                     </>
                   )}
                   {!account.deletionStatus && (
-                    <Button size="xs" color="yellow" variant="light" loading={actionLoading === account.id} onClick={() => startDeletion(account.id, account.email)}>
+                    <Button
+                      size="xs"
+                      color="yellow"
+                      variant="light"
+                      loading={actionLoading === account.id}
+                      onClick={() => setPendingAction({ type: "startDeletion", accountId: account.id, email: account.email })}
+                    >
                       Start deletion
                     </Button>
                   )}
                   {!isSelf && (
-                    <Button size="xs" color="grape" variant="light" loading={actionLoading === account.id} onClick={() => toggleRole(account.id, account.platformRole, account.email)}>
+                    <Button
+                      size="xs"
+                      color="grape"
+                      variant="light"
+                      loading={actionLoading === account.id}
+                      onClick={() => setPendingAction({ type: "toggleRole", accountId: account.id, email: account.email, grant: account.platformRole !== "steward" })}
+                    >
                       {account.platformRole === "steward" ? "Revoke Steward" : "Grant Steward"}
                     </Button>
                   )}
                   {!isSelf && (
-                    <Button size="xs" color="red" variant="outline" loading={actionLoading === account.id} onClick={() => forceDelete(account.id, account.email)}>
+                    <Button
+                      size="xs"
+                      color="red"
+                      variant="outline"
+                      loading={actionLoading === account.id}
+                      onClick={() => setPendingAction({ type: "forceDelete", accountId: account.id, email: account.email })}
+                    >
                       Force delete
                     </Button>
                   )}
@@ -285,6 +284,58 @@ export function StewardAccountsClient({ initialAccounts, currentUserId }: { init
           );
         })}
       </Stack>
+
+      {pendingAction && (
+        <StewardActionModal
+          opened
+          loading={modalLoading}
+          error={modalError}
+          onCancel={closeModal}
+          onConfirm={confirmPendingAction}
+          {...pendingActionModalProps(pendingAction)}
+        />
+      )}
     </Stack>
   );
+}
+
+function pendingActionModalProps(action: PendingAction): {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  confirmColor?: string;
+  requireTypedConfirmation?: string;
+} {
+  const label = action.email || action.accountId;
+  switch (action.type) {
+    case "purge":
+      return {
+        title: "Purge account",
+        message: `Permanently delete ${label} and everything they own? This cannot be undone.`,
+        confirmLabel: "Purge now",
+      };
+    case "startDeletion":
+      return {
+        title: "Start account deletion",
+        message: `Start the 30-day deletion process for ${label}? This blocks their sign-in immediately.`,
+        confirmLabel: "Start deletion",
+        confirmColor: "yellow",
+      };
+    case "forceDelete":
+      return {
+        title: "Force delete account",
+        message: `This immediately and permanently deletes ${label} and everything they own, skipping the 30-day recovery window. This cannot be undone.`,
+        confirmLabel: "Force delete",
+        requireTypedConfirmation: "DELETE",
+      };
+    case "toggleRole":
+      return {
+        title: action.grant ? "Grant Steward access" : "Revoke Steward access",
+        message: action.grant
+          ? `Grant Steward access to ${label}? They will be able to view/manage any book and other accounts.`
+          : `Revoke Steward access from ${label}?`,
+        confirmLabel: action.grant ? "Grant access" : "Revoke access",
+        confirmColor: "grape",
+      };
+  }
 }
