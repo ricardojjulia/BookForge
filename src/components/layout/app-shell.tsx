@@ -57,7 +57,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Group>
           <Group gap="lg">
             <Anchor component={Link} href="/dashboard">
-              Dashboard
+              My Book Room
             </Anchor>
             <Anchor component={Link} href="/books/new">
               Import
