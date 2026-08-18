@@ -9,7 +9,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ boo
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
 
-  const { data: book } = await supabase.from("books").select("id").eq("id", bookId).eq("owner_id", user.id).single();
+  // Rely on RLS (books view access: owner OR a named collaborator OR platform
+  // staff) rather than hardcoding owner_id -- the previous literal owner check
+  // silently blocked legitimate collaborators from downloading exports, not just
+  // staff.
+  const { data: book } = await supabase.from("books").select("id").eq("id", bookId).single();
   if (!book) return NextResponse.json({ error: "Book not found." }, { status: 404 });
 
   const { data: exportRow } = await supabase
