@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Group, Modal, Paper, Select, SimpleGrid, Text, Title } from "@mantine/core";
+import { Button, Group, Modal, Select, Text, UnstyledButton } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { useRouter } from "next/navigation";
 
@@ -30,11 +30,14 @@ export function DashboardMetrics({ bookCount, reportCount, aiEngine, books }: Pr
 
   return (
     <>
-      <SimpleGrid cols={{ base: 1, md: 3 }} mb="xl">
-        <MetricLink label="Books" value={bookCount} href="#books" />
-        <MetricButton label="Critic reports" value={reportCount} onClick={open} />
+      <Group
+        gap={28}
+        style={{ padding: "20px 4px 28px", marginBottom: 8, borderBottom: "1px solid oklch(0.92 0.003 90)" }}
+      >
+        <MetricLink label="books" value={bookCount} href="#books" />
+        <MetricButton label="critic reports" value={reportCount} onClick={open} />
         <MetricLink label="AI engine" value={aiEngine} href="/settings" />
-      </SimpleGrid>
+      </Group>
 
       <Modal opened={criticChooserOpened} onClose={close} title="Choose a book" centered>
         <Select
@@ -57,25 +60,25 @@ export function DashboardMetrics({ bookCount, reportCount, aiEngine, books }: Pr
 
 function MetricLink({ label, value, href }: { label: string; value: string | number; href: string }) {
   return (
-    <Paper component="a" href={href} withBorder radius="md" p="lg" bg="white" style={metricStyle}>
+    <UnstyledButton component="a" href={href} style={metricStyle}>
       <MetricContent label={label} value={value} />
-    </Paper>
+    </UnstyledButton>
   );
 }
 
 function MetricButton({ label, value, onClick }: { label: string; value: string | number; onClick: () => void }) {
   return (
-    <Paper component="button" type="button" onClick={onClick} withBorder radius="md" p="lg" bg="white" style={metricStyle}>
+    <UnstyledButton onClick={onClick} style={metricStyle}>
       <MetricContent label={label} value={value} />
-    </Paper>
+    </UnstyledButton>
   );
 }
 
 function MetricContent({ label, value }: { label: string; value: string | number }) {
   return (
     <>
-      <Text size="sm" c="dimmed">{label}</Text>
-      <Title order={2}>{value}</Title>
+      <Text component="span" style={{ fontSize: 20, fontWeight: 800, color: "oklch(0.2 0.005 90)" }}>{value}</Text>
+      <Text component="span" style={{ fontSize: 13, color: "oklch(0.55 0.005 90)" }}> {label}</Text>
     </>
   );
 }
@@ -83,7 +86,5 @@ function MetricContent({ label, value }: { label: string; value: string | number
 const metricStyle = {
   color: "inherit",
   cursor: "pointer",
-  textAlign: "left" as const,
   textDecoration: "none",
-  width: "100%",
 };
