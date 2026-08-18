@@ -3,7 +3,6 @@
 import { useState } from "react";
 import {
   Alert,
-  Badge,
   Button,
   Group,
   NumberInput,
@@ -13,7 +12,6 @@ import {
   SimpleGrid,
   Stack,
   Switch,
-  Table,
   Tabs,
   Text,
   TextInput,
@@ -399,47 +397,98 @@ export function SettingsForm({
                 />
               </SimpleGrid>
               {recommendations.length > 0 && (
-                <Paper withBorder radius="sm" p="md" bg="#fbfaf8">
-                  <Title order={4} mb="sm">
+                <div style={{ background: "#fff", border: "1px solid oklch(0.92 0.003 90)", borderRadius: 14, padding: "20px 24px" }}>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: "oklch(0.2 0.005 90)", marginBottom: 14 }}>
                     Detected {profileLabel(settings.quality_profile)} Match
-                  </Title>
-                  <Table striped highlightOnHover>
-                    <thead>
-                      <tr>
-                        <th>Task</th>
-                        <th>Selected model</th>
-                        <th>Why</th>
-                        <th>Alternatives</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {recommendations.map((item) => (
-                        <tr key={item.task}>
-                          <td>{item.label}</td>
-                          <td>
-                            {item.selectedModel ? (
-                              <Badge color="green" variant="light">
-                                {item.selectedModel}
-                              </Badge>
-                            ) : (
-                              <Badge color="yellow" variant="light">
-                                No match
-                              </Badge>
-                            )}
-                          </td>
-                          <td>
-                            <Text size="sm">{item.reason}</Text>
-                          </td>
-                          <td>
-                            <Text size="sm" c="dimmed">
-                              {item.alternatives.join(", ") || "None"}
-                            </Text>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </Table>
-                </Paper>
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "minmax(100px,140px) minmax(140px,190px) minmax(180px,2fr) minmax(160px,1.3fr)",
+                      gap: 12,
+                      paddingBottom: 8,
+                      borderBottom: "1px solid oklch(0.9 0.003 90)",
+                    }}
+                  >
+                    {["Task", "Selected model", "Why", "Alternatives"].map((heading) => (
+                      <span
+                        key={heading}
+                        style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "oklch(0.55 0.005 90)" }}
+                      >
+                        {heading}
+                      </span>
+                    ))}
+                  </div>
+                  {recommendations.map((item) => (
+                    <div
+                      key={item.task}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "minmax(100px,140px) minmax(140px,190px) minmax(180px,2fr) minmax(160px,1.3fr)",
+                        gap: 12,
+                        padding: "12px 0",
+                        borderBottom: "1px solid oklch(0.93 0.003 90)",
+                        alignItems: "start",
+                      }}
+                    >
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "oklch(0.2 0.005 90)" }}>{item.label}</span>
+                      <div>
+                        {item.selectedModel ? (
+                          <span
+                            style={{
+                              display: "inline-block",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              fontFamily: "ui-monospace, monospace",
+                              padding: "4px 9px",
+                              borderRadius: 6,
+                              background: "oklch(0.94 0.05 165)",
+                              color: "oklch(0.4 0.1 165)",
+                            }}
+                          >
+                            {item.selectedModel}
+                          </span>
+                        ) : (
+                          <span
+                            style={{
+                              display: "inline-block",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              padding: "4px 9px",
+                              borderRadius: 6,
+                              background: "oklch(0.95 0.06 45)",
+                              color: "oklch(0.5 0.12 45)",
+                            }}
+                          >
+                            No match
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: 12, color: "oklch(0.35 0.005 90)", lineHeight: 1.45 }}>{item.reason}</span>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                        {item.alternatives.length ? (
+                          item.alternatives.map((alt) => (
+                            <span
+                              key={alt}
+                              style={{
+                                fontSize: 10.5,
+                                fontFamily: "ui-monospace, monospace",
+                                padding: "3px 8px",
+                                borderRadius: 5,
+                                background: "oklch(0.95 0.003 90)",
+                                color: "oklch(0.4 0.005 90)",
+                              }}
+                            >
+                              {alt}
+                            </span>
+                          ))
+                        ) : (
+                          <span style={{ fontSize: 11, color: "oklch(0.6 0.005 90)" }}>None</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
               <Group justify="space-between">
                 <Button
