@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Alert, Badge, Button, Checkbox, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { Alert, Badge, Button, Group, Stack, Text } from "@mantine/core";
 import { fetchJson } from "@/lib/http/fetch-json";
 
 type Chapter = { id: string; chapter_number: number; title: string | null };
@@ -62,13 +62,13 @@ export function VoiceCapturePanel({ bookId, chapters, existingProfile }: Props) 
   }
 
   return (
-    <Paper withBorder radius="md" p="xl" bg="white">
+    <div style={{ background: "#fff", border: "1px solid oklch(0.92 0.003 90)", borderRadius: 12, padding: "26px 28px" }}>
       <Stack gap="md">
         <div>
-          <Title order={2}>Author Voice Capture</Title>
-          <Text c="dimmed" size="sm">
+          <div style={{ fontSize: 22, fontWeight: 800, color: "oklch(0.2 0.005 90)" }}>Author Voice Capture</div>
+          <p style={{ margin: "8px 0 0", fontSize: 14, color: "oklch(0.5 0.005 90)", lineHeight: 1.6, maxWidth: 900 }}>
             Select 1–5 chapters that best represent your writing at its strongest. BookForge will extract a voice fingerprint and inject it into every rewrite prompt.
-          </Text>
+          </p>
         </div>
 
         {profile && (
@@ -88,22 +88,63 @@ export function VoiceCapturePanel({ bookId, chapters, existingProfile }: Props) 
           </Alert>
         )}
 
-        <Stack gap="xs">
-          <Text size="sm" fw={500}>Select chapters to analyze (pick your best writing):</Text>
-          {chapters.map((ch) => (
-            <Checkbox
-              key={ch.id}
-              checked={selected.includes(ch.id)}
-              onChange={() => toggle(ch.id)}
-              disabled={!selected.includes(ch.id) && selected.length >= 5}
-              label={`Ch. ${ch.chapter_number}${ch.title ? ` — ${ch.title}` : ""}`}
-            />
-          ))}
-        </Stack>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "oklch(0.25 0.005 90)", marginBottom: 10 }}>
+            Select chapters to analyze (pick your best writing)
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {chapters.map((ch) => {
+              const on = selected.includes(ch.id);
+              const disabled = !on && selected.length >= 5;
+              return (
+                <button
+                  key={ch.id}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => toggle(ch.id)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    background: on ? "oklch(0.96 0.03 275)" : "#fff",
+                    color: on ? "oklch(0.4 0.13 275)" : disabled ? "oklch(0.7 0.005 90)" : "oklch(0.35 0.005 90)",
+                    border: `1px solid ${on ? "oklch(0.75 0.08 275)" : "oklch(0.87 0.005 90)"}`,
+                    padding: "9px 16px",
+                    borderRadius: 8,
+                    fontWeight: 600,
+                    fontSize: 13,
+                    cursor: disabled ? "default" : "pointer",
+                    opacity: disabled ? 0.6 : 1,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: 4,
+                      border: `2px solid ${on ? "oklch(0.5 0.16 275)" : "oklch(0.8 0.005 90)"}`,
+                      background: on ? "oklch(0.5 0.16 275)" : "#fff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#fff",
+                      fontSize: 9,
+                      fontWeight: 800,
+                    }}
+                  >
+                    {on ? "✓" : ""}
+                  </span>
+                  {`Ch. ${ch.chapter_number}${ch.title ? ` — ${ch.title}` : ""}`}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         {error && <Alert color="red" variant="light">{error}</Alert>}
 
         <Button
+          fullWidth
           color="grape"
           loading={loading}
           disabled={selected.length === 0}
@@ -112,6 +153,6 @@ export function VoiceCapturePanel({ bookId, chapters, existingProfile }: Props) 
           {profile ? "Re-capture voice" : "Capture voice"} ({selected.length} chapter{selected.length !== 1 ? "s" : ""} selected)
         </Button>
       </Stack>
-    </Paper>
+    </div>
   );
 }

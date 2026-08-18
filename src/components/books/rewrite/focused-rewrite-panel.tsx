@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Alert, Button, Checkbox, Group, Paper, Progress, Stack, Switch, Text, ThemeIcon, Title, Loader } from "@mantine/core";
+import { Alert, Button, Group, Progress, Stack, Text, ThemeIcon, Loader } from "@mantine/core";
 import { IconCheck } from "@tabler/icons-react";
 import { useRouter } from "next/navigation";
 import { getJobProgressDisplay } from "@/lib/ai/job-state";
@@ -320,14 +320,14 @@ export function FocusedRewritePanel({ bookId }: { bookId: string }) {
   }
 
   return (
-    <Paper withBorder radius="md" p="xl" bg="white" mt="xl">
+    <div style={{ background: "#fff", border: "1px solid oklch(0.92 0.003 90)", borderRadius: 12, padding: "26px 28px", marginTop: 32 }}>
       <Stack>
         <div>
-          <Title order={2}>Rewrite with Selected Critics</Title>
-          <Text c="dimmed">
+          <div style={{ fontSize: 22, fontWeight: 800, color: "oklch(0.2 0.005 90)" }}>Rewrite with Selected Critics</div>
+          <p style={{ margin: "8px 0 0", fontSize: 14, color: "oklch(0.5 0.005 90)", lineHeight: 1.6, maxWidth: 900 }}>
             Pick the critic lenses you want this rewrite to prioritize. BookForge plans and executes a full-book
             rewrite focused on those lenses, accepts the rewritten paragraphs, then refreshes their scores above.
-          </Text>
+          </p>
         </div>
 
         {resumePlan && !running && (
@@ -346,26 +346,105 @@ export function FocusedRewritePanel({ bookId }: { bookId: string }) {
           </Alert>
         )}
 
-        <Stack gap="xs">
-          {ALL_LENSES.map((lens) => (
-            <Checkbox
-              key={lens}
-              label={criticLenses[lens].label}
-              description={criticLenses[lens].instruction}
-              checked={selectedLenses.includes(lens)}
-              disabled={running || completedRun}
-              onChange={(event) => toggleLens(lens, event.currentTarget.checked)}
-            />
-          ))}
-        </Stack>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+          {ALL_LENSES.map((lens) => {
+            const on = selectedLenses.includes(lens);
+            const disabled = running || completedRun;
+            return (
+              <div
+                key={lens}
+                onClick={() => !disabled && toggleLens(lens, !on)}
+                style={{
+                  cursor: disabled ? "default" : "pointer",
+                  opacity: disabled && !on ? 0.6 : 1,
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "flex-start",
+                  border: `1px solid ${on ? "oklch(0.75 0.08 275)" : "oklch(0.9 0.003 90)"}`,
+                  background: on ? "oklch(0.96 0.03 275)" : "#fff",
+                  borderRadius: 10,
+                  padding: "14px 16px",
+                }}
+              >
+                <span
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: 5,
+                    border: `2px solid ${on ? "oklch(0.5 0.16 275)" : "oklch(0.8 0.005 90)"}`,
+                    background: on ? "oklch(0.5 0.16 275)" : "#fff",
+                    flexShrink: 0,
+                    marginTop: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#fff",
+                    fontSize: 12,
+                    fontWeight: 800,
+                  }}
+                >
+                  {on ? "✓" : ""}
+                </span>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "oklch(0.2 0.005 90)" }}>{criticLenses[lens].label}</div>
+                  <div style={{ fontSize: 12, color: "oklch(0.5 0.005 90)", marginTop: 3, lineHeight: 1.5 }}>
+                    {criticLenses[lens].instruction}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
 
-        <Switch
-          label="Also re-rewrite already-accepted paragraphs"
-          description="Turn off to only fill in paragraphs that have never been rewritten."
-          checked={includeAccepted}
-          disabled={running || completedRun}
-          onChange={(event) => setIncludeAccepted(event.currentTarget.checked)}
-        />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            paddingTop: 16,
+            borderTop: "1px solid oklch(0.94 0.003 90)",
+          }}
+        >
+          <button
+            type="button"
+            disabled={running || completedRun}
+            onClick={() => setIncludeAccepted((current) => !current)}
+            style={{
+              width: 38,
+              height: 22,
+              borderRadius: 11,
+              background: includeAccepted ? "oklch(0.5 0.16 275)" : "oklch(0.88 0.003 90)",
+              position: "relative",
+              flexShrink: 0,
+              border: "none",
+              padding: 0,
+              cursor: running || completedRun ? "default" : "pointer",
+              transition: "background 0.15s",
+            }}
+          >
+            <span
+              style={{
+                position: "absolute",
+                top: 2,
+                left: includeAccepted ? 18 : 2,
+                width: 18,
+                height: 18,
+                borderRadius: "50%",
+                background: "#fff",
+                boxShadow: "0 1px 2px oklch(0.2 0 0 / 0.3)",
+                transition: "left 0.15s",
+              }}
+            />
+          </button>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "oklch(0.25 0.005 90)" }}>
+              Also re-rewrite already-accepted paragraphs
+            </div>
+            <div style={{ fontSize: 12, color: "oklch(0.55 0.005 90)", marginTop: 1 }}>
+              Turn off to only fill in paragraphs that have never been rewritten.
+            </div>
+          </div>
+        </div>
 
         {running && (
           <Stack gap={6}>
@@ -432,6 +511,6 @@ export function FocusedRewritePanel({ bookId }: { bookId: string }) {
         )}
         {error && <Alert color="red">{error}</Alert>}
       </Stack>
-    </Paper>
+    </div>
   );
 }
