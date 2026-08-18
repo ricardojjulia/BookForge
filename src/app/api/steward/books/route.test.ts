@@ -39,6 +39,15 @@ describe("steward books list route", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toEqual({ books: [{ id: "book-1" }], page: 1, hasMore: false });
-    expect(listStewardBooksMock).toHaveBeenCalledWith({ client: "admin" }, { search: "Forge", page: undefined });
+    expect(listStewardBooksMock).toHaveBeenCalledWith({ client: "admin" }, { search: "Forge", page: undefined, ownerId: undefined });
+  });
+
+  it("passes an ownerId filter through when provided", async () => {
+    requireStaffMock.mockResolvedValue({ user: { id: "steward-1" }, response: null });
+    mockCreateAdminClient.mockReturnValue({ client: "admin" });
+    listStewardBooksMock.mockResolvedValue({ books: [], page: 1, hasMore: false });
+
+    await GET(new Request("http://localhost/api/steward/books?ownerId=user-1"));
+    expect(listStewardBooksMock).toHaveBeenCalledWith({ client: "admin" }, { search: undefined, page: undefined, ownerId: "user-1" });
   });
 });

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Alert, Badge, Button, Collapse, Group, Paper, PasswordInput, Stack, Text, TextInput } from "@mantine/core";
+import Link from "next/link";
+import { Alert, Anchor, Badge, Button, Collapse, Group, Paper, PasswordInput, Stack, Text, TextInput } from "@mantine/core";
 import { fetchJson } from "@/lib/http/fetch-json";
 
 type Account = {
@@ -13,6 +14,7 @@ type Account = {
   deletionStatus: "pending" | "ready_for_purge" | null;
   purgeAfter: string | null;
   platformRole: string | null;
+  bookCount: number;
 };
 
 export function StewardAccountsClient({ initialAccounts, currentUserId }: { initialAccounts: Account[]; currentUserId: string }) {
@@ -236,6 +238,14 @@ export function StewardAccountsClient({ initialAccounts, currentUserId }: { init
                     Joined {account.createdAt ? new Date(account.createdAt).toLocaleDateString() : "unknown"}
                     {account.lastSignInAt ? ` · last sign-in ${new Date(account.lastSignInAt).toLocaleDateString()}` : ""}
                     {account.purgeAfter ? ` · purge scheduled ${new Date(account.purgeAfter).toLocaleDateString()}` : ""}
+                    {" · "}
+                    {account.bookCount > 0 ? (
+                      <Anchor component={Link} href={`/steward/books?ownerId=${account.id}`} size="xs">
+                        {account.bookCount} book{account.bookCount === 1 ? "" : "s"}
+                      </Anchor>
+                    ) : (
+                      "0 books"
+                    )}
                   </Text>
                 </div>
                 <Group gap="xs">
