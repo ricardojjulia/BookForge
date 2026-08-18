@@ -232,7 +232,7 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
 
   return (
     <Container size="xl">
-      <DataFreshnessBanner routeKey={`book:${bookId}:dashboard`} fetchedAt={new Date().toISOString()} label="Book dashboard data" />
+      <DataFreshnessBanner routeKey={`book:${bookId}:dashboard`} fetchedAt={new Date().toISOString()} label="Book dashboard data" variant="subtle" />
       <LiveProcessBanner bookId={bookId} />
       <Group justify="space-between" mb="xl" align="flex-start">
         <div>

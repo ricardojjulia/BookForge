@@ -2,14 +2,25 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Anchor, AppShell as MantineAppShell, Button, Group, Menu, Text, ThemeIcon, UnstyledButton } from "@mantine/core";
-import { IconBook2, IconChevronDown, IconLogout, IconShieldCog } from "@tabler/icons-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Anchor, AppShell as MantineAppShell, Button, Group, Menu, Text, UnstyledButton } from "@mantine/core";
+import { IconChevronDown, IconLogout, IconShieldCog } from "@tabler/icons-react";
 import { createClient } from "@/lib/supabase/client";
 import { GlobalJobIndicator } from "@/components/layout/global-job-indicator";
 
+const NAV_LINKS = [
+  { href: "/dashboard", label: "My Book Room" },
+  { href: "/books/new", label: "Import" },
+  { href: "/creativewriter", label: "CreativeWriter" },
+  { href: "/series", label: "Series" },
+  { href: "/analytics", label: "Analytics" },
+  { href: "/settings", label: "Settings" },
+  { href: "/account", label: "Account" },
+];
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [email, setEmail] = useState<string | null>(null);
   const [isSteward, setIsSteward] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -47,48 +58,87 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <MantineAppShell header={{ height: 64 }} padding="md">
-      <MantineAppShell.Header px="lg">
-        <Group h="100%" justify="space-between">
-          <Group>
-            <ThemeIcon color="grape" radius="sm">
-              <IconBook2 size={18} />
-            </ThemeIcon>
-            <Text fw={800}>BookForge AI</Text>
+      <MantineAppShell.Header
+        px={40}
+        style={{ borderBottom: "1px solid oklch(0.92 0.003 90)" }}
+      >
+        <Group h="100%" justify="space-between" wrap="nowrap">
+          <Group gap={10} wrap="nowrap">
+            <div
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 8,
+                background: "oklch(0.5 0.16 275)",
+                color: "white",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: 800,
+                fontSize: 15,
+                flexShrink: 0,
+              }}
+            >
+              B
+            </div>
+            <Text style={{ fontWeight: 700, fontSize: 16, color: "oklch(0.2 0.005 90)" }}>BookForge AI</Text>
           </Group>
-          <Group gap="lg">
-            <Anchor component={Link} href="/dashboard">
-              My Book Room
-            </Anchor>
-            <Anchor component={Link} href="/books/new">
-              Import
-            </Anchor>
-            <Anchor component={Link} href="/creativewriter">
-              CreativeWriter
-            </Anchor>
-            <Anchor component={Link} href="/series">
-              Series
-            </Anchor>
-            <Anchor component={Link} href="/analytics">
-              Analytics
-            </Anchor>
-            <Anchor component={Link} href="/settings">
-              Settings
-            </Anchor>
-            <Anchor component={Link} href="/account">
-              Account
-            </Anchor>
+          <Group gap={20} wrap="nowrap">
+            {NAV_LINKS.map((link) => {
+              const active = pathname === link.href || pathname?.startsWith(`${link.href}/`);
+              return (
+                <Anchor
+                  key={link.href}
+                  component={Link}
+                  href={link.href}
+                  underline="never"
+                  style={{
+                    fontWeight: active ? 600 : 500,
+                    fontSize: 14,
+                    color: active ? "oklch(0.5 0.16 275)" : "oklch(0.45 0.005 90)",
+                  }}
+                >
+                  {link.label}
+                </Anchor>
+              );
+            })}
             {email ? (
-              <Group gap="xs">
+              <Group gap="xs" wrap="nowrap">
                 <GlobalJobIndicator />
                 <Menu shadow="md" width={200} position="bottom-end">
                   <Menu.Target>
-                    <UnstyledButton>
-                      <Group gap={4}>
-                        <Text size="sm" c="dimmed">
-                          {email}
-                        </Text>
-                        <IconChevronDown size={14} color="var(--mantine-color-dimmed)" />
-                      </Group>
+                    <UnstyledButton
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        border: "1px solid oklch(0.9 0.003 90)",
+                        borderRadius: 8,
+                        padding: "7px 10px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: "50%",
+                          background: "oklch(0.65 0.16 145)",
+                          flexShrink: 0,
+                        }}
+                      />
+                      <Text
+                        style={{
+                          fontSize: 13,
+                          color: "oklch(0.4 0.005 90)",
+                          maxWidth: 220,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {email}
+                      </Text>
+                      <IconChevronDown size={14} color="var(--mantine-color-dimmed)" />
                     </UnstyledButton>
                   </Menu.Target>
                   <Menu.Dropdown>

@@ -1,4 +1,4 @@
-import { Alert, Button, Container, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { Alert, Button, Container, Group, Paper, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { CreateSeriesButton } from "@/components/series/create-series-button";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
@@ -18,36 +18,56 @@ export default async function SeriesListPage() {
   const { data: seriesList } = await supabase.from("series").select("id,title,description,created_at").eq("owner_id", user.id).order("created_at", { ascending: false });
 
   return (
-    <Container size="lg">
-      <Group justify="space-between" mb="xl">
+    <Container size="xl">
+      <Group justify="space-between" align="flex-start" mb={8} wrap="wrap">
         <div>
-          <Title>Series Bible</Title>
-          <Text c="dimmed">Manage multi-book series, shared world-building, and cross-book continuity.</Text>
+          <Title style={{ fontSize: 28, letterSpacing: "-0.01em" }}>Series Bible</Title>
+          <Text mt={6} style={{ fontSize: 14, color: "oklch(0.5 0.005 90)" }}>
+            Manage multi-book series, shared world-building, and cross-book continuity.
+          </Text>
         </div>
         <CreateSeriesButton />
       </Group>
+
+      <div style={{ marginTop: 24 }}>
+        {(seriesList || []).map((s) => (
+          <div
+            key={s.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 16,
+              padding: "16px 4px",
+              borderBottom: "1px solid oklch(0.93 0.003 90)",
+            }}
+          >
+            <span
+              style={{
+                width: 6,
+                alignSelf: "stretch",
+                borderRadius: 3,
+                background: "oklch(0.5 0.16 275)",
+                flexShrink: 0,
+              }}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontSize: 15, fontWeight: 700, color: "oklch(0.2 0.005 90)" }}>{s.title}</span>
+              {s.description && (
+                <div style={{ fontSize: 13, color: "oklch(0.6 0.005 90)", marginTop: 3 }}>{s.description}</div>
+              )}
+            </div>
+            <Button component={Link} href={`/series/${s.id}`} color="grape" style={{ width: 150, flexShrink: 0 }}>
+              Open Series Bible
+            </Button>
+          </div>
+        ))}
+      </div>
 
       {!seriesList?.length && (
         <Paper withBorder radius="md" p="xl" bg="white">
           <Text c="dimmed">No series yet. Create one to link books and track cross-book continuity.</Text>
         </Paper>
       )}
-
-      <Stack gap="md">
-        {(seriesList || []).map((s) => (
-          <Paper key={s.id} withBorder radius="md" p="lg" bg="white">
-            <Group justify="space-between">
-              <Stack gap={4}>
-                <Title order={3}>{s.title}</Title>
-                {s.description && <Text c="dimmed" size="sm">{s.description}</Text>}
-              </Stack>
-              <Link href={`/series/${s.id}`} style={{ textDecoration: "none" }}>
-                <Button color="grape" variant="light">Open Series Bible</Button>
-              </Link>
-            </Group>
-          </Paper>
-        ))}
-      </Stack>
     </Container>
   );
 }
