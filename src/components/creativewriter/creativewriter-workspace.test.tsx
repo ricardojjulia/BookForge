@@ -193,6 +193,56 @@ describe("CreativeWriterWorkspace", () => {
     expect(screen.getByLabelText("CreativeWriter manuscript editor")).toHaveValue("Second paragraph.");
   });
 
+  it("steps to the next paragraph across a chapter boundary with the chevron control", async () => {
+    stubBrowserLayoutApis();
+    const user = userEvent.setup();
+
+    renderWorkspace(workspaceData({ includeSecondChapter: true, conflicts: [] }));
+
+    expect(screen.getByRole("heading", { name: "Opening" })).toBeInTheDocument();
+    expect(screen.getByLabelText("CreativeWriter manuscript editor")).toHaveValue("Original paragraph.");
+    expect(screen.getByLabelText("Previous paragraph")).toBeDisabled();
+
+    await user.click(screen.getByLabelText("Next paragraph"));
+
+    expect(await screen.findByRole("heading", { name: "Rising Action" })).toBeInTheDocument();
+    expect(screen.getByLabelText("CreativeWriter manuscript editor")).toHaveValue("First paragraph of the second chapter.");
+    expect(screen.getByLabelText("Next paragraph")).toBeDisabled();
+
+    await user.click(screen.getByLabelText("Previous paragraph"));
+
+    expect(await screen.findByRole("heading", { name: "Opening" })).toBeInTheDocument();
+    expect(screen.getByLabelText("CreativeWriter manuscript editor")).toHaveValue("Original paragraph.");
+  });
+
+  it("blocks stepping to the next paragraph while the selected paragraph has an unsynced draft", async () => {
+    stubBrowserLayoutApis();
+    const user = userEvent.setup();
+
+    renderWorkspace(workspaceData({ includeSecondParagraph: true, conflicts: [] }));
+
+    await user.type(screen.getByLabelText("CreativeWriter manuscript editor"), " Unsynced.");
+    await user.click(screen.getByLabelText("Next paragraph"));
+
+    expect(await screen.findByText("Push or discard the current draft before switching paragraphs.")).toBeInTheDocument();
+    expect(screen.getByLabelText("CreativeWriter manuscript editor")).toHaveValue("Original paragraph. Unsynced.");
+  });
+
+  it("falls back to the paragraph's original text when current and accepted text are both empty", () => {
+    stubBrowserLayoutApis();
+    const data = workspaceData({ conflicts: [] });
+    data.paragraphs[0] = {
+      ...data.paragraphs[0],
+      currentText: null,
+      acceptedText: null,
+      originalText: "Archived original text.",
+    };
+
+    renderWorkspace(data);
+
+    expect(screen.getByLabelText("CreativeWriter manuscript editor")).toHaveValue("Archived original text.");
+  });
+
   it("rehydrates the editor when route data changes to another selected book", async () => {
     stubBrowserLayoutApis();
     const { rerender } = renderWorkspace();
@@ -702,6 +752,7 @@ function stubBrowserLayoutApis() {
 function workspaceData(
   options: {
     includeSecondParagraph?: boolean;
+    includeSecondChapter?: boolean;
     conflicts?: CreativeWriterWorkspaceData["conflicts"];
     selectedBookId?: "book-1" | "book-2";
     includeOwnSuggestion?: boolean;
@@ -754,6 +805,7 @@ function workspaceData(
           sourceParagraphNumber: 1,
           currentText: "Second book paragraph.",
           acceptedText: null,
+          originalText: null,
           updatedAt: "2026-08-02T12:10:00.000Z",
         },
       ],
@@ -785,6 +837,7 @@ function workspaceData(
       sourceParagraphNumber: 1,
       currentText: "Original paragraph.",
       acceptedText: null,
+      originalText: null,
       updatedAt: "2026-08-02T12:00:00.000Z",
     },
   ];
@@ -798,6 +851,21 @@ function workspaceData(
       sourceParagraphNumber: 2,
       currentText: "Second paragraph.",
       acceptedText: null,
+      originalText: null,
+      updatedAt: "2026-08-02T12:00:00.000Z",
+    });
+  }
+  if (options.includeSecondChapter) {
+    paragraphs.push({
+      id: "paragraph-2b",
+      chapterId: "chapter-1b",
+      sceneId: "scene-1b",
+      sceneNumber: 1,
+      paragraphNumber: 1,
+      sourceParagraphNumber: 1,
+      currentText: "First paragraph of the second chapter.",
+      acceptedText: null,
+      originalText: null,
       updatedAt: "2026-08-02T12:00:00.000Z",
     });
   }
@@ -906,6 +974,18 @@ function workspaceData(
         currentText: "Chapter text.",
         updatedAt: "2026-08-02T12:00:00.000Z",
       },
+      ...(options.includeSecondChapter
+        ? [
+            {
+              id: "chapter-1b",
+              chapterNumber: 2,
+              title: "Rising Action",
+              summary: null,
+              currentText: "Second chapter text.",
+              updatedAt: "2026-08-02T12:00:00.000Z",
+            },
+          ]
+        : []),
     ],
     paragraphs,
     readerComments: [
