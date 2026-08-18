@@ -15,6 +15,7 @@ export async function GET(request: Request) {
     const result = await listStewardBooks(createAdminClient(), {
       search: searchParams.get("search") || undefined,
       page: Number(searchParams.get("page")) || undefined,
+      ownerId: searchParams.get("ownerId") || undefined,
     });
     return NextResponse.json(result);
   } catch (error) {

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Alert, Badge, Button, Group, Paper, Stack, Text, TextInput } from "@mantine/core";
 import { fetchJson } from "@/lib/http/fetch-json";
 
@@ -15,18 +16,34 @@ type Book = {
   updated_at: string | null;
 };
 
-export function StewardBooksClient({ initialBooks }: { initialBooks: Book[] }) {
+export function StewardBooksClient({
+  initialBooks,
+  initialOwnerId,
+  initialOwnerEmail,
+}: {
+  initialBooks: Book[];
+  initialOwnerId: string | null;
+  initialOwnerEmail: string | null;
+}) {
+  const router = useRouter();
   const [books, setBooks] = useState<Book[]>(initialBooks);
   const [search, setSearch] = useState("");
+  const [ownerId, setOwnerId] = useState(initialOwnerId);
+  const [ownerEmail, setOwnerEmail] = useState(initialOwnerEmail);
   const [loading, setLoading] = useState(false);
+  const [transferLoading, setTransferLoading] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
-  async function load(query: string) {
+  async function load(query: string, ownerFilter: string | null) {
     setLoading(true);
     setError("");
     try {
+      const params = new URLSearchParams();
+      if (query) params.set("search", query);
+      if (ownerFilter) params.set("ownerId", ownerFilter);
       const result = await fetchJson<{ books: Book[] }>(
-        `/api/steward/books${query ? `?search=${encodeURIComponent(query)}` : ""}`,
+        `/api/steward/books${params.toString() ? `?${params.toString()}` : ""}`,
         {},
         "Load books",
       );
@@ -38,23 +55,64 @@ export function StewardBooksClient({ initialBooks }: { initialBooks: Book[] }) {
     }
   }
 
+  function clearOwnerFilter() {
+    setOwnerId(null);
+    setOwnerEmail(null);
+    router.replace("/steward/books");
+    void load(search, null);
+  }
+
+  async function transfer(event: React.MouseEvent, book: Book) {
+    event.preventDefault();
+    event.stopPropagation();
+    const newOwnerEmail = window.prompt(`Transfer "${book.title}" to which account's email?`);
+    if (!newOwnerEmail) return;
+    setTransferLoading(book.id);
+    setError("");
+    setMessage("");
+    try {
+      await fetchJson(
+        `/api/steward/books/${book.id}/transfer`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ newOwnerEmail }) },
+        "Transfer book",
+      );
+      setMessage(`"${book.title}" transferred to ${newOwnerEmail}.`);
+      await load(search, ownerId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to transfer book.");
+    } finally {
+      setTransferLoading(null);
+    }
+  }
+
   return (
     <Stack gap="md">
       <Text size="sm" c="dimmed">
         Opening a book here uses your Steward access to view/edit it like any admin-tier collaborator would — the same pages every owner uses.
       </Text>
+
+      {ownerId && (
+        <Alert color="grape" variant="light">
+          <Group justify="space-between">
+            <Text size="sm">Showing books owned by <strong>{ownerEmail || ownerId}</strong></Text>
+            <Button size="xs" variant="subtle" color="dark" onClick={clearOwnerFilter}>Clear filter</Button>
+          </Group>
+        </Alert>
+      )}
+
       <Group>
         <TextInput
           placeholder="Search by title"
           value={search}
           onChange={(event) => setSearch(event.currentTarget.value)}
-          onKeyDown={(event) => { if (event.key === "Enter") void load(search); }}
+          onKeyDown={(event) => { if (event.key === "Enter") void load(search, ownerId); }}
           style={{ flex: 1 }}
         />
-        <Button variant="light" color="grape" loading={loading} onClick={() => load(search)}>Search</Button>
+        <Button variant="light" color="grape" loading={loading} onClick={() => load(search, ownerId)}>Search</Button>
       </Group>
 
       {error && <Alert color="red">{error}</Alert>}
+      {message && <Alert color="green">{message}</Alert>}
       {!loading && !books.length && <Text c="dimmed">No books found.</Text>}
 
       <Stack gap="xs">
@@ -71,6 +129,15 @@ export function StewardBooksClient({ initialBooks }: { initialBooks: Book[] }) {
                   {book.updated_at ? ` · updated ${new Date(book.updated_at).toLocaleDateString()}` : ""}
                 </Text>
               </div>
+              <Button
+                size="xs"
+                variant="light"
+                color="dark"
+                loading={transferLoading === book.id}
+                onClick={(event) => void transfer(event, book)}
+              >
+                Transfer
+              </Button>
             </Group>
           </Paper>
         ))}
