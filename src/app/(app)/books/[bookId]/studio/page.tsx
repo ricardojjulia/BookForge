@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Container, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import { Alert, Container, Stack, Title } from "@mantine/core";
 import Link from "next/link";
 import { AutoReviewWizard } from "@/components/books/auto-review/auto-review-wizard";
 import { BookActions } from "@/components/books/book-actions";
@@ -58,40 +58,70 @@ export default async function StudioPage({ params }: { params: Promise<{ bookId:
         ),
     ).length || 0;
 
+  const quickLinks: { label: string; href: string }[] = [
+    { label: "World Bible", href: `/books/${bookId}/world` },
+    {
+      label: "Reader View",
+      href: `/books/${bookId}/read?returnTo=${encodeURIComponent(`/books/${bookId}/studio`)}&returnLabel=${encodeURIComponent("Back to Studio")}`,
+    },
+    { label: "Abridged Edition", href: `/books/${bookId}/abridgement` },
+    { label: "Publishing Lab", href: `/books/${bookId}/publishing-lab` },
+    { label: "Jobs History", href: `/books/${bookId}/jobs` },
+  ];
+
   return (
     <Container size="xl">
-      <Title mb="xl">Studio</Title>
+      <Title style={{ fontSize: 28, fontWeight: 800, color: "oklch(0.2 0.005 90)", letterSpacing: "-0.01em" }} mb={24}>
+        Studio
+      </Title>
       <Stack gap="xl">
-        <Paper id="studio-actions" withBorder radius="md" p="xl" bg="white">
-          <Group justify="space-between" mb="sm" align="flex-start" wrap="nowrap">
-            <div>
-              <Group gap="xs" mb={4}>
-                <Title order={2}>Studio Actions</Title>
-                <Badge color="grape" variant="light" size="sm">Local AI via LM Studio</Badge>
-              </Group>
-              <Text c="dimmed" size="sm">
-                Analyze, evaluate, revise, review, and export this manuscript from one controlled workflow.
-              </Text>
+        <div
+          id="studio-actions"
+          style={{ background: "#fff", border: "1px solid oklch(0.92 0.003 90)", borderRadius: 12, padding: "24px 26px" }}
+        >
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 20, flexWrap: "wrap", marginBottom: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 19, fontWeight: 800, color: "oklch(0.2 0.005 90)" }}>Studio Actions</span>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.03em",
+                  padding: "4px 10px",
+                  borderRadius: 5,
+                  background: "oklch(0.94 0.04 275)",
+                  color: "oklch(0.45 0.13 275)",
+                }}
+              >
+                LOCAL AI VIA LM STUDIO
+              </span>
             </div>
             <AutoReviewWizard bookId={bookId} bookTitle={book.title} />
-          </Group>
-          <Group gap="xs" mb="lg">
-            <Link href={`/books/${bookId}/world`} style={{ textDecoration: "none" }}>
-              <Button size="xs" color="violet" variant="light">World Bible</Button>
-            </Link>
-            <Link href={`/books/${bookId}/read?returnTo=${encodeURIComponent(`/books/${bookId}/studio`)}&returnLabel=${encodeURIComponent("Back to Studio")}`} style={{ textDecoration: "none" }}>
-              <Button size="xs" color="cyan" variant="light">Reader View</Button>
-            </Link>
-            <Link href={`/books/${bookId}/abridgement`} style={{ textDecoration: "none" }}>
-              <Button size="xs" color="teal" variant="light">Abridged Edition</Button>
-            </Link>
-            <Link href={`/books/${bookId}/publishing-lab`} style={{ textDecoration: "none" }}>
-              <Button size="xs" color="orange" variant="light">Publishing Lab</Button>
-            </Link>
-            <Link href={`/books/${bookId}/jobs`} style={{ textDecoration: "none" }}>
-              <Button size="xs" color="grape" variant="light">Jobs History</Button>
-            </Link>
-          </Group>
+          </div>
+          <p style={{ margin: "0 0 18px", fontSize: 14, color: "oklch(0.5 0.005 90)" }}>
+            Analyze, evaluate, revise, review, and export this manuscript from one controlled workflow.
+          </p>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 24 }}>
+            {quickLinks.map((link) => (
+              <Link
+                key={link.label}
+                href={link.href}
+                style={{
+                  textDecoration: "none",
+                  display: "inline-block",
+                  background: "#fff",
+                  color: "oklch(0.35 0.005 90)",
+                  border: "1px solid oklch(0.87 0.005 90)",
+                  padding: "8px 16px",
+                  borderRadius: 8,
+                  fontWeight: 600,
+                  fontSize: 13,
+                }}
+              >
+                {link.label}
+              </Link>
+            ))}
+          </div>
           <BookActions
             bookId={bookId}
             chapterCount={chapters?.length || 0}
@@ -99,7 +129,7 @@ export default async function StudioPage({ params }: { params: Promise<{ bookId:
             paragraphCount={paragraphs || 0}
             plannedChapterCount={plannedChapterCount}
           />
-        </Paper>
+        </div>
 
         <PersistentAiJobsPanel bookId={bookId} />
       </Stack>
