@@ -38,7 +38,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ us
 
     const { error: updateError } = await admin
       .from("account_deletion_requests")
-      .update({ status: "purged", purged_at: new Date().toISOString(), purge_error: null })
+      .update({ status: "purged", purged_at: new Date().toISOString(), purge_error: null, purged_by: user.id })
       .eq("id", pendingRequest.id);
     if (updateError) throw updateError;
 

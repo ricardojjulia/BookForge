@@ -10,6 +10,7 @@ export type StewardAccount = {
   bannedUntil: string | null;
   deletionStatus: "pending" | "ready_for_purge" | null;
   purgeAfter: string | null;
+  platformRole: string | null;
 };
 
 export type StewardBook = {
@@ -31,17 +32,20 @@ export async function listStewardAccounts(admin: AdminSupabase, options: { searc
   const search = (options.search || "").trim().toLowerCase();
   const page = Math.max(1, options.page || 1);
 
-  const [{ data: userList, error: listError }, { data: activeRequests, error: requestsError }] = await Promise.all([
+  const [{ data: userList, error: listError }, { data: activeRequests, error: requestsError }, { data: profileRows, error: profilesError }] = await Promise.all([
     admin.auth.admin.listUsers({ page, perPage: PER_PAGE }),
     admin
       .from("account_deletion_requests")
       .select("user_id, status, requested_at, purge_after")
       .in("status", ["pending", "ready_for_purge"]),
+    admin.from("profiles").select("id, platform_role"),
   ]);
   if (listError) throw listError;
   if (requestsError) throw requestsError;
+  if (profilesError) throw profilesError;
 
   const deletionByUserId = new Map((activeRequests || []).map((row) => [row.user_id, row]));
+  const roleByUserId = new Map((profileRows || []).map((row) => [row.id, row.platform_role]));
 
   // listUsers has no server-side email filter; the search box only narrows the
   // current page rather than searching the whole user base. Acceptable for an
@@ -59,6 +63,7 @@ export async function listStewardAccounts(admin: AdminSupabase, options: { searc
         bannedUntil: account.banned_until || null,
         deletionStatus: (deletionRequest?.status as StewardAccount["deletionStatus"]) || null,
         purgeAfter: deletionRequest?.purge_after || null,
+        platformRole: roleByUserId.get(account.id) || null,
       };
     });
 
