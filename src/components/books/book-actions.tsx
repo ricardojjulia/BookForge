@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Divider, Group, Modal, Paper, Select, SimpleGrid, Stack, Switch, Text, Title } from "@mantine/core";
+import { Alert, Button, Modal, Paper, Select, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AiJobQueue, AiJobQueueInlineStatus, type AiJobQueueState } from "@/components/ai/ai-job-queue";
@@ -1467,8 +1467,8 @@ export function BookActions({
               <>
                 <Button
                   fullWidth
-                  variant="light"
-                  color="teal"
+                  variant="outline"
+                  color="grape"
                   loading={localActive}
                   disabled={remoteOnly}
                   onClick={() => requestTask("chapter-summaries")}
@@ -1505,7 +1505,7 @@ export function BookActions({
               <>
                 <Button
                   fullWidth
-                  variant="light"
+                  variant="outline"
                   color="grape"
                   loading={localActive}
                   disabled={remoteOnly}
@@ -1548,29 +1548,66 @@ export function BookActions({
           title="Rewrite & Export"
           description="Revise drafted chapters and build reviewable/final files."
         >
-          <Button component={Link} href={`/books/${bookId}/critic-quality`} color="dark" variant="light" fullWidth>
+          <Button component={Link} href={`/books/${bookId}/critic-quality`} color="dark" variant="outline" fullWidth>
             Rewrite Architect
           </Button>
-          <Button component={Link} href={`/books/${bookId}/revisions`} color="teal" variant="light" fullWidth>
+          <Button component={Link} href={`/books/${bookId}/revisions`} color="grape" variant="outline" fullWidth>
             Review Draft Revisions
           </Button>
-          <Button component={Link} href={`/books/${bookId}/final-manuscript`} color="green" variant="light" fullWidth>
+          <Button component={Link} href={`/books/${bookId}/final-manuscript`} color="grape" fullWidth>
             Final Manuscript Builder
           </Button>
         </ActionPanel>
       </SimpleGrid>
 
-      <Divider />
-
-      <Group justify="space-between" align="center">
-        <Text size="sm" c="dimmed">Queue visibility</Text>
-        <Switch
-          checked={alwaysShowDetailedQueue}
-          onChange={(event) => setAlwaysShowDetailedQueue(event.currentTarget.checked)}
-          label="Always show detailed queue"
-          size="sm"
-        />
-      </Group>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+          margin: "26px 0 16px",
+          paddingTop: 20,
+          borderTop: "1px solid oklch(0.93 0.003 90)",
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 600, color: "oklch(0.45 0.005 90)" }}>Queue visibility</span>
+        <button
+          type="button"
+          onClick={() => setAlwaysShowDetailedQueue((current) => !current)}
+          aria-pressed={alwaysShowDetailedQueue}
+          style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", padding: 0, cursor: "pointer" }}
+        >
+          <span style={{ fontSize: 13, color: "oklch(0.4 0.005 90)" }}>Always show detailed queue</span>
+          <span
+            style={{
+              width: 38,
+              height: 22,
+              borderRadius: 11,
+              background: alwaysShowDetailedQueue ? "oklch(0.5 0.16 275)" : "oklch(0.88 0.003 90)",
+              position: "relative",
+              transition: "background 0.15s",
+              flexShrink: 0,
+              display: "inline-block",
+            }}
+          >
+            <span
+              style={{
+                position: "absolute",
+                top: 2,
+                left: alwaysShowDetailedQueue ? 18 : 2,
+                width: 18,
+                height: 18,
+                borderRadius: "50%",
+                background: "#fff",
+                boxShadow: "0 1px 2px oklch(0.2 0 0 / 0.3)",
+                transition: "left 0.15s",
+              }}
+            />
+          </span>
+        </button>
+      </div>
 
       {(alwaysShowDetailedQueue || queue.status !== "idle" || queue.totalUnits > 0 || Boolean(queue.currentTask)) ? (
         <AiJobQueue
@@ -1612,9 +1649,10 @@ export function BookActions({
           }}
         />
       ) : (
-        <Alert color="gray" variant="light" title="AI Job Queue">
-          No active local queue task.
-        </Alert>
+        <div style={{ background: "oklch(0.97 0.002 90)", border: "1px solid oklch(0.92 0.003 90)", borderRadius: 10, padding: "16px 18px" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "oklch(0.2 0.005 90)", marginBottom: 6 }}>AI Job Queue</div>
+          <div style={{ fontSize: 13, color: "oklch(0.55 0.005 90)" }}>No active local queue task.</div>
+        </div>
       )}
       {output && (
         <Alert color={output.startsWith("Error:") || output.includes('"error"') ? "red" : "green"} title="Latest result">
@@ -1688,17 +1726,13 @@ function ActionPanel({
   children: React.ReactNode;
 }) {
   return (
-    <Paper withBorder radius="md" p="lg" bg="#fbfaf8">
-      <Stack>
-        <div>
-          <Title order={3}>{title}</Title>
-          <Text size="sm" c="dimmed">
-            {description}
-          </Text>
-        </div>
-        {children}
-      </Stack>
-    </Paper>
+    <div style={{ border: "1px solid oklch(0.92 0.003 90)", borderRadius: 10, padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+      <div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: "oklch(0.2 0.005 90)" }}>{title}</div>
+        <p style={{ margin: "6px 0 0", fontSize: 13, color: "oklch(0.5 0.005 90)", lineHeight: 1.5 }}>{description}</p>
+      </div>
+      {children}
+    </div>
   );
 }
 
