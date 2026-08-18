@@ -204,7 +204,7 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
 
   return (
     <Container size="xl">
-      <DataFreshnessBanner routeKey={`book:${bookId}:critic-quality`} fetchedAt={new Date().toISOString()} label="Critic & quality data" />
+      <DataFreshnessBanner routeKey={`book:${bookId}:critic-quality`} fetchedAt={new Date().toISOString()} label="Critic & quality data" variant="subtle" />
       <LiveProcessBanner bookId={bookId} />
       <Group justify="space-between" mb="xl" align="flex-start">
         <div>

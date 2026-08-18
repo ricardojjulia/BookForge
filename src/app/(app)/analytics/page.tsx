@@ -361,7 +361,7 @@ export default async function AnalyticsPage() {
   return (
     <Container size="xl">
       <Stack gap="xl">
-        <DataFreshnessBanner routeKey="analytics:runs" fetchedAt={new Date().toISOString()} label="Analytics data" />
+        <DataFreshnessBanner routeKey="analytics:runs" fetchedAt={new Date().toISOString()} label="Analytics data" variant="subtle" />
         <div>
           <Title>Run Analytics</Title>
           <Text c="dimmed">

@@ -165,7 +165,7 @@ export default async function FinalManuscriptPage({ params }: { params: Promise<
 
   return (
     <Container size="xl">
-      <DataFreshnessBanner routeKey={`book:${bookId}:final-manuscript`} fetchedAt={new Date().toISOString()} label="Final manuscript data" />
+      <DataFreshnessBanner routeKey={`book:${bookId}:final-manuscript`} fetchedAt={new Date().toISOString()} label="Final manuscript data" variant="subtle" />
       <Group justify="space-between" mb="xl" align="flex-start">
         <div>
           <Group gap="sm" mb={4}>
