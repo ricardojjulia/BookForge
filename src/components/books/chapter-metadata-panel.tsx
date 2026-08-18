@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Alert, Badge, Button, Checkbox, Group, Modal, Paper, Select, Stack, Text, Textarea, TextInput, Title } from "@mantine/core";
+import { Alert, Button, Checkbox, Group, Modal, Paper, Select, Stack, Text, Textarea, TextInput } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { useRouter } from "next/navigation";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { ManuscriptHealthCard } from "@/components/books/manuscript-health-card";
 import { RewritePlanActions } from "@/components/books/rewrite/rewrite-plan-actions";
 import { runServerManagedJob } from "@/lib/rewrite/run-server-managed-job";
 import { auditBookStructure, type StructureAuditChapter, type StructureAuditParagraph } from "@/lib/structure/audit";
@@ -259,36 +260,18 @@ export function ChapterMetadataPanel({
   }
 
   return (
-    <Paper withBorder radius="md" p="xl" bg="white" mt="xl">
-      <Group justify="space-between" align="flex-start">
-        <div>
-          <Title order={2}>Structure Repair Assistant</Title>
-          <Text c="dimmed" size="sm">
-            Repair chapter labels and import artifacts before rewrite, Critic, or export work.
-          </Text>
-        </div>
-        <Group gap="xs">
-          <Badge color={issues.length ? "yellow" : "green"} variant="light">
-            {issues.length ? `${issues.length} warnings` : "structure clean"}
-          </Badge>
-          <Button color="dark" variant="light" onClick={open}>
-            Repair Chapters
-          </Button>
-        </Group>
-      </Group>
-
-      {issues.length > 0 && (
-        <Stack gap="xs" mt="md">
-          {issues.slice(0, 5).map((issue) => (
-            <Alert key={issue.id} color={issue.severity === "high" ? "red" : "yellow"} variant="light">
-              <Text fw={800} size="sm">
-                {issue.chapterNumber ? `Chapter ${issue.chapterNumber}: ` : ""}{issue.title}
-              </Text>
-              <Text size="sm">{issue.description}</Text>
-            </Alert>
-          ))}
-        </Stack>
-      )}
+    <>
+      <ManuscriptHealthCard
+        icon="🛠"
+        title="Structure Repair Assistant"
+        description="Repair chapter labels and import artifacts before rewrite, Critic, or export work."
+        pills={[
+          issues.length ? { label: `${issues.length} WARNINGS`, tone: "warn" } : { label: "STRUCTURE CLEAN", tone: "ok" },
+        ]}
+        actionLabel="Repair Chapters"
+        onAction={open}
+        warning={issues.length > 0}
+      />
 
       <Modal opened={opened} onClose={close} title="Chapter Repair and Metadata" size="75rem" centered>
         <Stack>
@@ -502,6 +485,6 @@ export function ChapterMetadataPanel({
           )}
         </Stack>
       </Modal>
-    </Paper>
+    </>
   );
 }

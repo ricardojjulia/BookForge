@@ -1,4 +1,4 @@
-import { Alert, Badge, Container, Paper, Stack, Table, Title } from "@mantine/core";
+import { Alert, Container, Stack, Title } from "@mantine/core";
 import { ChapterMetadataPanel } from "@/components/books/chapter-metadata-panel";
 import { ChapterSummaryReview } from "@/components/books/chapter-summary-review";
 import { ChapterSummaryViewer } from "@/components/books/chapter-summary-viewer";
@@ -46,55 +46,78 @@ export default async function ManuscriptPage({ params }: { params: Promise<{ boo
 
   return (
     <Container size="xl">
-      <Title mb="xl">Manuscript</Title>
+      <Title style={{ fontSize: 28, fontWeight: 800, color: "oklch(0.2 0.005 90)", letterSpacing: "-0.01em" }} mb={24}>
+        Manuscript
+      </Title>
       <Stack gap="xl">
-        <ChapterMetadataPanel bookId={bookId} chapters={chapters || []} paragraphs={paragraphRows || []} />
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "oklch(0.2 0.005 90)", marginBottom: 14 }}>
+            Manuscript Health
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+            <ChapterMetadataPanel bookId={bookId} chapters={chapters || []} paragraphs={paragraphRows || []} />
+            <StructureAuditPanel chapters={chapters || []} paragraphs={paragraphRows || []} />
+            <SceneEditorPanel
+              chapters={chapters || []}
+              scenes={sceneRows || []}
+              paragraphs={paragraphRows || []}
+              suggestions={sceneSplitSuggestions || []}
+            />
+          </div>
+        </div>
 
-        <StructureAuditPanel chapters={chapters || []} paragraphs={paragraphRows || []} />
-
-        <SceneEditorPanel
-          chapters={chapters || []}
-          scenes={sceneRows || []}
-          paragraphs={paragraphRows || []}
-          suggestions={sceneSplitSuggestions || []}
-        />
-
-        <Paper withBorder radius="md" p="xl" bg="white">
-          <Title order={2} mb="md">
-            Chapter Browser
-          </Title>
+        <div style={{ background: "#fff", border: "1px solid oklch(0.92 0.003 90)", borderRadius: 12, padding: "24px 26px" }}>
+          <div style={{ fontSize: 17, fontWeight: 800, color: "oklch(0.2 0.005 90)", marginBottom: 16 }}>Chapter Browser</div>
           <ChapterSummaryReview bookId={bookId} chapters={chapters || []} />
           <PassageLockManager chapters={chapters || []} paragraphs={paragraphRows || []} />
-          <Table striped highlightOnHover>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Title</th>
-                <th>Status</th>
-                <th>Summary</th>
-              </tr>
-            </thead>
-            <tbody>
-              {chapters?.map((chapter) => (
-                <tr key={chapter.id}>
-                  <td>{chapter.chapter_number}</td>
-                  <td>{chapter.title}</td>
-                  <td>
-                    <Badge variant="light">{chapter.status}</Badge>
-                  </td>
-                  <td>
-                    <ChapterSummaryViewer
-                      chapterId={chapter.id}
-                      chapterNumber={chapter.chapter_number}
-                      title={chapter.title}
-                      summary={chapter.summary}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        </Paper>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 14, marginTop: 20 }}>
+            {chapters?.map((chapter) => (
+              <div
+                key={chapter.id}
+                style={{
+                  border: "1px solid oklch(0.92 0.003 90)",
+                  borderRadius: 10,
+                  padding: 18,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                  background: "oklch(0.99 0.002 90)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 26, fontWeight: 800, color: "oklch(0.85 0.02 275)" }}>
+                    {String(chapter.chapter_number).padStart(2, "0")}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: "0.02em",
+                      padding: "4px 9px",
+                      borderRadius: 6,
+                      background: "oklch(0.94 0.04 275)",
+                      color: "oklch(0.45 0.13 275)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {(chapter.status || "draft").toUpperCase()}
+                  </span>
+                </div>
+                <span style={{ fontSize: 15, fontWeight: 700, color: "oklch(0.2 0.005 90)" }}>
+                  {chapter.title || `Chapter ${chapter.chapter_number}`}
+                </span>
+                <div style={{ marginTop: "auto" }}>
+                  <ChapterSummaryViewer
+                    chapterId={chapter.id}
+                    chapterNumber={chapter.chapter_number}
+                    title={chapter.title}
+                    summary={chapter.summary}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </Stack>
     </Container>
   );

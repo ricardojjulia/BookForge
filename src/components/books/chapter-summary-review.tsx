@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Alert, Badge, Button, Group, Paper, Stack, Table, Text, Title } from "@mantine/core";
 import { useRouter } from "next/navigation";
 import { AiJobQueue, type AiJobQueueState } from "@/components/ai/ai-job-queue";
+import { Pill } from "@/components/books/manuscript-health-card";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { evaluateChapterSummaryQuality } from "@/lib/manuscript/summary-quality";
 
@@ -174,17 +175,11 @@ export function ChapterSummaryReview({
     <Stack mb="md">
       <Group justify="space-between">
         <Group gap="xs">
-          <Button variant="light" color="teal" onClick={() => setOpened((current) => !current)}>
+          <Button variant="outline" color="grape" onClick={() => setOpened((current) => !current)}>
             {opened ? "Hide Summary Check" : "Check Summary Quality"}
           </Button>
-          <Badge color={weak.length ? "yellow" : "green"} variant="light">
-            {good}/{reviewed.length} usable
-          </Badge>
-          {weak.length > 0 && (
-            <Badge color="orange" variant="light">
-              {weak.length} need review
-            </Badge>
-          )}
+          <Pill label={`${good}/${reviewed.length} USABLE`} tone={weak.length ? "warn" : "ok"} />
+          {weak.length > 0 && <Pill label={`${weak.length} NEED REVIEW`} tone="warn" />}
         </Group>
         {opened && (
           <Button

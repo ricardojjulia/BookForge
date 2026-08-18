@@ -42,9 +42,22 @@ export function ChapterSummaryViewer({
 
   return (
     <>
-      <Button size="xs" variant="light" color={hasSummary ? "teal" : "gray"} onClick={open}>
-        {hasSummary ? "View Summary" : "No Summary"}
-      </Button>
+      <button
+        type="button"
+        onClick={open}
+        style={{
+          background: "none",
+          border: "none",
+          padding: 0,
+          color: hasSummary ? "oklch(0.5 0.16 275)" : "oklch(0.6 0.005 90)",
+          fontWeight: 600,
+          fontSize: 13,
+          cursor: "pointer",
+          textAlign: "left",
+        }}
+      >
+        {hasSummary ? "View Summary →" : "No Summary"}
+      </button>
       <Modal opened={opened} onClose={close} size="xl" title="Chapter Summary" centered>
         <Stack>
           <div>

@@ -7,6 +7,7 @@ import { useDisclosure } from "@mantine/hooks";
 import { useRouter } from "next/navigation";
 import { GenerationProgressAlert } from "@/components/ai/generation-progress-alert";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { ManuscriptHealthCard } from "@/components/books/manuscript-health-card";
 
 type SceneEditorChapter = {
   id: string;
@@ -164,41 +165,20 @@ export function SceneEditorPanel({
   }
 
   return (
-    <Paper withBorder radius="md" p="lg" bg="white" mt="xl">
-      <Group justify="space-between" align="flex-start">
-        <div>
-          <Title order={3}>Scene Editor</Title>
-          <Text c="dimmed" size="sm">
-            Repair scene boundaries before running scene-level rewrite or export workflows.
-          </Text>
-        </div>
-        <Group gap="xs">
-          <Badge color={sceneIssues.length ? "yellow" : "green"} variant="light">
-            {sceneIssues.length ? `${sceneIssues.length} scene warnings` : "Scenes look usable"}
-          </Badge>
-          <Button variant="light" color="dark" onClick={open}>
-            Manage Scenes
-          </Button>
-        </Group>
-      </Group>
-
-      {sceneIssues.length > 0 && (
-        <Stack gap="xs" mt="md">
-          {sceneIssues.slice(0, 4).map((issue) => (
-            <Alert key={issue.id} color={issue.severity === "high" ? "red" : "yellow"} variant="light">
-              <Text fw={700} size="sm">
-                {issue.title}
-              </Text>
-              <Text size="sm">{issue.description}</Text>
-            </Alert>
-          ))}
-          {sceneIssues.length > 4 && (
-            <Text size="sm" c="dimmed">
-              {sceneIssues.length - 4} more scene warnings are available in Manage Scenes.
-            </Text>
-          )}
-        </Stack>
-      )}
+    <>
+      <ManuscriptHealthCard
+        icon="🎬"
+        title="Scene Editor"
+        description="Repair scene boundaries before running scene-level rewrite or export workflows."
+        pills={[
+          sceneIssues.length
+            ? { label: `${sceneIssues.length} SCENE WARNINGS`, tone: "warn" }
+            : { label: "SCENES LOOK USABLE", tone: "ok" },
+        ]}
+        actionLabel="Manage Scenes"
+        onAction={open}
+        warning={sceneIssues.length > 0}
+      />
 
       <Modal opened={opened} onClose={close} title="Scene Editor" size="90rem" centered>
         <Stack>
@@ -206,6 +186,18 @@ export function SceneEditorPanel({
           <Alert color="blue" variant="light">
             Scene edits update the parsed manuscript structure only. Original uploaded files and original paragraph text stay preserved.
           </Alert>
+          {sceneIssues.length > 0 && (
+            <Stack gap="xs">
+              {sceneIssues.map((issue) => (
+                <Alert key={issue.id} color={issue.severity === "high" ? "red" : "yellow"} variant="light">
+                  <Text fw={700} size="sm">
+                    {issue.title}
+                  </Text>
+                  <Text size="sm">{issue.description}</Text>
+                </Alert>
+              ))}
+            </Stack>
+          )}
           <ScrollArea h="72vh">
             <Stack>
               {chapters.map((chapter) => {
@@ -392,7 +384,7 @@ export function SceneEditorPanel({
           </ScrollArea>
         </Stack>
       </Modal>
-    </Paper>
+    </>
   );
 }
 

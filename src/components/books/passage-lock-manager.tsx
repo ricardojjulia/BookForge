@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Alert, Badge, Button, Group, Modal, Paper, ScrollArea, Stack, Text, Textarea, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { useRouter } from "next/navigation";
+import { Pill } from "@/components/books/manuscript-health-card";
 import { fetchJson } from "@/lib/http/fetch-json";
 
 type ChapterForLocks = {
@@ -181,12 +182,10 @@ export function PassageLockManager({
     <>
       <Group justify="space-between" mb="md">
         <Group gap="xs">
-          <Button variant="light" color="dark" onClick={open}>
+          <Button variant="outline" color="dark" onClick={open}>
             Manage Passage Locks
           </Button>
-          <Badge color={lockedCount ? "gray" : "green"} variant="light">
-            {lockedCount} locked
-          </Badge>
+          <Pill label={`${lockedCount} LOCKED`} tone="neutral" />
         </Group>
         <Text size="sm" c="dimmed">
           Locked passages are skipped by rewrite batches and use original text by default during export.
