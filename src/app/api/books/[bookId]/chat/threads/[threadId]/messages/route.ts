@@ -389,6 +389,7 @@ function buildSystemInstruction(mode: ChatMode) {
       "Only include keys that should be changed.",
       "Use revisionDrafts only for explicit rewrite requests.",
       "Never claim that any update was already applied.",
+      "revisedText must contain ONLY the final replacement prose for that paragraph -- never a section header, bracketed label, or any commentary describing the change (e.g. do not prefix it with something like '[Merged Chapter 1 & 2]'). Put that kind of explanation in rationale or revisionNotes instead.",
     ].join("\n");
   }
 
