@@ -184,8 +184,9 @@ export function AccountPageClient({ email, displayName }: Props) {
       <Paper withBorder radius="md" p="lg" mb="md" style={{ borderColor: "var(--mantine-color-red-4)" }}>
         <Title order={4} c="red" mb="md">Danger Zone</Title>
         <Text size="sm" mb="sm">
-          Permanently delete your account and all associated books, manuscripts, reports, and exports.
-          This cannot be undone.
+          Deleting your account blocks sign-in immediately, but your books, manuscripts, reports, and
+          exports are kept for 30 days before permanent removal. Changed your mind? Contact support
+          before then — since sign-in is blocked, this isn&apos;t something you can undo yourself.
         </Text>
         <Divider mb="sm" />
         <TextInput
