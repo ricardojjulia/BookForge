@@ -11,11 +11,9 @@ import {
   Select,
   SimpleGrid,
   Stack,
-  Tabs,
   Text,
   TextInput,
   Textarea,
-  Title,
 } from "@mantine/core";
 import { createClient } from "@/lib/supabase/client";
 
@@ -125,54 +123,84 @@ export function BookInputsManager({
   matterSections: MatterSectionRow[];
   revisionInstructions: RevisionInstructionRow[];
 }) {
-  return (
-    <Paper withBorder radius="md" p="xl" bg="white">
-      <Stack>
-        <div>
-          <Title order={2}>Book Inputs</Title>
-          <Text c="dimmed">
-            Store manuscript text separately from guidance, style references, profiles, and front/back matter.
-          </Text>
-        </div>
-        <Tabs defaultValue="chapter">
-          <Tabs.List>
-            <Tabs.Tab value="metadata">Metadata</Tabs.Tab>
-            <Tabs.Tab value="chapter">Add Chapter</Tabs.Tab>
-            <Tabs.Tab value="bible">Manuscript Blueprint</Tabs.Tab>
-            <Tabs.Tab value="notes">Author Notes</Tabs.Tab>
-            <Tabs.Tab value="characters">Characters</Tabs.Tab>
-            <Tabs.Tab value="instructions">Revision Instructions</Tabs.Tab>
-            <Tabs.Tab value="style">Style Sample</Tabs.Tab>
-            <Tabs.Tab value="matter">Front / Back Matter</Tabs.Tab>
-          </Tabs.List>
+  const sections = [
+    { key: "metadata", label: "Metadata", desc: "Title, genre, audience, POV" },
+    { key: "chapter", label: "Add Chapter", desc: "Upload or paste chapter text" },
+    { key: "bible", label: "Manuscript Blueprint", desc: "Structure and outline" },
+    { key: "notes", label: "Author Notes", desc: "Private context for revision" },
+    { key: "characters", label: "Characters", desc: "Profiles and relationships" },
+    { key: "instructions", label: "Revision Instructions", desc: "Guidance for rewrite passes" },
+    { key: "style", label: "Style Sample", desc: "Reference prose for tone/voice" },
+    { key: "matter", label: "Front / Back Matter", desc: "Title page, dedication, colophon" },
+  ] as const;
+  type SectionKey = (typeof sections)[number]["key"];
+  const [activeKey, setActiveKey] = useState<SectionKey>("chapter");
 
-          <Tabs.Panel value="metadata" pt="lg">
-            <BookMetadataForm bookId={bookId} book={book} />
-          </Tabs.Panel>
-          <Tabs.Panel value="chapter" pt="lg">
-            <ManualChapterForm bookId={bookId} />
-          </Tabs.Panel>
-          <Tabs.Panel value="bible" pt="lg">
-            <BookBibleForm bookId={bookId} bible={bible} />
-          </Tabs.Panel>
-          <Tabs.Panel value="notes" pt="lg">
-            <AuthorNotesForm bookId={bookId} authorNotes={authorNotes} />
-          </Tabs.Panel>
-          <Tabs.Panel value="characters" pt="lg">
-            <CharacterProfileForm bookId={bookId} characters={characters} />
-          </Tabs.Panel>
-          <Tabs.Panel value="instructions" pt="lg">
+  return (
+    <div>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 22, fontWeight: 800, color: "oklch(0.2 0.005 90)" }}>Book Inputs</div>
+        <p style={{ margin: "4px 0 0", fontSize: 14, color: "oklch(0.5 0.005 90)" }}>
+          Store manuscript text separately from guidance, style references, profiles, and front/back matter.
+        </p>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 20, alignItems: "start" }}>
+        <div
+          style={{
+            background: "#fff",
+            border: "1px solid oklch(0.92 0.003 90)",
+            borderRadius: 12,
+            padding: 10,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          {sections.map((section) => {
+            const isActive = activeKey === section.key;
+            return (
+              <button
+                key={section.key}
+                type="button"
+                onClick={() => setActiveKey(section.key)}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  gap: 2,
+                  textAlign: "left",
+                  background: isActive ? "oklch(0.95 0.03 275)" : "transparent",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "11px 14px",
+                  cursor: "pointer",
+                }}
+              >
+                <span style={{ fontSize: 14, fontWeight: 600, color: isActive ? "oklch(0.4 0.13 275)" : "oklch(0.25 0.005 90)" }}>
+                  {section.label}
+                </span>
+                <span style={{ fontSize: 12, color: isActive ? "oklch(0.5 0.1 275)" : "oklch(0.55 0.005 90)", lineHeight: 1.4 }}>
+                  {section.desc}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ background: "#fff", border: "1px solid oklch(0.92 0.003 90)", borderRadius: 12, padding: "26px 28px" }}>
+          {activeKey === "metadata" && <BookMetadataForm bookId={bookId} book={book} />}
+          {activeKey === "chapter" && <ManualChapterForm bookId={bookId} />}
+          {activeKey === "bible" && <BookBibleForm bookId={bookId} bible={bible} />}
+          {activeKey === "notes" && <AuthorNotesForm bookId={bookId} authorNotes={authorNotes} />}
+          {activeKey === "characters" && <CharacterProfileForm bookId={bookId} characters={characters} />}
+          {activeKey === "instructions" && (
             <RevisionInstructionsForm bookId={bookId} revisionInstructions={revisionInstructions} />
-          </Tabs.Panel>
-          <Tabs.Panel value="style" pt="lg">
-            <StyleSampleForm bookId={bookId} styleSamples={styleSamples} />
-          </Tabs.Panel>
-          <Tabs.Panel value="matter" pt="lg">
-            <MatterSectionForm bookId={bookId} matterSections={matterSections} />
-          </Tabs.Panel>
-        </Tabs>
-      </Stack>
-    </Paper>
+          )}
+          {activeKey === "style" && <StyleSampleForm bookId={bookId} styleSamples={styleSamples} />}
+          {activeKey === "matter" && <MatterSectionForm bookId={bookId} matterSections={matterSections} />}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -250,7 +278,7 @@ function BookMetadataForm({ bookId, book }: { bookId: string; book: BookMetadata
           onChange={(event) => setMetadata({ ...metadata, tense: event.currentTarget.value })}
         />
       </SimpleGrid>
-      <Group justify="flex-end">
+      <Group justify="flex-end" pt="md" style={{ borderTop: "1px solid oklch(0.94 0.003 90)" }}>
         <Button color="grape" loading={loading} onClick={save}>
           Save Metadata
         </Button>
@@ -322,7 +350,7 @@ function RevisionInstructionsForm({
         value={instructions}
         onChange={(event) => setInstructions(event.currentTarget.value)}
       />
-      <Group justify="space-between">
+      <Group justify="space-between" pt="md" style={{ borderTop: "1px solid oklch(0.94 0.003 90)" }}>
         <Text c="dimmed">{revisionInstructions.length} revision instruction sets saved.</Text>
         <Button color="grape" loading={loading} onClick={save}>
           Add Instructions
@@ -377,7 +405,7 @@ function ManualChapterForm({ bookId }: { bookId: string }) {
       {error && <Alert color="red">{error}</Alert>}
       <TextInput label="Chapter title" value={title} onChange={(event) => setTitle(event.currentTarget.value)} />
       <Textarea label="Chapter text" minRows={10} value={text} onChange={(event) => setText(event.currentTarget.value)} />
-      <Group justify="flex-end">
+      <Group justify="flex-end" pt="md" style={{ borderTop: "1px solid oklch(0.94 0.003 90)" }}>
         <Button color="grape" loading={loading} onClick={submit}>
           Add Chapter
         </Button>
@@ -426,7 +454,7 @@ function BookBibleForm({ bookId, bible }: { bookId: string; bible: BookBibleRow 
       {message && <Alert color="green">{message}</Alert>}
       {error && <Alert color="red">{error}</Alert>}
       <JsonInput label="Editable Manuscript Blueprint JSON" value={value} onChange={setValue} autosize minRows={18} validationError="Invalid JSON" />
-      <Group justify="flex-end">
+      <Group justify="flex-end" pt="md" style={{ borderTop: "1px solid oklch(0.94 0.003 90)" }}>
         <Button color="grape" loading={loading} onClick={save}>
           Save Manuscript Blueprint
         </Button>
@@ -481,7 +509,7 @@ function AuthorNotesForm({ bookId, authorNotes }: { bookId: string; authorNotes:
         <Textarea label="Contemporary View alignment" minRows={5} value={notes.theological_alignment} onChange={(event) => setNotes({ ...notes, theological_alignment: event.currentTarget.value })} />
       </SimpleGrid>
       <Textarea label="Forbidden changes" minRows={4} value={notes.forbidden_changes} onChange={(event) => setNotes({ ...notes, forbidden_changes: event.currentTarget.value })} />
-      <Group justify="flex-end">
+      <Group justify="flex-end" pt="md" style={{ borderTop: "1px solid oklch(0.94 0.003 90)" }}>
         <Button color="grape" loading={loading} onClick={save}>
           Save Author Notes
         </Button>
@@ -555,7 +583,7 @@ function CharacterProfileForm({ bookId, characters }: { bookId: string; characte
         <Textarea label="Wound / flaw" minRows={4} value={profile.wound_flaw} onChange={(event) => setProfile({ ...profile, wound_flaw: event.currentTarget.value })} />
         <Textarea label="Do-not-change notes" minRows={4} value={profile.do_not_change_notes} onChange={(event) => setProfile({ ...profile, do_not_change_notes: event.currentTarget.value })} />
       </SimpleGrid>
-      <Group justify="space-between">
+      <Group justify="space-between" pt="md" style={{ borderTop: "1px solid oklch(0.94 0.003 90)" }}>
         <Text c="dimmed">{characters.length} character profiles saved.</Text>
         <Button color="grape" loading={loading} onClick={save}>
           Add Character
@@ -604,7 +632,7 @@ function StyleSampleForm({ bookId, styleSamples }: { bookId: string; styleSample
       <TextInput label="Sample title" value={title} onChange={(event) => setTitle(event.currentTarget.value)} />
       <Textarea label="Writing sample" minRows={8} value={sampleText} onChange={(event) => setSampleText(event.currentTarget.value)} />
       <Textarea label="Guidance notes" minRows={3} value={guidanceNotes} onChange={(event) => setGuidanceNotes(event.currentTarget.value)} />
-      <Group justify="space-between">
+      <Group justify="space-between" pt="md" style={{ borderTop: "1px solid oklch(0.94 0.003 90)" }}>
         <Text c="dimmed">{styleSamples.length} style samples saved.</Text>
         <Button color="grape" loading={loading} onClick={save}>
           Add Style Sample
@@ -663,7 +691,7 @@ function MatterSectionForm({ bookId, matterSections }: { bookId: string; matterS
         <TextInput label="Section title" value={title} onChange={(event) => setTitle(event.currentTarget.value)} />
       </SimpleGrid>
       <Textarea label="Content" minRows={8} value={content} onChange={(event) => setContent(event.currentTarget.value)} />
-      <Group justify="space-between">
+      <Group justify="space-between" pt="md" style={{ borderTop: "1px solid oklch(0.94 0.003 90)" }}>
         <Text c="dimmed">{matterSections.length} front/back matter sections saved.</Text>
         <Button color="grape" loading={loading} onClick={save}>
           Add Section
@@ -675,7 +703,21 @@ function MatterSectionForm({ bookId, matterSections }: { bookId: string; matterS
 }
 
 function InputNotice({ text }: { text: string }) {
-  return <Alert color="grape" variant="light">{text}</Alert>;
+  return (
+    <div
+      style={{
+        background: "oklch(0.96 0.02 275)",
+        border: "1px solid oklch(0.88 0.05 275)",
+        borderRadius: 10,
+        padding: "14px 18px",
+        fontSize: 13,
+        color: "oklch(0.4 0.1 275)",
+        lineHeight: 1.5,
+      }}
+    >
+      {text}
+    </div>
+  );
 }
 
 function SavedList({ items }: { items: string[] }) {
