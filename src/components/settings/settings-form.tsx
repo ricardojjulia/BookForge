@@ -397,23 +397,23 @@ export function SettingsForm({
                 />
               </SimpleGrid>
               {recommendations.length > 0 && (
-                <div style={{ background: "#fff", border: "1px solid oklch(0.92 0.003 90)", borderRadius: 16, padding: "28px 32px" }}>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: "oklch(0.2 0.005 90)", marginBottom: 20 }}>
+                <div style={{ background: "#fff", border: "1px solid oklch(0.92 0.003 90)", borderRadius: 14, padding: "20px 24px" }}>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: "oklch(0.2 0.005 90)", marginBottom: 14 }}>
                     Detected {profileLabel(settings.quality_profile)} Match
                   </div>
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "minmax(120px,160px) minmax(160px,220px) minmax(200px,2fr) minmax(180px,1.3fr)",
-                      gap: 16,
-                      paddingBottom: 12,
+                      gridTemplateColumns: "minmax(100px,140px) minmax(140px,190px) minmax(180px,2fr) minmax(160px,1.3fr)",
+                      gap: 12,
+                      paddingBottom: 8,
                       borderBottom: "1px solid oklch(0.9 0.003 90)",
                     }}
                   >
                     {["Task", "Selected model", "Why", "Alternatives"].map((heading) => (
                       <span
                         key={heading}
-                        style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "oklch(0.55 0.005 90)" }}
+                        style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "oklch(0.55 0.005 90)" }}
                       >
                         {heading}
                       </span>
@@ -424,24 +424,24 @@ export function SettingsForm({
                       key={item.task}
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "minmax(120px,160px) minmax(160px,220px) minmax(200px,2fr) minmax(180px,1.3fr)",
-                        gap: 16,
-                        padding: "20px 0",
+                        gridTemplateColumns: "minmax(100px,140px) minmax(140px,190px) minmax(180px,2fr) minmax(160px,1.3fr)",
+                        gap: 12,
+                        padding: "12px 0",
                         borderBottom: "1px solid oklch(0.93 0.003 90)",
                         alignItems: "start",
                       }}
                     >
-                      <span style={{ fontSize: 15, fontWeight: 600, color: "oklch(0.2 0.005 90)" }}>{item.label}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "oklch(0.2 0.005 90)" }}>{item.label}</span>
                       <div>
                         {item.selectedModel ? (
                           <span
                             style={{
                               display: "inline-block",
-                              fontSize: 13,
+                              fontSize: 11,
                               fontWeight: 600,
                               fontFamily: "ui-monospace, monospace",
-                              padding: "6px 12px",
-                              borderRadius: 8,
+                              padding: "4px 9px",
+                              borderRadius: 6,
                               background: "oklch(0.94 0.05 165)",
                               color: "oklch(0.4 0.1 165)",
                             }}
@@ -452,10 +452,10 @@ export function SettingsForm({
                           <span
                             style={{
                               display: "inline-block",
-                              fontSize: 13,
+                              fontSize: 11,
                               fontWeight: 600,
-                              padding: "6px 12px",
-                              borderRadius: 8,
+                              padding: "4px 9px",
+                              borderRadius: 6,
                               background: "oklch(0.95 0.06 45)",
                               color: "oklch(0.5 0.12 45)",
                             }}
@@ -464,17 +464,17 @@ export function SettingsForm({
                           </span>
                         )}
                       </div>
-                      <span style={{ fontSize: 14, color: "oklch(0.35 0.005 90)", lineHeight: 1.5 }}>{item.reason}</span>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      <span style={{ fontSize: 12, color: "oklch(0.35 0.005 90)", lineHeight: 1.45 }}>{item.reason}</span>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
                         {item.alternatives.length ? (
                           item.alternatives.map((alt) => (
                             <span
                               key={alt}
                               style={{
-                                fontSize: 12,
+                                fontSize: 10.5,
                                 fontFamily: "ui-monospace, monospace",
-                                padding: "5px 10px",
-                                borderRadius: 6,
+                                padding: "3px 8px",
+                                borderRadius: 5,
                                 background: "oklch(0.95 0.003 90)",
                                 color: "oklch(0.4 0.005 90)",
                               }}
@@ -483,7 +483,7 @@ export function SettingsForm({
                             </span>
                           ))
                         ) : (
-                          <span style={{ fontSize: 13, color: "oklch(0.6 0.005 90)" }}>None</span>
+                          <span style={{ fontSize: 11, color: "oklch(0.6 0.005 90)" }}>None</span>
                         )}
                       </div>
                     </div>
