@@ -29,10 +29,22 @@ export function describeDialogueDensity(level: string | null | undefined): strin
   return `${DIALOG_DENSITY_LABELS[key]} — ${DIALOG_DENSITY_GUIDANCE[key]}`;
 }
 
+// Straight/curly double quotes cover English and many other languages, but
+// literary Spanish, French, and Italian conventionally render dialogue with
+// guillemets (« ») for the whole exchange and/or an em/en dash starting each
+// speaker's line instead of quotation marks -- counting only quotes silently
+// scored those manuscripts as having near-zero dialogue.
+function extractDialogueSegments(text: string): string[] {
+  const quoted = text.match(/["“][^"”]{1,4000}["”]/g) || [];
+  const guillemets = text.match(/«[^»]{1,4000}»/g) || [];
+  const dashLines = text.match(/^[ \t]*[—–][^\n]+$/gm) || [];
+  return [...quoted, ...guillemets, ...dashLines];
+}
+
 export function computeDialogueRatio(text: string): { dialogueWords: number; totalWords: number; ratio: number } {
-  const dialogueMatches = text.match(/["“][^"”]{1,4000}["”]/g) || [];
-  const dialogueWords = dialogueMatches.reduce((sum, match) => sum + countWords(match), 0);
+  const dialogueMatches = extractDialogueSegments(text);
   const totalWords = countWords(text);
+  const dialogueWords = Math.min(totalWords, dialogueMatches.reduce((sum, match) => sum + countWords(match), 0));
   return { dialogueWords, totalWords, ratio: totalWords > 0 ? dialogueWords / totalWords : 0 };
 }
 
