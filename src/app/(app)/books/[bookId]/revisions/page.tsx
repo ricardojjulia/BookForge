@@ -120,7 +120,6 @@ export default async function RevisionsPage({
   }
 
   const { data: chapters } = await supabase.from("chapters").select("id,chapter_number,title").eq("book_id", bookId).order("chapter_number");
-  const firstChapter = (chapters || [])[0];
 
   const mapped = ((versions || []) as RawVersion[]).map((version) => ({
     id: version.id,
@@ -178,13 +177,7 @@ export default async function RevisionsPage({
 
       <RevisionStatsPanel bookId={bookId} />
 
-      {firstChapter && (
-        <ChapterSnapshotPanel
-          bookId={bookId}
-          chapterId={firstChapter.id}
-          chapterLabel={`Ch. ${firstChapter.chapter_number}${firstChapter.title ? ` — ${firstChapter.title}` : ""}`}
-        />
-      )}
+      <ChapterSnapshotPanel bookId={bookId} chapters={chapters || []} />
 
       <RevisionReviewList
         bookId={bookId}
