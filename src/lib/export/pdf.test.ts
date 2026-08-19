@@ -50,4 +50,25 @@ describe("buildFinalManuscriptPdf", () => {
     expect(buffer.length).toBeGreaterThan(0);
     expect(buffer.subarray(0, 5).toString("ascii")).toBe("%PDF-");
   });
+
+  it("builds successfully for a manuscript containing Hebrew and Vietnamese text", async () => {
+    const buffer = await buildFinalManuscriptPdf(
+      buildInput({
+        book: { title: "ספר עברי with Vietnamese", author_name: null },
+        paragraphs: [
+          {
+            id: "p1",
+            chapter_id: "ch1",
+            scene_id: null,
+            paragraph_number: 1,
+            original_text: "שלום עולם. Xin chào, đây là một câu tiếng Việt.",
+            current_text: null,
+            accepted_text: null,
+            is_locked: false,
+          },
+        ],
+      }),
+    );
+    expect(buffer.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+  });
 });
