@@ -77,8 +77,8 @@ function MetricButton({ label, value, onClick }: { label: string; value: string 
 function MetricContent({ label, value }: { label: string; value: string | number }) {
   return (
     <>
-      <Text component="span" style={{ fontSize: 20, fontWeight: 800, color: "oklch(0.2 0.005 90)" }}>{value}</Text>
-      <Text component="span" style={{ fontSize: 13, color: "oklch(0.55 0.005 90)" }}> {label}</Text>
+      <Text component="span" style={{ fontSize: 20, fontWeight: 800, color: "oklch(0.2 0.005 90)" }}>{value}</Text>{" "}
+      <Text component="span" style={{ fontSize: 13, color: "oklch(0.55 0.005 90)" }}>{label}</Text>
     </>
   );
 }

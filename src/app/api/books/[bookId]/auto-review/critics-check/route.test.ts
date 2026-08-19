@@ -20,7 +20,9 @@ vi.mock("@/lib/critic/score", () => ({
 
 describe("GET /api/books/[bookId]/auto-review/critics-check", () => {
   it("limits report query to baseline and post critic report types", async () => {
-    const inSpy = vi.fn(() => ({ order: vi.fn(async () => ({ data: [], error: null })) }));
+    const inSpy = vi.fn<(column: string, values: string[]) => { order: () => Promise<{ data: never[]; error: null }> }>(
+      () => ({ order: vi.fn(async () => ({ data: [], error: null })) }),
+    );
     const eqSpy = vi.fn(() => ({ in: inSpy }));
     const selectSpy = vi.fn(() => ({ eq: eqSpy }));
 

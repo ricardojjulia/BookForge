@@ -309,6 +309,10 @@ export function CreateBookWizard({ existingProject }: { existingProject?: Existi
       router.push(destination);
       window.setTimeout(() => {
         if (window.location.pathname !== destination) {
+          // Deliberate fallback, not the primary navigation path -- router.push()
+          // above is the normal route, this only fires if client-side navigation
+          // silently didn't happen within 500ms.
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
           window.location.assign(destination);
         }
       }, 500);
