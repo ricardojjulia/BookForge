@@ -63,9 +63,9 @@ describe("POST /api/books/[bookId]/chat/threads/[threadId]/tool-run", () => {
 
       if (table === "chat_messages") {
         return {
-          insert: (...args: unknown[]) => {
+          insert: () => {
             chatMessagesInsertCount += 1;
-            return chatMessagesInsertCount === 1 ? userInsert(...args) : assistantInsert(...args);
+            return chatMessagesInsertCount === 1 ? userInsert() : assistantInsert();
           },
           update: assistantUpdate,
         };
@@ -170,9 +170,9 @@ describe("POST /api/books/[bookId]/chat/threads/[threadId]/tool-run", () => {
 
       if (table === "chat_messages") {
         return {
-          insert: (...args: unknown[]) => {
+          insert: () => {
             chatMessagesInsertCount += 1;
-            return chatMessagesInsertCount === 1 ? userInsert(...args) : assistantInsert(...args);
+            return chatMessagesInsertCount === 1 ? userInsert() : assistantInsert();
           },
           update: assistantUpdate,
         };

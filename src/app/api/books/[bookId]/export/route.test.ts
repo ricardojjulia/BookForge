@@ -38,8 +38,8 @@ type SupabaseBuilder = {
   then: (resolve: (value: { data: unknown; error: unknown }) => unknown) => unknown;
 };
 
-const captured = {
-  exportInsert: null as Record<string, unknown> | null,
+const captured: { exportInsert: Record<string, unknown> | null } = {
+  exportInsert: null,
 };
 
 function createBuilder(table: string): SupabaseBuilder {
@@ -173,7 +173,12 @@ describe("POST /api/books/[bookId]/export", () => {
     const payload = await response.json();
     expect(response.status, JSON.stringify(payload)).toBe(200);
 
-    const metadata = (captured.exportInsert?.metadata || {}) as Record<string, unknown>;
+    // TypeScript 6's control-flow analysis narrows `captured.exportInsert` to
+    // `never` here, treating the `= null` reset above as still in effect
+    // across the `await POST(...)` call even though POST's mocked insert()
+    // reassigns it -- an explicit re-cast breaks that (over-eager) narrowing.
+    const exportInsert = captured.exportInsert as Record<string, unknown> | null;
+    const metadata = (exportInsert?.metadata || {}) as Record<string, unknown>;
     expect(metadata.epubMetadata).toEqual({
       language: "en-US",
       copyright: "Copyright 2026",

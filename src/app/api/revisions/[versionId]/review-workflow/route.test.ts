@@ -79,8 +79,13 @@ describe("PATCH /api/revisions/[versionId]/review-workflow", () => {
 
     expect(response.status, JSON.stringify(payload)).toBe(200);
     expect(canManageBookWorkflowMock).toHaveBeenCalledWith(expect.anything(), "book-1", "actor-1");
-    expect(updatePayload?.review_status).toBe("assigned");
-    expect(updatePayload?.reviewer_id).toBe("11111111-1111-4111-8111-111111111111");
+    // TypeScript 6's control-flow analysis over-narrows `updatePayload` here
+    // (the `let ... = null` above appears "still in effect" across the
+    // intervening `await` even though the mocked update() reassigns it) --
+    // an explicit re-cast breaks that over-eager narrowing.
+    const finalUpdatePayload = updatePayload as Record<string, unknown> | null;
+    expect(finalUpdatePayload?.review_status).toBe("assigned");
+    expect(finalUpdatePayload?.reviewer_id).toBe("11111111-1111-4111-8111-111111111111");
     expect(addNotificationMock).toHaveBeenCalled();
   });
 });

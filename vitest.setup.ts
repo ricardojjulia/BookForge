@@ -31,3 +31,16 @@ if (typeof window !== "undefined" && !window.visualViewport) {
 		},
 	});
 }
+
+// jsdom doesn't implement ResizeObserver at all; Mantine's ScrollArea (and
+// other components) instantiate one unconditionally. Upgrading jsdom made
+// this a hard ReferenceError instead of a silently-tolerated gap, so every
+// test now needs the same no-op stub some individual test files already
+// applied locally.
+if (typeof globalThis.ResizeObserver === "undefined") {
+	globalThis.ResizeObserver = class ResizeObserver {
+		observe() {}
+		unobserve() {}
+		disconnect() {}
+	};
+}

@@ -16,7 +16,13 @@ type SupabaseMutationBuilder = {
 };
 
 type SupabaseTableBuilder = {
-  insert: (payload: unknown) => SupabaseMutationBuilder;
+  // The real Supabase client's `.insert()` is generic over the row shape
+  // (`RejectExcessProperties<...>`), which a plain `unknown` parameter here
+  // can no longer structurally match after upgrading @supabase/supabase-js
+  // -- `any` keeps this a permissive interop shim without weakening safety
+  // at the actual call sites below, which all pass concretely typed objects.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see comment above
+  insert: (payload: any) => SupabaseMutationBuilder;
 };
 
 type SupabaseLike = {

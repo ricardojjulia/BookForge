@@ -92,8 +92,13 @@ describe("PATCH /api/books/[bookId]/rewrite-workflow/review", () => {
 
     const payload = await response.json();
     expect(response.status, JSON.stringify(payload)).toBe(200);
-    expect(upsertPayload?.review_status).toBe("assigned");
-    expect(upsertPayload?.reviewer_id).toBe("11111111-1111-4111-8111-111111111111");
+    // TypeScript 6's control-flow analysis over-narrows `upsertPayload` here
+    // (the `let ... = null` above appears "still in effect" across the
+    // intervening `await POST(...)` even though the mocked upsert()
+    // reassigns it) -- an explicit re-cast breaks that over-eager narrowing.
+    const finalUpsertPayload = upsertPayload as Record<string, unknown> | null;
+    expect(finalUpsertPayload?.review_status).toBe("assigned");
+    expect(finalUpsertPayload?.reviewer_id).toBe("11111111-1111-4111-8111-111111111111");
     expect(addNotificationMock).toHaveBeenCalled();
   });
 });

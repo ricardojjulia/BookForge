@@ -70,7 +70,7 @@ describe("POST /api/books/[bookId]/chat/threads/[threadId]/messages", () => {
     const assistantMessageInsertSelect = vi.fn(() => ({ single: assistantMessageInsertSingle }));
 
     let chatMessagesInsertCount = 0;
-    const chatMessagesInsert = vi.fn(() => {
+    const chatMessagesInsert = vi.fn<(payload: Record<string, unknown>) => { select: typeof userMessageInsertSelect }>(() => {
       chatMessagesInsertCount += 1;
       if (chatMessagesInsertCount === 1) return { select: userMessageInsertSelect };
       return { select: assistantMessageInsertSelect };
