@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
+  Autocomplete,
   Badge,
   Button,
   Group,
@@ -102,6 +103,27 @@ const TONE_OPTIONS = [
   "Academic",
   "Narrative",
   "Devotional",
+];
+
+// Presets only -- the field accepts any typed value, so a book can be
+// requested in a language not listed here (see AGENTS.md guidance in
+// concept/architecture/draft prompt builders, which already parameterize on
+// whatever string is provided rather than assuming English).
+const LANGUAGE_OPTIONS = [
+  "English",
+  "Spanish",
+  "Bilingual English/Spanish",
+  "French",
+  "German",
+  "Portuguese",
+  "Italian",
+  "Dutch",
+  "Polish",
+  "Romanian",
+  "Tagalog",
+  "Korean",
+  "Japanese",
+  "Mandarin Chinese",
 ];
 
 type ExistingCreationProject = {
@@ -520,11 +542,12 @@ export function CreateBookWizard({ existingProject }: { existingProject?: Existi
               onChange={setAudience}
               data={["General adult", "Young adult", "Parents", "Pastors", "Church small groups", "Grief/loss readers", "Christian readers"]}
             />
-            <Select
+            <Autocomplete
               label="Language"
-              value={language}
+              placeholder="Type or pick a language"
+              value={language ?? ""}
               onChange={setLanguage}
-              data={["English", "Spanish", "Bilingual English/Spanish"]}
+              data={LANGUAGE_OPTIONS}
             />
             <Select
               label="Tone"

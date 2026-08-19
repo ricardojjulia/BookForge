@@ -66,6 +66,28 @@ describe("isChapterStartLine (via parseManuscript)", () => {
   });
 });
 
+describe("chapter heading detection in other languages", () => {
+  it("detects French chapter headings", () => {
+    const filler = Array.from({ length: 40 }, (_, i) => `Body sentence number ${i} continues the scene.`).join(" ");
+    const text = [`${filler}`, "", "Chapitre 2", "", `${filler}`].join("\n");
+
+    const result = parseManuscript(text, "Test Book");
+
+    expect(result.chapters.length).toBeGreaterThan(1);
+    expect(result.chapters.some((chapter) => chapter.title === "Chapitre 2")).toBe(true);
+  });
+
+  it("detects CJK '第N章' chapter headings", () => {
+    const filler = Array.from({ length: 40 }, (_, i) => `Body sentence number ${i} continues the scene.`).join(" ");
+    const text = [`${filler}`, "", "第3章", "", `${filler}`].join("\n");
+
+    const result = parseManuscript(text, "Test Book");
+
+    expect(result.chapters.length).toBeGreaterThan(1);
+    expect(result.chapters.some((chapter) => chapter.title === "第3章")).toBe(true);
+  });
+});
+
 describe("stripPdfPageArtifacts", () => {
   it("removes '-- N of M --' page markers and bare-digit page-number lines", () => {
     const input = [

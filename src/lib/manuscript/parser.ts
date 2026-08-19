@@ -3,11 +3,29 @@ import JSZip from "jszip";
 import { PDFParse } from "pdf-parse";
 import type { ParsedChapter, ParsedManuscript, ParsedParagraph, ParsedScene } from "@/lib/types";
 
-const chapterPattern =
-  /^(#{1,2}\s*)?((chapter|cap[ií]tulo)\s+([0-9]+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|diecis[eé]is|diecisiete|dieciocho|diecinueve|veinte|primero|primera|segundo|segunda|tercero|tercera)(\s*[:.-]\s*.*)?|prologue|pr[oó]logo|epilogue|ep[ií]logo|introduction|introducci[oó]n|afterword|[0-9]+\.\s+.+|[0-9]+\s*:\s+.+)$/imu;
+// Shared across all chapter-heading regexes below so every one of them
+// recognizes the same set of languages -- previously only English and
+// Spanish keywords existed, silently failing to split chapters for any
+// other imported manuscript language (the wizard's language picker used to
+// artificially limit users to English/Spanish, which was the only reason
+// this gap didn't show up more often).
+const CHAPTER_WORDS = "chapter|cap[ií]tulo|chapitre|capitolo|capitol|hoofdstuk|rozdzia[łl]|kabanata";
+const NUMBER_WORDS =
+  "[0-9]+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|diecis[eé]is|diecisiete|dieciocho|diecinueve|veinte|primero|primera|segundo|segunda|tercero|tercera";
+// East Asian manuscripts commonly mark chapters with a counter word rather
+// than a "word + number" shape (e.g. "第3章", "제1장") -- matched as its own
+// top-level alternative instead of folded into CHAPTER_WORDS/NUMBER_WORDS.
+const CJK_CHAPTER_MARKER = String.raw`第\s*[0-9〇一二三四五六七八九十百千]+\s*[章回节節]|제\s*[0-9]+\s*[장화]`;
 
-const inlineChapterHeadingPattern =
-  /(^|[.!?…]\s+)((chapter|cap[ií]tulo)\s+(?:[0-9]+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|diecis[eé]is|diecisiete|dieciocho|diecinueve|veinte|primero|primera|segundo|segunda|tercero|tercera)(?:\s*[:.-])?)/gimu;
+const chapterPattern = new RegExp(
+  String.raw`^(#{1,2}\s*)?((${CHAPTER_WORDS})\s+(${NUMBER_WORDS})(\s*[:.-]\s*.*)?|prologue|pr[oó]logo|epilogue|ep[ií]logo|introduction|introducci[oó]n|afterword|${CJK_CHAPTER_MARKER}|[0-9]+\.\s+.+|[0-9]+\s*:\s+.+)$`,
+  "imu",
+);
+
+const inlineChapterHeadingPattern = new RegExp(
+  String.raw`(^|[.!?…]\s+)((${CHAPTER_WORDS})\s+(?:${NUMBER_WORDS})(?:\s*[:.-])?)`,
+  "gimu",
+);
 
 const sceneBreakPattern = /^\s{0,3}(\*\s*\*\s*\*|#{3,}|-{3,}|_{3,})\s*$/m;
 
@@ -163,17 +181,20 @@ function normalizeDetectedChapterTitle(title: string, index: number) {
   return title || `Chapter ${index + 1}`;
 }
 
+const chapterHeadingSpacingPattern = new RegExp(String.raw`([^\n])\s+((${CHAPTER_WORDS})\s+[0-9ivxlcdm]+\s*[:.-])`, "gimu");
+const chapterHeadingWrapPattern = new RegExp(
+  String.raw`^((${CHAPTER_WORDS})\s+(?:${NUMBER_WORDS})\s*[:.-]?)(\s+\S.{80,})$`,
+  "gimu",
+);
+
 function normalizeChapterHeadingBreaks(text: string) {
   return text
     .replace(inlineChapterHeadingPattern, (_match, prefix: string, heading: string) => {
       const sentenceEnd = prefix.trim();
       return `${sentenceEnd ? `${sentenceEnd}\n\n` : ""}${heading.trim()}`;
     })
-    .replace(/([^\n])\s+((chapter|cap[ií]tulo)\s+[0-9ivxlcdm]+\s*[:.-])/gimu, "$1\n\n$2")
-    .replace(
-      /^((chapter|cap[ií]tulo)\s+(?:[0-9]+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|diecis[eé]is|diecisiete|dieciocho|diecinueve|veinte|primero|primera|segundo|segunda|tercero|tercera)\s*[:.-]?)(\s+\S.{80,})$/gimu,
-      "$1\n\n$3",
-    )
+    .replace(chapterHeadingSpacingPattern, "$1\n\n$2")
+    .replace(chapterHeadingWrapPattern, "$1\n\n$3")
     .replace(/\n{3,}/g, "\n\n");
 }
 
