@@ -1,5 +1,75 @@
 # Changelog
 
+## 2.0.0 - 2026-08-19
+
+### Language & script support
+
+- Book language is now a free-text field (with common presets) instead of a fixed English/Spanish/Bilingual dropdown — the database column, API validation, and every AI prompt builder already accepted arbitrary language strings; the dropdown was the only real restriction.
+- **Chapter-heading detection** extended from English/Spanish to also recognize French, Italian, Dutch, Polish, Romanian, and Tagalog chapter/prologue/epilogue keywords, plus a CJK counter-word pattern (`第3章`, `제1장`) for manuscripts that mark chapters without a "word + number" shape.
+- **Dialogue-density scoring** now also counts guillemet-delimited (`« »`) and em-dash-led dialogue lines, not just straight/curly quotes — literary Spanish, French, and Italian prose was being scored as having almost no dialogue.
+- **PDF export** no longer renders non-Latin-1 text as missing-glyph boxes. It now auto-detects a manuscript's dominant script and embeds the matching font: Open Sans by default (full Latin Extended, Cyrillic, Greek, Vietnamese, and Hebrew coverage), switching to Noto Sans Arabic or Noto Sans SC the moment Arabic or CJK text is detected. The ~10MB CJK font is lazy-loaded so an ordinary Latin-script export never pays its cost.
+- **EPUB export** previously hardcoded `lang="en"` on every chapter's XHTML document regardless of the book's actual language — only the OPF package's `dc:language` was ever set correctly. Every document now carries the resolved language.
+- Known open items, called out honestly rather than silently skipped: Arabic contextual letterforms and right-to-left reading order aren't corrected yet (glyphs render, order doesn't), and CJK word-count estimates still split on whitespace.
+
+## 1.4.0 - 2026-08-18
+
+### Design system rollout
+
+Implemented a cohesive design spec (Inter font, brand-purple theme, icon-labeled navigation) across the entire app, extending it from an initial dashboard redesign to every major workflow:
+
+- Global header/nav restyle, `My Book Room` rename, and a subtle freshness banner rolled out to every page that previously used the louder colored-alert version.
+- Redesigned: dashboard, AI Settings' Model Status panel and Detected Match recommendations table, Studio Actions, Book Inputs (sidebar section nav replacing a horizontal tab list), the Manuscript page (Structure Repair / Structure Audit / Scene Editor collapsed into a "Manuscript Health" summary-card row), Metadata Timeline (row-list layout with overflow menus replacing per-row button clusters), Rewrite Setup (clickable critic-lens cards, chapter-selection chips), and Production Command Center / BookForge Critic (score rings, STRONG/SOLID/NEEDS WORK band pills, a new average/strongest/weakest summary row).
+- Added icons and a filled active-pill style to the book sub-navigation bar.
+- Every redesign preserved full existing functionality underneath — same modals, same job/queue logic, same API calls — only presentation changed.
+
+## 1.3.0 - 2026-08-18
+
+### Steward console — account lifecycle without an admin god-mode account
+
+- Account deletion is now a **30-day recoverable ban**, not an immediate hard delete: the account is locked out right away, but nothing is destroyed until the retention window closes *and* a Steward explicitly confirms the purge. A daily job only flags accounts as due — it never deletes anything itself.
+- Added a BookForge-specific **Steward** platform role (not a generic `is_admin` flag), with its own RLS foundation so staff access is auditable and scoped, not a service-role bypass.
+- New Steward console: account search, restore, extend-retention, and purge-confirmation actions; per-account book counts and an owner-filtered book list; one-click book **ownership transfer**.
+- Fixed export downloads for collaborators and staff, found while building the cross-book RLS path.
+- Replaced every native `window.confirm`/`window.prompt` in the console with a real Mantine modal (type-to-confirm for deletes) after a live "prompt() is not supported" failure.
+- Console entry point lives behind the username menu, not a top-level nav link.
+
+## 1.2.0 - 2026-08-16 – 2026-08-18
+
+### Focused Rewrite and job visibility
+
+- Added **Focused Rewrite**: pick specific critic lenses, run a full-book rewrite plan → execute → accept → re-evaluate cycle targeted at just those lenses, with a resumable stepper if the browser tab closes mid-run.
+- Added a global job-visibility indicator so a long-running AI job stays visible while navigating away from the page that started it.
+- Fixed Structure Repair no-ops, several critic/chapter edge-case bugs, a chat message de-duplication bug, and durability gaps in job tracking.
+- Fixed Auto-Review silently reverting a finished book back to draft status, and a split-chapter operation leaving later chapters' titles out of sync.
+- CreativeWriter: added inline paragraph editing in BookReader (reusing CreativeWriter's sync-push path), prev/next paragraph flow with adjacent-text previews, full-text-on-hover for clamped previews, and fixed a returning-visitor hydration mismatch.
+- Fixed the chat copilot leaking internal `revisionDrafts` meta-labels into manuscript text, and a `DataFreshnessBanner` hydration mismatch on returning visits.
+
+## 1.1.0 - 2026-08-10 – 2026-08-11
+
+### Guided rewrite and reliability polish
+
+- Added a **Guided** option to the Auto-Review Wizard and connected Guided Rewrite Run's steps with a visual progress timeline; every step's action button is now visible in manual mode too.
+- Grounded the AI Job Queue panel in real server-reported progress instead of a client-side time-based simulation, and fixed the background-job heartbeat clobbering `taskName`/`startedAt` on its first tick.
+- Fixed Retry Failed silently doing nothing after the real-progress work landed, and made rewrite calls retry once on a different cloud model before failing (plus corrected telemetry model attribution).
+- Fixed the Rewrite Readiness Gate showing "Blocked" while every visible card was green, and made the Command Center's next-step guidance name the actual button to click.
+- Made the Architecture Roadmap panel compact and graphical (with moderate motion) instead of a wall of text, and stopped its stale Auto-Review callout and dangling third button.
+- Fixed the Creation Progress stepper showing false-done, and localized the working-title placeholder for non-English projects.
+- Every new job-triggering button now gives resumable, live progress feedback instead of a bare spinner.
+
+## 1.0.0 - 2026-08-06
+
+### Six-phase structural revamp
+
+A full-app restructuring, shipped in six sequential phases: a shared critic-lens progress module, a shared book-data loader with SWR poll deduplication, AppShell consolidated into a root layout with the book sub-navigation bar, the book hub page broken into proper route seams, the Guidance panel promoted and the onboarding wizard generalized, and a final cleanup/hardening/regression pass.
+
+Shipped alongside the revamp:
+
+- Gated the landing page's primary CTAs and manuscript import/creation on auth state.
+- Added AI-suggested scene splits with per-item review, moved manuscript search from the hub page into Reader view, and added parser regression tests.
+- Fixed PDF page-artifact leakage and two chapter-detection bugs; patched `js-yaml` for a high-severity quadratic-complexity DoS.
+- Fixed the Spanish-language default and a stale AI-engine status display left over from onboarding.
+- Removed several redundant/dead-end CTAs ("Run Auto-Review", a duplicate Architecture Roadmap Auto-Review button) once the Command Center made the same actions discoverable in one place.
+
 ## 0.5.0 - 2026-08-02
 
 ### BookForge CreativeWriter 0.1.0
@@ -111,7 +181,6 @@
 ## Unreleased / planned
 
 - Manuscript search — full-text search across all chapters and scenes.
-- Author Voice Capture — AI voice fingerprint extraction injected into rewrite prompts.
 - Character / Location / Theme UI — full CRUD editor for all five world-building entity types.
 - Chapter Snapshots — named checkpoints with one-click restore before major rewrite passes.
 - Onboarding checklist — first-run guided flow tracking progress through the core workflow.

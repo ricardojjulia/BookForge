@@ -5,10 +5,12 @@
 **A local-first revision studio for authors who want an editor, not an autocomplete.**
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/BookForge%20AI-2.0.0-6C3CE1)](CHANGELOG.md)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Auth%20%2B%20Storage-3ECF8E)](https://supabase.com/)
 [![LM Studio](https://img.shields.io/badge/AI%20Engine-LM%20Studio%20%7C%20Cloud-8A2BE2)](https://lmstudio.ai/)
 [![OpenRouter](https://img.shields.io/badge/Cloud%20Routing-OpenRouter-0F172A)](https://openrouter.ai/)
+[![Languages](https://img.shields.io/badge/Book%20language-Any-orange)](#language--script-support)
 
 [Quick Start](#quick-start) · [CreativeWriter](#bookforge-creativewriter) · [How-To Guide](docs/HOWTO.md) · [Changelog](CHANGELOG.md) · [Architecture](docs/ARCHITECTURE.md)
 
@@ -68,9 +70,27 @@ Every arrow above can be driven by hand, one step at a time — or handed to the
 
 **Export** — Final Manuscript Builder produces Markdown, DOCX, EPUB, and PDF with an assembly-source preview before you commit to a version; mark one export as **finished** for one-click download from the dashboard. An **Abridged Edition Builder** can produce a shorter version from approved compression suggestions.
 
-**Runs where you tell it to** — LM Studio locally by default, or route specific tasks (critique, planning, rewriting, extraction) to OpenAI, Anthropic, or Google, per task, via an Auto / Local / Cloud execution mode.
+**Runs where you tell it to** — LM Studio locally by default, or route specific tasks (critique, planning, rewriting, extraction) to OpenAI, Anthropic, or Google, per task, via an Auto / Local / Cloud execution mode. If a call fails on the configured cloud model, it retries once on a different model before giving up.
 
 **Learns from what actually happens on your machine** — every local model call is recorded (success, empty output, too-short output, context-related crashes). BookForge uses that history to avoid repeating a model+task combination that's already failed, and to request a safer context size the next time — because no two locally loaded models behave the same way, and static name-matching heuristics alone can't tell you that.
+
+### Language & script support
+
+A book's language is a free-text field, not a fixed dropdown — write in anything. The parts of the pipeline that used to quietly assume English (or English + Spanish) now cover a much wider range:
+
+- **Chapter-heading detection** recognizes chapter/prologue/epilogue keywords in English, Spanish, French, Italian, Dutch, Polish, Romanian, and Tagalog, plus CJK counter-word headings (`第3章`, `제1장`).
+- **Dialogue-density scoring** counts straight/curly quotes *and* guillemets (`« »`) and em-dash-led dialogue lines — the conventions literary Spanish, French, and Italian actually use.
+- **Export** (PDF/EPUB) picks the right embedded font automatically per manuscript: Latin Extended, Cyrillic, Greek, Vietnamese, and Hebrew by default, switching to a dedicated Arabic or CJK font the moment it detects that script in the text — so accented and non-Latin text never renders as missing-glyph boxes. EPUB output also sets the correct `lang` attribute on every chapter, not just the package metadata.
+- Known open item: right-to-left *reading order* (Arabic/Hebrew) and CJK-aware word counting aren't solved yet — glyphs render correctly, but full bidi layout is still ahead.
+
+### Platform administration
+
+A **Steward** role (Settings → account, not a generic admin flag) gives trusted staff exactly what's needed to run support without an "admin god-mode" account:
+
+- **Account deletion is a 30-day ban, not a hard delete** — the account is locked out immediately, but nothing is destroyed until a Steward explicitly confirms the purge after the window closes. Nothing is ever auto-purged on a schedule.
+- Restore, extend the retention window, or archive/fork any account from one console.
+- Cross-book visibility and full management for support — book counts per account, an owner-filtered book list, and one-click **ownership transfer**.
+- Every destructive action goes through a real confirmation modal (type-to-confirm for deletes), never a native browser dialog.
 
 ## BookForge CreativeWriter
 
@@ -145,12 +165,12 @@ This is opt-in per user (**Settings → AI Settings → Optimize per feature**) 
 | Layer | Choice |
 |---|---|
 | Framework | Next.js 16 (App Router), React 19, TypeScript |
-| UI | Mantine 9, Tailwind CSS 4 |
+| UI | Mantine 9, Tailwind CSS 4 — one consistent design system (Inter, brand purple, icon-labeled nav) across every workflow |
 | Data | Supabase — Postgres, Auth, Storage, Row-Level Security |
 | AI engine | LM Studio (local, OpenAI-compatible) or OpenAI / Anthropic / Google |
 | Document handling | DOCX, EPUB, PDF, Markdown, and archive parsing/export |
 | Testing | Vitest |
-| Current release | BookForge AI 0.5.0, CreativeWriter 0.1.0 |
+| Current release | BookForge AI 2.0.0, CreativeWriter 0.1.0 |
 
 ---
 
