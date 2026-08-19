@@ -12,6 +12,8 @@ type Chapter = { id: string; chapter_number: number; title: string | null };
 
 type Props = {
   bookId: string;
+  seriesId: string | null;
+  sharedEntityLinkIds: Record<string, string>;
   initialCharacters: Record<string, unknown>[];
   initialLocations: Record<string, unknown>[];
   initialThemes: Record<string, unknown>[];
@@ -25,8 +27,19 @@ type Props = {
 
 type QueueResponse = { content?: { jobId?: string } };
 
+function linksForType(sharedEntityLinkIds: Record<string, string>, entityType: string): Record<string, string> {
+  const prefix = `${entityType}:`;
+  return Object.fromEntries(
+    Object.entries(sharedEntityLinkIds)
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([key, linkId]) => [key.slice(prefix.length), linkId]),
+  );
+}
+
 export function WorldBibleEditor({
   bookId,
+  seriesId,
+  sharedEntityLinkIds,
   initialCharacters,
   initialLocations,
   initialThemes,
@@ -122,6 +135,8 @@ export function WorldBibleEditor({
           bookId={bookId}
           entityType="characters"
           initial={initialCharacters}
+          seriesId={seriesId}
+          sharedLinkIds={linksForType(sharedEntityLinkIds, "characters")}
           fields={[
             { key: "name", label: "Name", required: true },
             { key: "role", label: "Role / Function" },
@@ -141,6 +156,8 @@ export function WorldBibleEditor({
           bookId={bookId}
           entityType="locations"
           initial={initialLocations}
+          seriesId={seriesId}
+          sharedLinkIds={linksForType(sharedEntityLinkIds, "locations")}
           fields={[
             { key: "name", label: "Name", required: true },
             { key: "description", label: "Description", multiline: true },
@@ -155,6 +172,8 @@ export function WorldBibleEditor({
           bookId={bookId}
           entityType="themes"
           initial={initialThemes}
+          seriesId={seriesId}
+          sharedLinkIds={linksForType(sharedEntityLinkIds, "themes")}
           fields={[
             { key: "name", label: "Theme", required: true },
             { key: "description", label: "Notes", multiline: true },
@@ -169,6 +188,8 @@ export function WorldBibleEditor({
           bookId={bookId}
           entityType="motifs"
           initial={initialMotifs}
+          seriesId={seriesId}
+          sharedLinkIds={linksForType(sharedEntityLinkIds, "motifs")}
           fields={[
             { key: "name", label: "Motif", required: true },
             { key: "description", label: "Description", multiline: true },

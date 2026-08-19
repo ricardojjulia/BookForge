@@ -3,9 +3,9 @@
 import { useState } from "react";
 import {
   ActionIcon, Alert, Button, Collapse, Group, NumberInput, Paper,
-  Popover, Select, Stack, Text, Textarea, TextInput, Title,
+  Popover, Select, Stack, Text, Textarea, TextInput, Title, Tooltip,
 } from "@mantine/core";
-import { IconChevronDown, IconChevronUp, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconBookmark, IconBookmarkPlus, IconChevronDown, IconChevronUp, IconPlus, IconTrash } from "@tabler/icons-react";
 import { fetchJson } from "@/lib/http/fetch-json";
 
 type Field = {
@@ -26,12 +26,16 @@ type Props = {
   displayName: (item: Record<string, unknown>) => string;
   displaySub?: (item: Record<string, unknown>) => string;
   chapters?: Chapter[];
+  /** Series this book belongs to, if any -- enables the "Share to Series" toggle. */
+  seriesId?: string | null;
+  /** entityId -> series_shared_entities row id, for entities already shared to the series. */
+  sharedLinkIds?: Record<string, string>;
 };
 
 const EMPTY = (fields: Field[]): Record<string, unknown> =>
   Object.fromEntries(fields.map((f) => [f.key, f.type === "number" ? "" : ""]));
 
-export function EntityList({ bookId, entityType, initial, fields, displayName, displaySub, chapters }: Props) {
+export function EntityList({ bookId, entityType, initial, fields, displayName, displaySub, chapters, seriesId, sharedLinkIds }: Props) {
   const [items, setItems] = useState<Record<string, unknown>[]>(initial);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
@@ -40,8 +44,34 @@ export function EntityList({ bookId, entityType, initial, fields, displayName, d
   const [showNew, setShowNew] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [shareLinks, setShareLinks] = useState<Record<string, string>>(sharedLinkIds || {});
+  const [sharing, setSharing] = useState<string | null>(null);
 
   const base = `/api/books/${bookId}/world/${entityType}`;
+
+  async function toggleShare(id: string) {
+    if (!seriesId) return;
+    setSharing(id);
+    setError(null);
+    try {
+      const existingLinkId = shareLinks[id];
+      if (existingLinkId) {
+        await fetchJson(`/api/series/${seriesId}/shared-entities/${existingLinkId}`, { method: "DELETE" });
+        setShareLinks((prev) => { const next = { ...prev }; delete next[id]; return next; });
+      } else {
+        const res = await fetchJson<{ linkId: string }>(`/api/series/${seriesId}/shared-entities`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entityType, entityId: id, bookId }),
+        });
+        setShareLinks((prev) => ({ ...prev, [id]: res.linkId }));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update series sharing.");
+    } finally {
+      setSharing(null);
+    }
+  }
 
   function patch(id: string, key: string, value: unknown) {
     setDrafts((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), [key]: value } }));
@@ -164,6 +194,19 @@ export function EntityList({ bookId, entityType, initial, fields, displayName, d
                   <Button size="xs" color="grape" loading={saving === id} onClick={() => save(item)}>
                     Save
                   </Button>
+                )}
+                {seriesId && (
+                  <Tooltip label={shareLinks[id] ? "Shared to series — click to unshare" : "Share to series"} withArrow>
+                    <ActionIcon
+                      variant="subtle"
+                      color={shareLinks[id] ? "grape" : "gray"}
+                      size="sm"
+                      loading={sharing === id}
+                      onClick={() => toggleShare(id)}
+                    >
+                      {shareLinks[id] ? <IconBookmark size={14} /> : <IconBookmarkPlus size={14} />}
+                    </ActionIcon>
+                  </Tooltip>
                 )}
                 <Popover opened={confirmingDelete === id} onClose={() => setConfirmingDelete(null)} position="bottom-end" withArrow>
                   <Popover.Target>

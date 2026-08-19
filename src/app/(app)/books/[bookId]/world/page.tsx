@@ -31,10 +31,11 @@ export default async function WorldBiblePage({ params }: { params: Promise<{ boo
     { data: styleSamples },
     { data: matterSections },
     { data: revisionInstructions },
+    { data: sharedLinks },
   ] = await Promise.all([
     supabase
       .from("books")
-      .select("id,title,author_name,genre,target_audience,point_of_view,tense,world_bible_processed,world_bible_status,world_bible_processed_at")
+      .select("id,title,author_name,genre,target_audience,point_of_view,tense,world_bible_processed,world_bible_status,world_bible_processed_at,series_id")
       .eq("id", bookId)
       .single(),
     supabase.from("characters").select("*").eq("book_id", bookId).order("created_at"),
@@ -64,6 +65,10 @@ export default async function WorldBiblePage({ params }: { params: Promise<{ boo
       .select("id,title,scope")
       .eq("book_id", bookId)
       .order("created_at", { ascending: false }),
+    supabase
+      .from("series_shared_entities")
+      .select("id,entity_type,source_entity_id")
+      .eq("source_book_id", bookId),
   ]);
 
   if (!book) {
@@ -74,6 +79,10 @@ export default async function WorldBiblePage({ params }: { params: Promise<{ boo
     );
   }
 
+  const sharedEntityLinkIds = Object.fromEntries(
+    (sharedLinks || []).map((link) => [`${link.entity_type}:${link.source_entity_id}`, link.id]),
+  );
+
   return (
     <Container size="xl">
       <Title mb={4}>World Bible</Title>
@@ -81,6 +90,8 @@ export default async function WorldBiblePage({ params }: { params: Promise<{ boo
       <Stack gap="xl">
         <WorldBibleEditor
           bookId={bookId}
+          seriesId={book.series_id}
+          sharedEntityLinkIds={sharedEntityLinkIds}
           initialCharacters={characters || []}
           initialLocations={locations || []}
           initialThemes={themes || []}
