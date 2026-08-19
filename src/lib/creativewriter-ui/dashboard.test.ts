@@ -3,6 +3,13 @@ import { getCreativeWriterWorkspaceData, isMissingCreativeWriterLedger } from "@
 
 describe("CreativeWriter workspace data", () => {
   it("treats a missing sync ledger table as an empty conflict queue", async () => {
+    // Collaboration data (reader comments, contributors, suggestions,
+    // assignments) is only fetched in managed_saas mode -- see
+    // src/lib/creativewriter-ui/access.ts. This test asserts on it, so it
+    // needs that mode explicitly, unlike the file's other tests.
+    const originalMode = process.env.NEXT_PUBLIC_DEPLOYMENT_MODE;
+    process.env.NEXT_PUBLIC_DEPLOYMENT_MODE = "managed_saas";
+
     const supabase = createDashboardSupabase({
       conflictError: {
         code: "PGRST205",
@@ -11,6 +18,9 @@ describe("CreativeWriter workspace data", () => {
     });
 
     const result = await getCreativeWriterWorkspaceData({ supabase, accountId: "user-1" });
+
+    if (originalMode === undefined) delete process.env.NEXT_PUBLIC_DEPLOYMENT_MODE;
+    else process.env.NEXT_PUBLIC_DEPLOYMENT_MODE = originalMode;
 
     expect(result.selectedBook?.id).toBe("book-1");
     expect(result.conflicts).toEqual([]);

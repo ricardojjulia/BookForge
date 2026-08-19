@@ -5,11 +5,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Anchor, AppShell as MantineAppShell, Button, Group, Menu, Text, UnstyledButton } from "@mantine/core";
 import { IconChevronDown, IconLogout, IconShieldCog } from "@tabler/icons-react";
-import { isManagedSaasDeployment } from "@/lib/deployment/mode";
 import { createClient } from "@/lib/supabase/client";
 import { GlobalJobIndicator } from "@/components/layout/global-job-indicator";
 
-const ALL_NAV_LINKS = [
+const NAV_LINKS = [
   { href: "/dashboard", label: "My Book Room" },
   { href: "/books/new", label: "Import" },
   { href: "/creativewriter", label: "CreativeWriter" },
@@ -18,13 +17,6 @@ const ALL_NAV_LINKS = [
   { href: "/settings", label: "Settings" },
   { href: "/account", label: "Account" },
 ];
-
-// No per-user entitlement system exists yet, so managed-SaaS deployments hide
-// CreativeWriter from nav entirely rather than showing a link every account
-// can click into. See src/lib/creativewriter-ui/access.ts for the route gate.
-const NAV_LINKS = isManagedSaasDeployment()
-  ? ALL_NAV_LINKS.filter((link) => link.href !== "/creativewriter")
-  : ALL_NAV_LINKS;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();

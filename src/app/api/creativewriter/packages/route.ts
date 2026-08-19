@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { logicalBookForgePackageSchema } from "@/lib/bookforge-package";
 import { insertCreativeWriterPackage } from "@/lib/creativewriter-cloud/package-transfer";
-import { creativeWriterAccessDenied } from "@/lib/creativewriter-ui/access";
-import { forbiddenResponse } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 
 const uploadSchema = z.object({
@@ -21,9 +19,6 @@ function getErrorMessage(error: unknown) {
 
 export async function POST(request: Request) {
   try {
-    const accessDenied = creativeWriterAccessDenied();
-    if (accessDenied) return forbiddenResponse(accessDenied);
-
     const supabase = await createClient();
     const {
       data: { user },

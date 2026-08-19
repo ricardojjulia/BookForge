@@ -98,10 +98,10 @@ A **Steward** role (Settings → account, not a generic admin flag) gives truste
 
 **CreativeWriter 0.1.0** is the BookForge-aware writing desk — a linked manuscript workspace with book selection, chapter navigation, paragraph editing, contributor suggestions, reader-comment triage, and cloud sync with real conflict resolution, built on top of the same authenticated BookForge data model.
 
-Its readiness bar depends on how you're running BookForge:
+The writing desk itself — book selection, chapter navigation, paragraph editing, sync, `.bookforge` import/export — works identically whether you're self-hosting this repo or running a managed deployment; a standalone desktop executable isn't built yet, but the feature isn't gated behind a subscription. What *is* deployment-dependent is collaboration:
 
-- **Self-hosted (this repo, run yourself):** CreativeWriter is a plain feature, free and unrestricted for the local user — there's no other tenant to isolate from and no subscription to enforce, so the sync/conflict/suggestion core below is what matters, and it's solid. A standalone desktop executable isn't built yet; today it's an authenticated route in the same Next.js app.
-- **Managed SaaS (hosted by us, subscription):** CreativeWriter is meant to be operationalized as a paid companion feature, not a default. That requires real multi-tenant guarantees this repo hasn't proven yet — cloud Supabase cross-account RLS proof, subscription entitlement enforcement, and import jobs isolated from the request/response lifecycle. Until those land, `NEXT_PUBLIC_DEPLOYMENT_MODE=managed_saas` disables CreativeWriter outright (hidden from nav, its routes return 403) rather than offering it to every account with no entitlement check behind it — see [.env.example](.env.example) and `src/lib/creativewriter-ui/access.ts`.
+- **Self-hosted (this repo, run yourself):** the full writing desk, solo (or same-account). No comment-triage or suggestion/assignment-review panels — there's no per-user entitlement system to gate them with yet, so they're off by default rather than open to every account.
+- **Managed SaaS (hosted by us, subscription):** everything above, plus CreativeWriter's collaboration panels — reader comment triage and contributor suggestion/assignment review — as a companion capability, turned on via `NEXT_PUBLIC_DEPLOYMENT_MODE=managed_saas`. See [.env.example](.env.example) and `src/lib/creativewriter-ui/access.ts`.
 
 What's in 0.1.0:
 

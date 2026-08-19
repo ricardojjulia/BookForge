@@ -1,4 +1,5 @@
 import { createCreativeWriterSyncCursor, type CreativeWriterConflict } from "@/lib/creativewriter-sync";
+import { isCreativeWriterCollaborationEnabled } from "@/lib/creativewriter-ui/access";
 
 export type CreativeWriterBookOption = {
   id: string;
@@ -144,6 +145,7 @@ export type CreativeWriterSupportContextView = {
 
 export type CreativeWriterWorkspaceData = {
   accountId: string;
+  collaborationEnabled: boolean;
   books: CreativeWriterBookOption[];
   selectedBook: CreativeWriterBookOption | null;
   chapters: CreativeWriterChapterView[];
@@ -322,6 +324,8 @@ export async function getCreativeWriterWorkspaceData(input: {
   accountId: string;
   selectedBookId?: string | null;
 }): Promise<CreativeWriterWorkspaceData> {
+  const collaborationEnabled = isCreativeWriterCollaborationEnabled();
+
   const { data: bookRows, error: booksError } = await resolveList<BookRow>(
     table(input.supabase, "books")
       .select("id,title,author_name,status,updated_at")
@@ -336,6 +340,7 @@ export async function getCreativeWriterWorkspaceData(input: {
   if (!selectedBook) {
     return {
       accountId: input.accountId,
+      collaborationEnabled,
       books,
       selectedBook: null,
       chapters: [],
@@ -387,30 +392,38 @@ export async function getCreativeWriterWorkspaceData(input: {
           .eq("book_id", selectedBook.id)
           .order("paragraph_number"),
       ),
-      resolveList<ReaderCommentRow>(
-        table(input.supabase, "reader_annotations")
-          .select("id,paragraph_id,annotator_id,note,resolved,created_at")
-          .eq("book_id", selectedBook.id)
-          .order("created_at", { ascending: false }),
-      ),
-      resolveList<ContributorSuggestionRow>(
-        table(input.supabase, "creativewriter_contributor_suggestions")
-          .select("id,chapter_id,paragraph_id,proposer_id,reviewer_id,status,original_text_snapshot,suggested_text,rationale,review_note,created_at,updated_at,reviewed_at,applied_at,withdrawn_at")
-          .eq("book_id", selectedBook.id)
-          .order("created_at", { ascending: false }),
-      ),
-      resolveList<ContributorRow>(
-        table(input.supabase, "book_collaborators")
-          .select("user_id,role,created_at")
-          .eq("book_id", selectedBook.id)
-          .order("created_at"),
-      ),
-      resolveList<ContributorAssignmentRow>(
-        table(input.supabase, "creativewriter_contributor_assignments")
-          .select("id,chapter_id,paragraph_id,assignee_id,assigner_id,scope,status,title,note,due_at,created_at,updated_at,completed_at")
-          .eq("book_id", selectedBook.id)
-          .order("created_at", { ascending: false }),
-      ),
+      collaborationEnabled
+        ? resolveList<ReaderCommentRow>(
+            table(input.supabase, "reader_annotations")
+              .select("id,paragraph_id,annotator_id,note,resolved,created_at")
+              .eq("book_id", selectedBook.id)
+              .order("created_at", { ascending: false }),
+          )
+        : emptyResolved<ReaderCommentRow>(),
+      collaborationEnabled
+        ? resolveList<ContributorSuggestionRow>(
+            table(input.supabase, "creativewriter_contributor_suggestions")
+              .select("id,chapter_id,paragraph_id,proposer_id,reviewer_id,status,original_text_snapshot,suggested_text,rationale,review_note,created_at,updated_at,reviewed_at,applied_at,withdrawn_at")
+              .eq("book_id", selectedBook.id)
+              .order("created_at", { ascending: false }),
+          )
+        : emptyResolved<ContributorSuggestionRow>(),
+      collaborationEnabled
+        ? resolveList<ContributorRow>(
+            table(input.supabase, "book_collaborators")
+              .select("user_id,role,created_at")
+              .eq("book_id", selectedBook.id)
+              .order("created_at"),
+          )
+        : emptyResolved<ContributorRow>(),
+      collaborationEnabled
+        ? resolveList<ContributorAssignmentRow>(
+            table(input.supabase, "creativewriter_contributor_assignments")
+              .select("id,chapter_id,paragraph_id,assignee_id,assigner_id,scope,status,title,note,due_at,created_at,updated_at,completed_at")
+              .eq("book_id", selectedBook.id)
+              .order("created_at", { ascending: false }),
+          )
+        : emptyResolved<ContributorAssignmentRow>(),
       resolveList<ConflictEventRow>(
         table(input.supabase, "creativewriter_sync_events")
           .select("id,conflict_id,conflict_payload,resolution_status,created_at")
@@ -481,13 +494,15 @@ export async function getCreativeWriterWorkspaceData(input: {
   const blockingSupportError = supportErrors.find((error) => !isMissingCreativeWriterLedger(error));
   if (blockingSupportError) throw blockingSupportError;
 
-  const participantProfileRows = await loadVisibleParticipantProfiles(input.supabase, {
-    accountId: input.accountId,
-    contributors: contributorRows || [],
-    readerComments: readerCommentRows || [],
-    suggestions: suggestionRows || [],
-    assignments: assignmentRows || [],
-  });
+  const participantProfileRows = collaborationEnabled
+    ? await loadVisibleParticipantProfiles(input.supabase, {
+        accountId: input.accountId,
+        contributors: contributorRows || [],
+        readerComments: readerCommentRows || [],
+        suggestions: suggestionRows || [],
+        assignments: assignmentRows || [],
+      })
+    : [];
   const participantProfiles = participantProfileRows.map(toParticipantProfileView);
   const participantProfileById = new Map(participantProfiles.map((profile) => [profile.userId, profile]));
 
@@ -499,6 +514,7 @@ export async function getCreativeWriterWorkspaceData(input: {
 
   return {
     accountId: input.accountId,
+    collaborationEnabled,
     books,
     selectedBook,
     chapters: (chapterRows || []).map(toChapterView),
@@ -781,6 +797,10 @@ function table(supabase: CreativeWriterDashboardSupabaseLike, name: string): Que
 async function resolveList<T>(builder: QueryBuilder): Promise<{ data: T[] | null; error: unknown }> {
   const result = await (builder as unknown as Promise<{ data?: T[] | null; error?: unknown }>);
   return { data: result?.data ?? [], error: result?.error ?? null };
+}
+
+async function emptyResolved<T>(): Promise<{ data: T[] | null; error: unknown }> {
+  return { data: [], error: null };
 }
 
 async function resolveMaybe<T>(builder: QueryBuilder): Promise<{ data: T | null; error: unknown }> {

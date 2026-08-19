@@ -816,8 +816,12 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
 
                 <Tabs.List style={{ flexWrap: "wrap", gap: 6, overflow: "visible" }}>
                   <Tabs.Tab value="conflicts" leftSection={<IconGitMerge size={14} />} style={SUPPORT_TAB_STYLE}>Conflicts</Tabs.Tab>
-                  <Tabs.Tab value="comments" leftSection={<IconMessage size={14} />} style={SUPPORT_TAB_STYLE}>Comments {commentEntries.length ? `(${commentEntries.length})` : ""}</Tabs.Tab>
-                  <Tabs.Tab value="suggestions" leftSection={<IconSparkles size={14} />} style={SUPPORT_TAB_STYLE}>Suggestions {data.contributorSuggestions.length ? `(${data.contributorSuggestions.length})` : ""}</Tabs.Tab>
+                  {data.collaborationEnabled && (
+                    <Tabs.Tab value="comments" leftSection={<IconMessage size={14} />} style={SUPPORT_TAB_STYLE}>Comments {commentEntries.length ? `(${commentEntries.length})` : ""}</Tabs.Tab>
+                  )}
+                  {data.collaborationEnabled && (
+                    <Tabs.Tab value="suggestions" leftSection={<IconSparkles size={14} />} style={SUPPORT_TAB_STYLE}>Suggestions {data.contributorSuggestions.length ? `(${data.contributorSuggestions.length})` : ""}</Tabs.Tab>
+                  )}
                   <Tabs.Tab value="notes" leftSection={<IconNotes size={14} />} style={SUPPORT_TAB_STYLE}>Notes {noteEntries.length ? `(${noteEntries.length})` : ""}</Tabs.Tab>
                   <Tabs.Tab value="research" leftSection={<IconSearch size={14} />} style={SUPPORT_TAB_STYLE}>Research {researchEntries.length ? `(${researchEntries.length})` : ""}</Tabs.Tab>
                   <Tabs.Tab value="bible" leftSection={<IconBook size={14} />} style={SUPPORT_TAB_STYLE}>Book Bible {bibleSummaryEntries.length ? `(${bibleSummaryEntries.length})` : ""}</Tabs.Tab>
@@ -877,6 +881,7 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                   </Stack>
                 </Tabs.Panel>
 
+                {data.collaborationEnabled && (
                 <Tabs.Panel value="comments" pt="md">
                   <Stack gap="sm">
                     <Group justify="space-between">
@@ -911,7 +916,9 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                     />
                   </Stack>
                 </Tabs.Panel>
+                )}
 
+                {data.collaborationEnabled && (
                 <Tabs.Panel value="suggestions" pt="md">
                   <Stack gap="sm">
                     <Group justify="space-between">
@@ -1019,6 +1026,7 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
                     />
                   </Stack>
                 </Tabs.Panel>
+                )}
 
                 <Tabs.Panel value="notes" pt="md">
                   <Stack gap="sm">
