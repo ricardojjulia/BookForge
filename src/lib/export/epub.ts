@@ -40,6 +40,12 @@ export async function buildFinalManuscriptEpub(input: BuildMarkdownInput, metada
   const bookId = `urn:uuid:${randomUUID()}`;
   const sections = buildEpubSections(input);
   const zip = new JSZip();
+  // Every XHTML document's <html lang> used to be hardcoded to "en"
+  // regardless of the book's actual language -- only the OPF package's
+  // dc:language was ever set correctly, which e-readers use for metadata
+  // display but not necessarily for per-document hyphenation/screen-reader
+  // language switching.
+  const language = metadata.language?.trim() || "en";
 
   zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
   zip.file(
@@ -53,10 +59,10 @@ export async function buildFinalManuscriptEpub(input: BuildMarkdownInput, metada
   );
 
   zip.file("EPUB/styles.css", buildCss());
-  zip.file("EPUB/nav.xhtml", buildNav(input, sections));
+  zip.file("EPUB/nav.xhtml", buildNav(input, sections, language));
   zip.file("EPUB/content.opf", buildPackage(input, sections, bookId, metadata));
   sections.forEach((section) => {
-    zip.file(`EPUB/${section.href}`, buildXhtmlDocument(section.title, section.body));
+    zip.file(`EPUB/${section.href}`, buildXhtmlDocument(section.title, section.body, language));
   });
 
   return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
@@ -159,7 +165,7 @@ function buildPackage(input: BuildMarkdownInput, sections: EpubSection[], bookId
 </package>`;
 }
 
-function buildNav(input: BuildMarkdownInput, sections: EpubSection[]) {
+function buildNav(input: BuildMarkdownInput, sections: EpubSection[], language: string) {
   const navItems = sections
     .map((section) => `<li><a href="${section.href}">${escapeXml(section.title)}</a></li>`)
     .join("\n        ");
@@ -173,13 +179,14 @@ function buildNav(input: BuildMarkdownInput, sections: EpubSection[]) {
         ${navItems}
       </ol>
     </nav>`,
+    language,
   );
 }
 
-function buildXhtmlDocument(title: string, body: string) {
+function buildXhtmlDocument(title: string, body: string, language: string) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="en">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="${escapeXml(language)}">
   <head>
     <title>${escapeXml(title)}</title>
     <link rel="stylesheet" type="text/css" href="styles.css"/>

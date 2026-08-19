@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import PDFDocument from "pdfkit";
 import {
   humanizeSectionType,
@@ -7,6 +9,22 @@ import {
   type ParagraphForExport,
 } from "@/lib/export/markdown";
 import { repairCommonMojibake } from "@/lib/text/repair-mojibake";
+
+// PDFKit's built-in "Helvetica"/"Helvetica-Bold" are PDF base-14 standard
+// fonts covering only WinAnsi (Latin-1) -- any accented character outside
+// that range (and all of Cyrillic, Greek, CJK, Arabic, Hebrew) silently
+// renders as a missing-glyph box. Liberation Sans covers full Latin
+// Extended, Cyrillic, and Greek (verified via fontkit), so registering it
+// in place of Helvetica fixes export for every language that uses those
+// scripts. It does NOT cover CJK/Arabic/Hebrew -- those need a dedicated
+// font of their own, tracked separately.
+const BODY_FONT = readFileSync(join(process.cwd(), "src/lib/export/fonts/LiberationSans-Regular.ttf"));
+const BODY_FONT_BOLD = readFileSync(join(process.cwd(), "src/lib/export/fonts/LiberationSans-Bold.ttf"));
+
+function registerBodyFonts(doc: PDFKit.PDFDocument) {
+  doc.registerFont("Body", BODY_FONT);
+  doc.registerFont("Body-Bold", BODY_FONT_BOLD);
+}
 
 const frontMatterTypes = new Set(["title_page", "copyright_page", "dedication", "foreword", "preface", "introduction"]);
 
@@ -49,13 +67,14 @@ export async function buildFinalManuscriptPdf(input: BuildMarkdownInput, options
 
   const chunks: Buffer[] = [];
   doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+  registerBodyFonts(doc);
 
   doc.addPage();
-  doc.font("Helvetica-Bold").fontSize(24).text(repairCommonMojibake(input.book.title.trim() || "Untitled Book"), {
+  doc.font("Body-Bold").fontSize(24).text(repairCommonMojibake(input.book.title.trim() || "Untitled Book"), {
     align: "center",
   });
   if (input.book.author_name) {
-    doc.moveDown(0.75).font("Helvetica").fontSize(13).text(`by ${repairCommonMojibake(input.book.author_name)}`, { align: "center" });
+    doc.moveDown(0.75).font("Body").fontSize(13).text(`by ${repairCommonMojibake(input.book.author_name)}`, { align: "center" });
   }
 
   const sortedMatter = (input.matterSections || []).slice().sort((a, b) => {
@@ -88,7 +107,7 @@ export async function buildFinalManuscriptPdf(input: BuildMarkdownInput, options
     let previousSceneId: string | null = null;
     chapterParagraphs.forEach((paragraph, index) => {
       if (index > 0 && paragraph.scene_id && previousSceneId && paragraph.scene_id !== previousSceneId) {
-        doc.moveDown(0.75).font("Helvetica").fontSize(12).text("***", { align: "center" }).moveDown(0.75);
+        doc.moveDown(0.75).font("Body").fontSize(12).text("***", { align: "center" }).moveDown(0.75);
       }
       appendBodyText(doc, selectExportParagraphText(paragraph, input), {
         fontSize,
@@ -125,7 +144,7 @@ function appendMatter(doc: PDFKit.PDFDocument, sections: MatterSectionForExport[
 
 function addHeading(doc: PDFKit.PDFDocument, title: string) {
   doc.addPage();
-  doc.font("Helvetica-Bold").fontSize(18).text(title, { align: "center" });
+  doc.font("Body-Bold").fontSize(18).text(title, { align: "center" });
   doc.moveDown(1);
 }
 
@@ -135,7 +154,7 @@ function appendBodyText(doc: PDFKit.PDFDocument, text: string, options: { fontSi
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)
     .forEach((paragraph) => {
-      doc.font("Helvetica").fontSize(options.fontSize).text(paragraph, {
+      doc.font("Body").fontSize(options.fontSize).text(paragraph, {
         align: "left",
         lineGap: options.lineGap ?? 3,
         paragraphGap: 8,
@@ -157,7 +176,7 @@ function addPageNumbers(doc: PDFKit.PDFDocument) {
     // without spawning a page, then it's restored immediately after.
     const originalBottomMargin = doc.page.margins.bottom;
     doc.page.margins.bottom = 0;
-    doc.font("Helvetica").fontSize(9).fillColor("gray").text(String(pageIndex + 1), 72, doc.page.height - 50, {
+    doc.font("Body").fontSize(9).fillColor("gray").text(String(pageIndex + 1), 72, doc.page.height - 50, {
       align: "center",
       width: doc.page.width - 144,
       lineBreak: false,
