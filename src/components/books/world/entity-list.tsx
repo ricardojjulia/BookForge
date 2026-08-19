@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   ActionIcon, Alert, Button, Collapse, Group, NumberInput, Paper,
-  Select, Stack, Text, Textarea, TextInput, Title,
+  Popover, Select, Stack, Text, Textarea, TextInput, Title,
 } from "@mantine/core";
 import { IconChevronDown, IconChevronUp, IconPlus, IconTrash } from "@tabler/icons-react";
 import { fetchJson } from "@/lib/http/fetch-json";
@@ -34,6 +34,7 @@ const EMPTY = (fields: Field[]): Record<string, unknown> =>
 export function EntityList({ bookId, entityType, initial, fields, displayName, displaySub, chapters }: Props) {
   const [items, setItems] = useState<Record<string, unknown>[]>(initial);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Record<string, unknown>>>({});
   const [newItem, setNewItem] = useState<Record<string, unknown>>(EMPTY(fields));
   const [showNew, setShowNew] = useState(false);
@@ -82,6 +83,7 @@ export function EntityList({ bookId, entityType, initial, fields, displayName, d
       setError(err instanceof Error ? err.message : "Delete failed.");
     } finally {
       setSaving(null);
+      setConfirmingDelete(null);
     }
   }
 
@@ -163,9 +165,32 @@ export function EntityList({ bookId, entityType, initial, fields, displayName, d
                     Save
                   </Button>
                 )}
-                <ActionIcon variant="subtle" color="red" size="sm" loading={saving === id} onClick={() => remove(id)}>
-                  <IconTrash size={14} />
-                </ActionIcon>
+                <Popover opened={confirmingDelete === id} onClose={() => setConfirmingDelete(null)} position="bottom-end" withArrow>
+                  <Popover.Target>
+                    <ActionIcon
+                      variant="subtle"
+                      color="red"
+                      size="sm"
+                      loading={saving === id}
+                      onClick={() => setConfirmingDelete(confirmingDelete === id ? null : id)}
+                    >
+                      <IconTrash size={14} />
+                    </ActionIcon>
+                  </Popover.Target>
+                  <Popover.Dropdown>
+                    <Stack gap={6}>
+                      <Text size="xs">Delete this entry?</Text>
+                      <Group gap={6}>
+                        <Button size="xs" color="red" loading={saving === id} onClick={() => remove(id)}>
+                          Delete
+                        </Button>
+                        <Button size="xs" variant="subtle" color="gray" onClick={() => setConfirmingDelete(null)}>
+                          Cancel
+                        </Button>
+                      </Group>
+                    </Stack>
+                  </Popover.Dropdown>
+                </Popover>
                 <ActionIcon variant="subtle" size="sm" onClick={() => setExpanded(isOpen ? null : id)}>
                   {isOpen ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
                 </ActionIcon>

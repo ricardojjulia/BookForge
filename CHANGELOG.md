@@ -180,8 +180,6 @@ Shipped alongside the revamp:
 
 ## Unreleased / planned
 
-- Manuscript search — full-text search across all chapters and scenes.
-- Character / Location / Theme UI — full CRUD editor for all five world-building entity types.
 - Chapter Snapshots — named checkpoints with one-click restore before major rewrite passes.
 - Onboarding checklist — first-run guided flow tracking progress through the core workflow.
 - Beta Reader Mode — read-only collaborator view with inline paragraph annotations.
