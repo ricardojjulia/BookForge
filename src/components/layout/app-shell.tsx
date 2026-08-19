@@ -69,17 +69,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 width: 30,
                 height: 30,
                 borderRadius: 8,
-                background: "oklch(0.5 0.16 275)",
-                color: "white",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontWeight: 800,
-                fontSize: 15,
+                overflow: "hidden",
                 flexShrink: 0,
               }}
             >
-              B
+              {/* eslint-disable-next-line @next/next/no-img-element -- tiny static nav-bar mark, not worth next/image's overhead */}
+              <img
+                src="/bookforge-mark.png"
+                alt="BookForge AI"
+                width={30}
+                height={30}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
             </div>
             <Text style={{ fontWeight: 700, fontSize: 16, color: "oklch(0.2 0.005 90)" }}>BookForge AI</Text>
           </Group>
