@@ -1,6 +1,8 @@
 <div align="center">
 
-# 📖 BookForge AI
+<img src="public/bookforge-logo.jpg" alt="BookForge AI" width="480" />
+
+# BookForge AI
 
 **A local-first revision studio for authors who want an editor, not an autocomplete.**
 

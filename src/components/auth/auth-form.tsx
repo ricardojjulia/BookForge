@@ -40,8 +40,8 @@ export function AuthForm() {
   return (
     <Paper withBorder radius="md" p="xl" maw={460} w="100%">
       <Stack>
-        <Title order={2}>{mode === "signin" ? "Welcome to BookForge" : "Create account"}</Title>
-        <Text c="dimmed">
+        <Title order={2} ta="center">{mode === "signin" ? "Welcome to BookForge AI" : "Create account"}</Title>
+        <Text c="dimmed" ta="center">
           Your manuscript stays private, and AI revision can run entirely on your own machine.
         </Text>
         {error && <Alert color="red">{error}</Alert>}
