@@ -15,6 +15,8 @@ function renderEditor() {
     <MantineProvider>
       <WorldBibleEditor
         bookId="book-1"
+        seriesId={null}
+        sharedEntityLinkIds={{}}
         initialCharacters={[]}
         initialLocations={[]}
         initialThemes={[]}
