@@ -584,7 +584,6 @@ function CreativeWriterWorkspaceState({ initialData }: { initialData: CreativeWr
         <Group justify="space-between" align="flex-start">
           <div>
             <Group gap="xs" mb="xs">
-              <Badge color="dark" variant="filled">Internal Prototype</Badge>
               <Badge color="grape" variant="light">{CREATIVEWRITER_RELEASE_LABEL}</Badge>
               <Badge color={data.conflicts.length ? "yellow" : "teal"} variant="light">
                 {data.conflicts.length} conflicts

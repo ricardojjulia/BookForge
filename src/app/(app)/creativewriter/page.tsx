@@ -24,7 +24,7 @@ export default async function CreativeWriterPage({ searchParams }: { searchParam
     return (
       <Container size="lg">
         <Alert color="grape" title="Login required">
-          Sign in to open the CreativeWriter prototype.
+          Sign in to open CreativeWriter.
         </Alert>
       </Container>
     );
