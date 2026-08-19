@@ -64,6 +64,7 @@ Status: Feature-ready for self-hosted use. Not ready as a managed-SaaS subscript
 - [ ] Live cross-account RLS proof exists for reader comments in cloud Supabase.
 - [ ] Live cross-account RLS proof exists for contributor suggestions in cloud Supabase.
 - [ ] Subscription entitlements are enforced against CreativeWriter capabilities.
+- [x] A deployment-level kill switch (`NEXT_PUBLIC_DEPLOYMENT_MODE=managed_saas`) disables CreativeWriter entirely for managed-SaaS deployments until per-user entitlements exist — see `src/lib/creativewriter-ui/access.ts`. This is a blanket off switch, not the subscription-entitlement check above; it exists so a managed-SaaS deployment can't accidentally ship CreativeWriter open to every account before that's built.
 
 ## Controlled Pilot Gate
 

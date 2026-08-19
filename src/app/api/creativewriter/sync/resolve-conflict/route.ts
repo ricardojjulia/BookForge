@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { creativeWriterConflictResolutionSchema } from "@/lib/creativewriter-sync";
 import { resolveCreativeWriterConflict } from "@/lib/creativewriter-sync/cloud-sync";
+import { creativeWriterAccessDenied } from "@/lib/creativewriter-ui/access";
+import { forbiddenResponse } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 
 function getErrorMessage(error: unknown) {
@@ -13,6 +15,9 @@ function getErrorMessage(error: unknown) {
 
 export async function POST(request: Request) {
   try {
+    const accessDenied = creativeWriterAccessDenied();
+    if (accessDenied) return forbiddenResponse(accessDenied);
+
     const supabase = await createClient();
     const {
       data: { user },

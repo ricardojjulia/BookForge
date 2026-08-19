@@ -1,10 +1,22 @@
 import { Alert, Container } from "@mantine/core";
 import { CreativeWriterWorkspace } from "@/components/creativewriter/creativewriter-workspace";
+import { creativeWriterAccessDenied } from "@/lib/creativewriter-ui/access";
 import { getCreativeWriterWorkspaceData } from "@/lib/creativewriter-ui/dashboard";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function CreativeWriterPage({ searchParams }: { searchParams: Promise<{ bookId?: string }> }) {
+  const accessDenied = creativeWriterAccessDenied();
+  if (accessDenied) {
+    return (
+      <Container size="lg">
+        <Alert color="yellow" title="Not available">
+          {accessDenied}
+        </Alert>
+      </Container>
+    );
+  }
+
   if (!hasSupabaseEnv()) {
     return (
       <Container size="lg">
