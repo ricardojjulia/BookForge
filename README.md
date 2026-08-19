@@ -96,9 +96,14 @@ A **Steward** role (Settings → account, not a generic admin flag) gives truste
 
 ## BookForge CreativeWriter
 
-**CreativeWriter 0.1.0** is the first internal prototype of the BookForge-aware writing desk. It is not a standalone desktop executable yet; it is an authenticated BookForge route that proves the product contract before offline packaging work begins.
+**CreativeWriter 0.1.0** is the BookForge-aware writing desk — a linked manuscript workspace with book selection, chapter navigation, paragraph editing, contributor suggestions, reader-comment triage, and cloud sync with real conflict resolution, built on top of the same authenticated BookForge data model.
 
-What is in 0.1.0:
+Its readiness bar depends on how you're running BookForge:
+
+- **Self-hosted (this repo, run yourself):** CreativeWriter is a plain feature, free and unrestricted for the local user — there's no other tenant to isolate from and no subscription to enforce, so the sync/conflict/suggestion core below is what matters, and it's solid. A standalone desktop executable isn't built yet; today it's an authenticated route in the same Next.js app.
+- **Managed SaaS (hosted by us, subscription):** CreativeWriter is meant to be operationalized as a paid companion feature, not a default. That requires real multi-tenant guarantees this repo hasn't proven yet — cloud Supabase cross-account RLS proof, subscription entitlement enforcement, and import jobs isolated from the request/response lifecycle. Until those land, CreativeWriter should not be offered as a SaaS subscription benefit.
+
+What's in 0.1.0:
 
 - Linked manuscript workspace with book selection, chapter navigation, paragraph editing, word counts, and dirty-draft protection
 - Authenticated sync APIs for link, pull, push, and conflict resolution
@@ -106,6 +111,8 @@ What is in 0.1.0:
 - `.bookforge` package import/export helpers and authenticated package transfer routes
 - Expanded import intake for common manuscript files and best-effort writing-app exports
 - Conflict review with local/cloud comparison, manual merge text, and explicit resolution actions
+- Contributor suggestion review (create, accept, reject, withdraw) with atomic apply and stale-conflict handling
+- Reader comment triage (Open / All / Resolved) and contributor assignment tracking
 - Read-only Notes, Research, and Bible panels using existing BookForge metadata
 - Support-context search and per-book pinned context cards
 - Structural create/delete/reorder guardrails: those operations are rejected until structure versioning, tombstones, and order-conflict review are implemented

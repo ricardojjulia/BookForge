@@ -1,8 +1,10 @@
 # CreativeWriter Release Readiness Checklist
 
-Date: 2026-08-04
+Date: 2026-08-04 (scope note added 2026-08-19)
 Phase: 5Q Pinned Context Device-Scope Clarity
-Status: Not ready for broad release
+Status: Feature-ready for self-hosted use. Not ready as a managed-SaaS subscription benefit.
+
+**Scope of this checklist:** the items below — desktop executable, local database, cloud Supabase deployment evidence, cross-account RLS proof, import job isolation, subscription entitlements — are specifically the requirements for operationalizing CreativeWriter as a *paid companion feature in the managed SaaS product*. None of them block a self-hosted user running this repo themselves: there's no other tenant to isolate from and no subscription to enforce in that context, so the sync/conflict/contributor-suggestion core already shipped is what matters there, and it's solid. Don't read an unchecked SaaS-only item as "CreativeWriter isn't usable" — read it as "CreativeWriter isn't sellable as a hosted subscription add-on yet."
 
 ## Current Readiness
 
@@ -65,7 +67,7 @@ Status: Not ready for broad release
 
 ## Controlled Pilot Gate
 
-CreativeWriter can proceed toward a richer internal prototype after local browser/API/data verification. It should not be offered as a production subscription benefit until cloud Supabase evidence, entitlement checks, import job isolation, local storage, and offline executable proof are complete.
+CreativeWriter is feature-ready for self-hosted use today. It should not be offered as a managed-SaaS subscription benefit until cloud Supabase evidence, entitlement checks, import job isolation, local storage, and offline executable proof are complete.
 
 ## Required Evidence Before Beta
 
