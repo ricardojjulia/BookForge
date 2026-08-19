@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { creativeWriterAccessDenied } from "@/lib/creativewriter-ui/access";
+import { isCreativeWriterCollaborationEnabled } from "@/lib/creativewriter-ui/access";
 
-describe("creativeWriterAccessDenied", () => {
+describe("isCreativeWriterCollaborationEnabled", () => {
   const original = process.env.NEXT_PUBLIC_DEPLOYMENT_MODE;
 
   afterEach(() => {
@@ -9,13 +9,13 @@ describe("creativeWriterAccessDenied", () => {
     else process.env.NEXT_PUBLIC_DEPLOYMENT_MODE = original;
   });
 
-  it("allows access when self-hosted (default)", () => {
+  it("is disabled when self-hosted (default)", () => {
     delete process.env.NEXT_PUBLIC_DEPLOYMENT_MODE;
-    expect(creativeWriterAccessDenied()).toBeNull();
+    expect(isCreativeWriterCollaborationEnabled()).toBe(false);
   });
 
-  it("denies access with a message in managed_saas mode", () => {
+  it("is enabled in managed_saas mode", () => {
     process.env.NEXT_PUBLIC_DEPLOYMENT_MODE = "managed_saas";
-    expect(creativeWriterAccessDenied()).toBe("CreativeWriter isn't available on this plan yet.");
+    expect(isCreativeWriterCollaborationEnabled()).toBe(true);
   });
 });

@@ -1,10 +1,10 @@
 # CreativeWriter Release Readiness Checklist
 
-Date: 2026-08-04 (scope note added 2026-08-19)
+Date: 2026-08-04 (scope note revised 2026-08-19)
 Phase: 5Q Pinned Context Device-Scope Clarity
-Status: Feature-ready for self-hosted use. Not ready as a managed-SaaS subscription benefit.
+Status: Writing desk is feature-ready everywhere (self-hosted and managed SaaS alike). Collaboration (comment triage, suggestion/assignment review) is managed-SaaS-only and not yet sellable as a subscription benefit.
 
-**Scope of this checklist:** the items below — desktop executable, local database, cloud Supabase deployment evidence, cross-account RLS proof, import job isolation, subscription entitlements — are specifically the requirements for operationalizing CreativeWriter as a *paid companion feature in the managed SaaS product*. None of them block a self-hosted user running this repo themselves: there's no other tenant to isolate from and no subscription to enforce in that context, so the sync/conflict/contributor-suggestion core already shipped is what matters there, and it's solid. Don't read an unchecked SaaS-only item as "CreativeWriter isn't usable" — read it as "CreativeWriter isn't sellable as a hosted subscription add-on yet."
+**Scope of this checklist:** the items below — desktop executable, local database, cloud Supabase deployment evidence, cross-account RLS proof, import job isolation, subscription entitlements — are specifically the requirements for operationalizing CreativeWriter's *collaboration panels* as a paid companion feature in the managed SaaS product. CreativeWriter's core writing desk (editing, sync, import/export) is not gated by any of this — it works identically in every deployment. None of these items block a self-hosted user running this repo themselves: there's no other tenant to isolate from and no subscription to enforce in that context, so the sync/conflict/contributor-suggestion core already shipped is what matters there, and it's solid. Don't read an unchecked SaaS-only item as "CreativeWriter isn't usable" — read it as "CreativeWriter's collaboration panels aren't sellable as a hosted subscription add-on yet."
 
 ## Current Readiness
 
@@ -64,11 +64,11 @@ Status: Feature-ready for self-hosted use. Not ready as a managed-SaaS subscript
 - [ ] Live cross-account RLS proof exists for reader comments in cloud Supabase.
 - [ ] Live cross-account RLS proof exists for contributor suggestions in cloud Supabase.
 - [ ] Subscription entitlements are enforced against CreativeWriter capabilities.
-- [x] A deployment-level kill switch (`NEXT_PUBLIC_DEPLOYMENT_MODE=managed_saas`) disables CreativeWriter entirely for managed-SaaS deployments until per-user entitlements exist — see `src/lib/creativewriter-ui/access.ts`. This is a blanket off switch, not the subscription-entitlement check above; it exists so a managed-SaaS deployment can't accidentally ship CreativeWriter open to every account before that's built.
+- [x] `isCreativeWriterCollaborationEnabled()` (`src/lib/creativewriter-ui/access.ts`, driven by `NEXT_PUBLIC_DEPLOYMENT_MODE`) gates CreativeWriter's comment-triage and suggestion/assignment-review panels to managed-SaaS deployments only, both in the data loader (`getCreativeWriterWorkspaceData`) and the workspace UI. This is a deployment-wide off switch, not the per-user subscription-entitlement check above; it exists so collaboration can't accidentally ship open to every account before real entitlements are built. The rest of CreativeWriter is never gated by this.
 
 ## Controlled Pilot Gate
 
-CreativeWriter is feature-ready for self-hosted use today. It should not be offered as a managed-SaaS subscription benefit until cloud Supabase evidence, entitlement checks, import job isolation, local storage, and offline executable proof are complete.
+CreativeWriter's writing desk is feature-ready in every deployment today. Its collaboration panels (comment triage, suggestion/assignment review) should not be offered as a managed-SaaS subscription benefit until cloud Supabase evidence, entitlement checks, import job isolation, local storage, and offline executable proof are complete.
 
 ## Required Evidence Before Beta
 

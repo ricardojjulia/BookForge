@@ -762,6 +762,7 @@ function workspaceData(
   if (options.selectedBookId === "book-2") {
     return {
       accountId: "user-1",
+      collaborationEnabled: true,
       books: [
         {
           id: "book-1",
@@ -949,6 +950,7 @@ function workspaceData(
 
   return {
     accountId: "user-1",
+    collaborationEnabled: true,
     books: [
       {
         id: "book-1",
