@@ -12,14 +12,17 @@ import { repairCommonMojibake } from "@/lib/text/repair-mojibake";
 
 // PDFKit's built-in "Helvetica"/"Helvetica-Bold" are PDF base-14 standard
 // fonts covering only WinAnsi (Latin-1) -- any accented character outside
-// that range (and all of Cyrillic, Greek, CJK, Arabic, Hebrew) silently
-// renders as a missing-glyph box. Liberation Sans covers full Latin
-// Extended, Cyrillic, and Greek (verified via fontkit), so registering it
-// in place of Helvetica fixes export for every language that uses those
-// scripts. It does NOT cover CJK/Arabic/Hebrew -- those need a dedicated
-// font of their own, tracked separately.
-const BODY_FONT = readFileSync(join(process.cwd(), "src/lib/export/fonts/LiberationSans-Regular.ttf"));
-const BODY_FONT_BOLD = readFileSync(join(process.cwd(), "src/lib/export/fonts/LiberationSans-Bold.ttf"));
+// that range silently renders as a missing-glyph box. Open Sans covers full
+// Latin Extended, Cyrillic, Greek, Vietnamese, and Hebrew (verified via
+// fontkit), so registering it in place of Helvetica fixes export for every
+// language that uses those scripts. It does NOT cover CJK or Arabic --
+// those need a dedicated font/shaping engine of their own, tracked
+// separately. Note also that pdfkit does not reorder text for
+// right-to-left scripts on its own, so Hebrew glyphs will render but the
+// reading order within a PDF text run is not yet corrected -- that's a
+// separate bidi/RTL layout problem, not a font-coverage one.
+const BODY_FONT = readFileSync(join(process.cwd(), "src/lib/export/fonts/OpenSans-Regular.ttf"));
+const BODY_FONT_BOLD = readFileSync(join(process.cwd(), "src/lib/export/fonts/OpenSans-Bold.ttf"));
 
 function registerBodyFonts(doc: PDFKit.PDFDocument) {
   doc.registerFont("Body", BODY_FONT);
