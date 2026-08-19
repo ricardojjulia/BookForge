@@ -2,7 +2,9 @@ import { Alert, Button, Container, Group, Paper, Text, Title } from "@mantine/co
 import { BookRow } from "@/components/dashboard/book-row";
 import { DashboardMetrics } from "@/components/dashboard/dashboard-metrics";
 import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
+import { GettingStartedChecklist } from "@/components/onboarding/getting-started-checklist";
 import { SetupWizard } from "@/components/onboarding/setup-wizard";
+import { buildOnboardingChecklist, CHECKLIST_DISMISSED_STEP } from "@/lib/onboarding/checklist";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -26,7 +28,15 @@ export default async function DashboardPage() {
     );
   }
 
-  const [{ data: books }, { data: bookOptions }, { count: bookCount }, { count: reportCount }, { data: userSettings }] = await Promise.all([
+  const [
+    { data: books },
+    { data: bookOptions },
+    { count: bookCount },
+    { count: reportCount },
+    { data: userSettings },
+    { count: acceptedParagraphCount },
+    { count: exportCount },
+  ] = await Promise.all([
     supabase
       .from("books")
       .select("id,title,author_name,genre,status,finished_export_id,created_at,updated_at")
@@ -43,6 +53,8 @@ export default async function DashboardPage() {
       .select("onboarding_completed_steps, primary_rewrite_model, llm_api_key_secret_id, llm_provider, execution_mode")
       .eq("user_id", user.id)
       .maybeSingle(),
+    supabase.from("paragraphs").select("id", { count: "exact", head: true }).not("accepted_text", "is", null),
+    supabase.from("exports").select("id", { count: "exact", head: true }),
   ]);
 
   const finishedExportIds = (books || [])
@@ -81,6 +93,14 @@ export default async function DashboardPage() {
   // some point and is never cleared on switching modes, so checking "does a
   // cloud key exist" instead of "what mode is active" showed the cloud
   // provider forever even after the user explicitly switched to local.
+  const checklistItems = buildOnboardingChecklist({
+    aiConfigured: !needsSetup,
+    hasBook: Boolean(bookCount),
+    hasCriticReport: Boolean(reportCount),
+    hasAcceptedParagraph: Boolean(acceptedParagraphCount),
+    hasExport: Boolean(exportCount),
+  });
+  const checklistDismissed = completedSteps.includes(CHECKLIST_DISMISSED_STEP);
   const cloudLabel = providerLabels[settings?.llm_provider ?? ""] ?? "Cloud provider";
   const aiEngine =
     settings?.execution_mode === "local"
@@ -123,6 +143,13 @@ export default async function DashboardPage() {
           </Button>
         </Group>
       </Group>
+
+      <GettingStartedChecklist
+        userId={user.id}
+        items={checklistItems}
+        completedSteps={completedSteps}
+        initiallyDismissed={checklistDismissed}
+      />
 
       <DashboardMetrics
         bookCount={bookCount ?? 0}
