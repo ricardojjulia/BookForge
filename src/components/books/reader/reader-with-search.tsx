@@ -22,11 +22,13 @@ export function ReaderWithSearch({
   chapters,
   paragraphs,
   initialAnnotations,
+  role,
 }: {
   bookId: string;
   chapters: Chapter[];
   paragraphs: Paragraph[];
   initialAnnotations: Annotation[];
+  role: "owner" | "editor" | "admin" | "viewer";
 }) {
   const [highlightParagraphId, setHighlightParagraphId] = useState<string | null>(null);
 
@@ -44,6 +46,7 @@ export function ReaderWithSearch({
         paragraphs={paragraphs}
         initialAnnotations={initialAnnotations}
         highlightParagraphId={highlightParagraphId}
+        role={role}
       />
     </Stack>
   );

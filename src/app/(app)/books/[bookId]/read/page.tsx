@@ -29,11 +29,12 @@ export default async function ReaderPage({
   const returnText = safeReturnLabel(returnLabel);
   const supabase = await createClient();
 
-  const [{ data: book }, { data: chapters }, { data: paragraphs }, { data: annotations }] = await Promise.all([
+  const [{ data: book }, { data: chapters }, { data: paragraphs }, { data: annotations }, { data: userData }] = await Promise.all([
     getBookCore(supabase, bookId),
     supabase.from("chapters").select("id,chapter_number,title").eq("book_id", bookId).order("chapter_number"),
     supabase.from("paragraphs").select("id,chapter_id,paragraph_number,original_text,accepted_text,current_text,updated_at").eq("book_id", bookId).order("paragraph_number"),
     supabase.from("reader_annotations").select("id,paragraph_id,note,resolved,created_at").eq("book_id", bookId).order("created_at", { ascending: false }),
+    supabase.auth.getUser(),
   ]);
 
   if (!book) {
@@ -42,6 +43,25 @@ export default async function ReaderPage({
         <Alert color="red">Book not found or access denied.</Alert>
       </Container>
     );
+  }
+
+  // RLS already gated the queries above to owner-or-collaborator, so if we
+  // got here without an owner match, a book_collaborators row must exist --
+  // this only decides which controls the client renders, not access itself.
+  const isOwner = Boolean(userData.user && book.owner_id === userData.user.id);
+  let role: "owner" | "editor" | "admin" | "viewer" = "viewer";
+  if (isOwner) {
+    role = "owner";
+  } else if (userData.user) {
+    const { data: collaborator } = await supabase
+      .from("book_collaborators")
+      .select("role")
+      .eq("book_id", bookId)
+      .eq("user_id", userData.user.id)
+      .maybeSingle();
+    if (collaborator?.role === "editor" || collaborator?.role === "admin") {
+      role = collaborator.role;
+    }
   }
 
   return (
@@ -65,6 +85,7 @@ export default async function ReaderPage({
         chapters={chapters || []}
         paragraphs={paragraphs || []}
         initialAnnotations={annotations || []}
+        role={role}
       />
     </Container>
   );

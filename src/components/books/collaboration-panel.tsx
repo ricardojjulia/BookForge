@@ -17,6 +17,7 @@ import {
   CopyButton,
   Tooltip,
   Loader,
+  Popover,
 } from "@mantine/core";
 import { IconCopy, IconCheck, IconTrash, IconUserPlus } from "@tabler/icons-react";
 
@@ -38,8 +39,9 @@ type Invite = {
 };
 
 const ROLE_COLORS: Record<string, string> = { viewer: "blue", editor: "green", admin: "grape" };
+const ROLE_LABELS: Record<string, string> = { viewer: "Beta Reader", editor: "Editor", admin: "Admin" };
 const ROLES = [
-  { value: "viewer", label: "Viewer — read only" },
+  { value: "viewer", label: "Beta Reader — read only" },
   { value: "editor", label: "Editor — can edit chapters" },
   { value: "admin", label: "Admin — full access" },
 ];
@@ -56,6 +58,7 @@ export function CollaborationPanel({ bookId }: { bookId: string }) {
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [inviteEmailSent, setInviteEmailSent] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const [confirmingRemove, setConfirmingRemove] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -119,8 +122,8 @@ export function CollaborationPanel({ bookId }: { bookId: string }) {
   }
 
   async function removeCollaborator(collaboratorId: string) {
-    if (!confirm("Remove this collaborator?")) return;
     await fetch(`/api/books/${bookId}/collaborators/${collaboratorId}`, { method: "DELETE" });
+    setConfirmingRemove(null);
     void load();
   }
 
@@ -199,7 +202,7 @@ export function CollaborationPanel({ bookId }: { bookId: string }) {
                       Expires {new Date(invite.expires_at).toLocaleDateString()}
                     </Text>
                   </div>
-                  <Badge color={ROLE_COLORS[invite.role]} variant="light">{invite.role}</Badge>
+                  <Badge color={ROLE_COLORS[invite.role]} variant="light">{ROLE_LABELS[invite.role] || invite.role}</Badge>
                 </Group>
               </Paper>
             ))}
@@ -227,19 +230,32 @@ export function CollaborationPanel({ bookId }: { bookId: string }) {
                   <Group gap="xs">
                     <Select
                       size="xs"
-                      data={ROLES.map((r) => ({ value: r.value, label: r.value }))}
+                      data={ROLES.map((r) => ({ value: r.value, label: ROLE_LABELS[r.value] || r.value }))}
                       value={c.role}
                       onChange={(v) => v && changeRole(c.id, v)}
                       w={90}
                     />
-                    <ActionIcon
-                      color="red"
-                      variant="subtle"
-                      size="sm"
-                      onClick={() => removeCollaborator(c.id)}
-                    >
-                      <IconTrash size={14} />
-                    </ActionIcon>
+                    <Popover opened={confirmingRemove === c.id} onClose={() => setConfirmingRemove(null)} position="bottom-end" withArrow>
+                      <Popover.Target>
+                        <ActionIcon
+                          color="red"
+                          variant="subtle"
+                          size="sm"
+                          onClick={() => setConfirmingRemove(confirmingRemove === c.id ? null : c.id)}
+                        >
+                          <IconTrash size={14} />
+                        </ActionIcon>
+                      </Popover.Target>
+                      <Popover.Dropdown>
+                        <Stack gap={6}>
+                          <Text size="xs">Remove this collaborator?</Text>
+                          <Group gap={6}>
+                            <Button size="xs" color="red" onClick={() => removeCollaborator(c.id)}>Remove</Button>
+                            <Button size="xs" variant="subtle" color="gray" onClick={() => setConfirmingRemove(null)}>Cancel</Button>
+                          </Group>
+                        </Stack>
+                      </Popover.Dropdown>
+                    </Popover>
                   </Group>
                 </Group>
               </Paper>
@@ -250,7 +266,7 @@ export function CollaborationPanel({ bookId }: { bookId: string }) {
 
       <Divider />
       <Text size="xs" c="dimmed">
-        Only the book owner can manage collaborators and roles. Viewers can read but not edit; Editors can modify chapters; Admins have full access except ownership transfer.
+        Only the book owner can manage collaborators and roles. Beta Readers can read and comment but not edit; Editors can modify chapters; Admins have full access except ownership transfer.
       </Text>
     </Stack>
   );

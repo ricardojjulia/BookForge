@@ -27,13 +27,15 @@ type Props = {
   initialAnnotations: Annotation[];
   /** Set (e.g. from a manuscript search result) to scroll to and briefly highlight a paragraph. */
   highlightParagraphId?: string | null;
+  role: "owner" | "editor" | "admin" | "viewer";
 };
 
 function paragraphDomId(paragraphId: string) {
   return `paragraph-${paragraphId}`;
 }
 
-export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, initialAnnotations, highlightParagraphId }: Props) {
+export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, initialAnnotations, highlightParagraphId, role }: Props) {
+  const canEdit = role !== "viewer";
   const [annotations, setAnnotations] = useState<Annotation[]>(initialAnnotations);
   const [paragraphs, setParagraphs] = useState<Paragraph[]>(initialParagraphs);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -209,7 +211,7 @@ export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, in
                   ) : (
                     <Text style={{ flex: 1, lineHeight: 1.8 }}>{text}</Text>
                   )}
-                  {!isEditing && (
+                  {!isEditing && canEdit && (
                     <Tooltip label="Edit this paragraph" withArrow>
                       <ActionIcon
                         size="sm"
@@ -280,15 +282,17 @@ export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, in
                       <Text size="sm" c="dimmed" style={{ lineHeight: 1.7 }}>
                         {para.original_text}
                       </Text>
-                      <Button
-                        size="xs"
-                        variant="light"
-                        color="teal"
-                        loading={reverting === para.id}
-                        onClick={() => preferOriginal(para.id)}
-                      >
-                        Prefer this version
-                      </Button>
+                      {canEdit && (
+                        <Button
+                          size="xs"
+                          variant="light"
+                          color="teal"
+                          loading={reverting === para.id}
+                          onClick={() => preferOriginal(para.id)}
+                        >
+                          Prefer this version
+                        </Button>
+                      )}
                     </Stack>
                   </Paper>
                 )}
@@ -299,7 +303,10 @@ export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, in
                       <Textarea
                         placeholder="Your note on this paragraph…"
                         value={drafts[para.id]}
-                        onChange={(e) => setDrafts((prev) => ({ ...prev, [para.id]: e.currentTarget.value }))}
+                        onChange={(e) => {
+                          const value = e.currentTarget.value;
+                          setDrafts((prev) => ({ ...prev, [para.id]: value }));
+                        }}
                         autosize
                         minRows={2}
                         size="sm"
@@ -320,9 +327,11 @@ export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, in
                         <Text size="sm">{a.note}</Text>
                         <Text size="xs" c="dimmed">{new Date(a.created_at).toLocaleString()}</Text>
                       </Stack>
-                      <ActionIcon size="sm" variant="subtle" color="teal" onClick={() => resolve(a.id)} title="Mark resolved">
-                        <IconCheck size={13} />
-                      </ActionIcon>
+                      {canEdit && (
+                        <ActionIcon size="sm" variant="subtle" color="teal" onClick={() => resolve(a.id)} title="Mark resolved">
+                          <IconCheck size={13} />
+                        </ActionIcon>
+                      )}
                     </Group>
                   </Paper>
                 ))}
