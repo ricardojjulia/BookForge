@@ -101,7 +101,7 @@ A **Steward** role (Settings → account, not a generic admin flag) gives truste
 Its readiness bar depends on how you're running BookForge:
 
 - **Self-hosted (this repo, run yourself):** CreativeWriter is a plain feature, free and unrestricted for the local user — there's no other tenant to isolate from and no subscription to enforce, so the sync/conflict/suggestion core below is what matters, and it's solid. A standalone desktop executable isn't built yet; today it's an authenticated route in the same Next.js app.
-- **Managed SaaS (hosted by us, subscription):** CreativeWriter is meant to be operationalized as a paid companion feature, not a default. That requires real multi-tenant guarantees this repo hasn't proven yet — cloud Supabase cross-account RLS proof, subscription entitlement enforcement, and import jobs isolated from the request/response lifecycle. Until those land, CreativeWriter should not be offered as a SaaS subscription benefit.
+- **Managed SaaS (hosted by us, subscription):** CreativeWriter is meant to be operationalized as a paid companion feature, not a default. That requires real multi-tenant guarantees this repo hasn't proven yet — cloud Supabase cross-account RLS proof, subscription entitlement enforcement, and import jobs isolated from the request/response lifecycle. Until those land, `NEXT_PUBLIC_DEPLOYMENT_MODE=managed_saas` disables CreativeWriter outright (hidden from nav, its routes return 403) rather than offering it to every account with no entitlement check behind it — see [.env.example](.env.example) and `src/lib/creativewriter-ui/access.ts`.
 
 What's in 0.1.0:
 

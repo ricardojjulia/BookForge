@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { pullCreativeWriterSync } from "@/lib/creativewriter-sync/cloud-sync";
+import { creativeWriterAccessDenied } from "@/lib/creativewriter-ui/access";
+import { forbiddenResponse } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 
 const pullSchema = z.object({
@@ -19,6 +21,9 @@ function getErrorMessage(error: unknown) {
 
 export async function POST(request: Request) {
   try {
+    const accessDenied = creativeWriterAccessDenied();
+    if (accessDenied) return forbiddenResponse(accessDenied);
+
     const supabase = await createClient();
     const {
       data: { user },
