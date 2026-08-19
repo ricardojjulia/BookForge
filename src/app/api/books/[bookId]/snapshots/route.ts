@@ -34,7 +34,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     const { data: snapshot, error } = await supabase
       .from("chapter_snapshots")
       .insert({ book_id: bookId, chapter_id: body.chapterId, name: body.name, paragraph_texts: paragraphTexts })
-      .select("id,name,created_at")
+      .select("id,chapter_id,name,created_at")
       .single();
     if (error) throw error;
 

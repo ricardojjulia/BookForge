@@ -1,43 +1,57 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ActionIcon, Alert, Badge, Button, Group, Paper, Stack, Text, TextInput, Title } from "@mantine/core";
+import { useEffect, useMemo, useState } from "react";
+import { ActionIcon, Alert, Badge, Button, Group, Modal, Paper, Select, Stack, Text, TextInput, Title } from "@mantine/core";
 import { IconCamera, IconClockRecord, IconTrash } from "@tabler/icons-react";
 import { fetchJson } from "@/lib/http/fetch-json";
 
 type Snapshot = { id: string; chapter_id: string; name: string; created_at: string };
+type ChapterOption = { id: string; chapter_number: number; title: string | null };
 
 type Props = {
   bookId: string;
-  chapterId: string;
-  chapterLabel: string;
+  chapters: ChapterOption[];
 };
 
-export function ChapterSnapshotPanel({ bookId, chapterId, chapterLabel }: Props) {
-  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+function labelForChapter(chapter: ChapterOption | undefined) {
+  if (!chapter) return "";
+  return `Ch. ${chapter.chapter_number}${chapter.title ? ` — ${chapter.title}` : ""}`;
+}
+
+export function ChapterSnapshotPanel({ bookId, chapters }: Props) {
+  const [allSnapshots, setAllSnapshots] = useState<Snapshot[]>([]);
+  const [selectedChapterId, setSelectedChapterId] = useState<string | null>(chapters[0]?.id ?? null);
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [confirmRestore, setConfirmRestore] = useState<Snapshot | null>(null);
 
   useEffect(() => {
     fetchJson<{ snapshots: Snapshot[] }>(`/api/books/${bookId}/snapshots`)
-      .then((d) => setSnapshots(d.snapshots.filter((s) => s.chapter_id === chapterId)))
+      .then((d) => setAllSnapshots(d.snapshots))
       .catch(() => {});
-  }, [bookId, chapterId]);
+  }, [bookId]);
+
+  const snapshots = useMemo(
+    () => allSnapshots.filter((s) => s.chapter_id === selectedChapterId),
+    [allSnapshots, selectedChapterId],
+  );
+
+  const chapterLabel = labelForChapter(chapters.find((c) => c.id === selectedChapterId));
 
   async function takeSnapshot() {
-    if (!name.trim()) return;
+    if (!name.trim() || !selectedChapterId) return;
     setLoading(true);
     setError(null);
     try {
       const res = await fetchJson<{ snapshot: Snapshot }>(`/api/books/${bookId}/snapshots`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chapterId, name: name.trim() }),
+        body: JSON.stringify({ chapterId: selectedChapterId, name: name.trim() }),
       });
-      setSnapshots((prev) => [res.snapshot, ...prev]);
+      setAllSnapshots((prev) => [res.snapshot, ...prev]);
       setName("");
       setSuccess("Snapshot saved.");
     } catch (err) {
@@ -47,17 +61,17 @@ export function ChapterSnapshotPanel({ bookId, chapterId, chapterLabel }: Props)
     }
   }
 
-  async function restore(snapshotId: string, snapshotName: string) {
-    if (!confirm(`Restore snapshot "${snapshotName}"? This will overwrite accepted text for all paragraphs in this chapter.`)) return;
-    setRestoring(snapshotId);
+  async function restore(snapshot: Snapshot) {
+    setRestoring(snapshot.id);
     setError(null);
     try {
-      const res = await fetchJson<{ restoredCount: number }>(`/api/books/${bookId}/snapshots/${snapshotId}`, { method: "POST" });
-      setSuccess(`Restored ${res.restoredCount} paragraphs from "${snapshotName}".`);
+      const res = await fetchJson<{ restoredCount: number }>(`/api/books/${bookId}/snapshots/${snapshot.id}`, { method: "POST" });
+      setSuccess(`Restored ${res.restoredCount} paragraphs from "${snapshot.name}".`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Restore failed.");
     } finally {
       setRestoring(null);
+      setConfirmRestore(null);
     }
   }
 
@@ -65,7 +79,7 @@ export function ChapterSnapshotPanel({ bookId, chapterId, chapterLabel }: Props)
     setRestoring(snapshotId);
     try {
       await fetchJson(`/api/books/${bookId}/snapshots/${snapshotId}`, { method: "DELETE" });
-      setSnapshots((prev) => prev.filter((s) => s.id !== snapshotId));
+      setAllSnapshots((prev) => prev.filter((s) => s.id !== snapshotId));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Delete failed.");
     } finally {
@@ -73,11 +87,26 @@ export function ChapterSnapshotPanel({ bookId, chapterId, chapterLabel }: Props)
     }
   }
 
+  if (!chapters.length) return null;
+
   return (
     <Paper withBorder radius="md" p="md" bg="#fafafa">
       <Stack gap="sm">
-        <Title order={5}>Chapter Snapshots — {chapterLabel}</Title>
-        <Text size="xs" c="dimmed">Checkpoint the current accepted text before a major rewrite. Restore in one click if things go wrong.</Text>
+        <Group justify="space-between" align="flex-end" wrap="wrap">
+          <div>
+            <Title order={5}>Chapter Snapshots</Title>
+            <Text size="xs" c="dimmed">Checkpoint the current accepted text before a major rewrite. Restore in one click if things go wrong.</Text>
+          </div>
+          <Select
+            label="Chapter"
+            value={selectedChapterId}
+            onChange={setSelectedChapterId}
+            allowDeselect={false}
+            data={chapters.map((c) => ({ value: c.id, label: labelForChapter(c) }))}
+            size="sm"
+            w={260}
+          />
+        </Group>
 
         <Group gap="xs" align="flex-end">
           <TextInput
@@ -102,7 +131,7 @@ export function ChapterSnapshotPanel({ bookId, chapterId, chapterLabel }: Props)
         {error && <Alert color="red" variant="light" onClose={() => setError(null)} withCloseButton>{error}</Alert>}
         {success && <Alert color="teal" variant="light" onClose={() => setSuccess(null)} withCloseButton>{success}</Alert>}
 
-        {snapshots.length === 0 && <Text size="sm" c="dimmed">No snapshots yet for this chapter.</Text>}
+        {snapshots.length === 0 && <Text size="sm" c="dimmed">No snapshots yet for {chapterLabel || "this chapter"}.</Text>}
 
         {snapshots.map((s) => (
           <Paper key={s.id} withBorder radius="sm" p="sm">
@@ -118,7 +147,7 @@ export function ChapterSnapshotPanel({ bookId, chapterId, chapterLabel }: Props)
                   color="orange"
                   leftSection={<IconClockRecord size={13} />}
                   loading={restoring === s.id}
-                  onClick={() => restore(s.id, s.name)}
+                  onClick={() => setConfirmRestore(s)}
                 >
                   Restore
                 </Button>
@@ -130,6 +159,26 @@ export function ChapterSnapshotPanel({ bookId, chapterId, chapterLabel }: Props)
           </Paper>
         ))}
       </Stack>
+
+      <Modal opened={Boolean(confirmRestore)} onClose={() => setConfirmRestore(null)} title="Restore snapshot" centered>
+        <Stack gap="md">
+          <Text size="sm">
+            Restore &ldquo;{confirmRestore?.name}&rdquo;? This will overwrite accepted text for all paragraphs in {chapterLabel}.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="subtle" color="gray" onClick={() => setConfirmRestore(null)}>
+              Cancel
+            </Button>
+            <Button
+              color="orange"
+              loading={Boolean(confirmRestore && restoring === confirmRestore.id)}
+              onClick={() => confirmRestore && restore(confirmRestore)}
+            >
+              Restore
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Paper>
   );
 }
