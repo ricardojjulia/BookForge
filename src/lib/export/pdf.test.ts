@@ -71,4 +71,50 @@ describe("buildFinalManuscriptPdf", () => {
     );
     expect(buffer.subarray(0, 5).toString("ascii")).toBe("%PDF-");
   });
+
+  it("switches to Noto Sans Arabic when the manuscript contains Arabic text", async () => {
+    const buffer = await buildFinalManuscriptPdf(
+      buildInput({
+        book: { title: "كتاب عربي", author_name: null },
+        paragraphs: [
+          {
+            id: "p1",
+            chapter_id: "ch1",
+            scene_id: null,
+            paragraph_number: 1,
+            original_text: "مرحبا بالعالم.",
+            current_text: null,
+            accepted_text: null,
+            is_locked: false,
+          },
+        ],
+      }),
+    );
+    const raw = buffer.toString("latin1");
+    expect(raw).toContain("/FontFile2");
+    expect(raw).not.toContain("/BaseFont /Helvetica");
+  });
+
+  it("switches to Noto Sans SC when the manuscript contains CJK text", async () => {
+    const buffer = await buildFinalManuscriptPdf(
+      buildInput({
+        book: { title: "中文书", author_name: null },
+        paragraphs: [
+          {
+            id: "p1",
+            chapter_id: "ch1",
+            scene_id: null,
+            paragraph_number: 1,
+            original_text: "这是一个测试段落。",
+            current_text: null,
+            accepted_text: null,
+            is_locked: false,
+          },
+        ],
+      }),
+    );
+    const raw = buffer.toString("latin1");
+    expect(raw).toContain("/FontFile2");
+    expect(raw).not.toContain("/BaseFont /Helvetica");
+  });
 });

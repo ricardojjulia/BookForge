@@ -14,19 +14,46 @@ import { repairCommonMojibake } from "@/lib/text/repair-mojibake";
 // fonts covering only WinAnsi (Latin-1) -- any accented character outside
 // that range silently renders as a missing-glyph box. Open Sans covers full
 // Latin Extended, Cyrillic, Greek, Vietnamese, and Hebrew (verified via
-// fontkit), so registering it in place of Helvetica fixes export for every
-// language that uses those scripts. It does NOT cover CJK or Arabic --
-// those need a dedicated font/shaping engine of their own, tracked
-// separately. Note also that pdfkit does not reorder text for
-// right-to-left scripts on its own, so Hebrew glyphs will render but the
-// reading order within a PDF text run is not yet corrected -- that's a
-// separate bidi/RTL layout problem, not a font-coverage one.
-const BODY_FONT = readFileSync(join(process.cwd(), "src/lib/export/fonts/OpenSans-Regular.ttf"));
-const BODY_FONT_BOLD = readFileSync(join(process.cwd(), "src/lib/export/fonts/OpenSans-Bold.ttf"));
+// fontkit), so it's the default. Manuscripts containing Arabic or CJK
+// characters switch to a Noto Sans variant instead -- no single font covers
+// every script, and Noto Sans SC in particular is ~10MB per weight (tens of
+// thousands of CJK glyphs), so it's read from disk only when a manuscript
+// actually contains CJK text rather than unconditionally on every export.
+// Note also that pdfkit does not reorder text for right-to-left scripts or
+// apply Arabic's positional letterforms on its own, so Arabic/Hebrew
+// glyphs will render but correct shaping/reading order is a separate,
+// still-open problem -- not a font-coverage one.
+function loadFontPair(regularFile: string, boldFile: string) {
+  return {
+    regular: readFileSync(join(process.cwd(), "src/lib/export/fonts", regularFile)),
+    bold: readFileSync(join(process.cwd(), "src/lib/export/fonts", boldFile)),
+  };
+}
 
-function registerBodyFonts(doc: PDFKit.PDFDocument) {
-  doc.registerFont("Body", BODY_FONT);
-  doc.registerFont("Body-Bold", BODY_FONT_BOLD);
+const LATIN_FONT = loadFontPair("OpenSans-Regular.ttf", "OpenSans-Bold.ttf");
+let arabicFont: { regular: Buffer; bold: Buffer } | null = null;
+let cjkFont: { regular: Buffer; bold: Buffer } | null = null;
+
+// Unicode block ranges, not literal glyphs, so the boundaries stay auditable.
+const ARABIC_SCRIPT_PATTERN = /[\u{0600}-\u{06FF}\u{0750}-\u{077F}\u{08A0}-\u{08FF}\u{FB50}-\u{FDFF}\u{FE70}-\u{FEFF}]/u;
+const CJK_SCRIPT_PATTERN = /[\u{3000}-\u{303F}\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{F900}-\u{FAFF}\u{FF00}-\u{FFEF}]/u;
+
+function detectBodyFont(sampleText: string) {
+  if (ARABIC_SCRIPT_PATTERN.test(sampleText)) {
+    arabicFont ??= loadFontPair("NotoSansArabic-Regular.ttf", "NotoSansArabic-Bold.ttf");
+    return arabicFont;
+  }
+  if (CJK_SCRIPT_PATTERN.test(sampleText)) {
+    cjkFont ??= loadFontPair("NotoSansSC-Regular.ttf", "NotoSansSC-Bold.ttf");
+    return cjkFont;
+  }
+  return LATIN_FONT;
+}
+
+function registerBodyFonts(doc: PDFKit.PDFDocument, sampleText: string) {
+  const font = detectBodyFont(sampleText);
+  doc.registerFont("Body", font.regular);
+  doc.registerFont("Body-Bold", font.bold);
 }
 
 const frontMatterTypes = new Set(["title_page", "copyright_page", "dedication", "foreword", "preface", "introduction"]);
@@ -70,7 +97,11 @@ export async function buildFinalManuscriptPdf(input: BuildMarkdownInput, options
 
   const chunks: Buffer[] = [];
   doc.on("data", (chunk: Buffer) => chunks.push(chunk));
-  registerBodyFonts(doc);
+  // A handful of paragraphs is enough to detect the manuscript's dominant
+  // script -- books are written in one language/script throughout, so this
+  // avoids reading every paragraph just to pick a font.
+  const scriptSample = [input.book.title, ...input.paragraphs.slice(0, 10).map((p) => p.original_text)].join(" ");
+  registerBodyFonts(doc, scriptSample);
 
   doc.addPage();
   doc.font("Body-Bold").fontSize(24).text(repairCommonMojibake(input.book.title.trim() || "Untitled Book"), {
