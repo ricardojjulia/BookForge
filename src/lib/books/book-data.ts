@@ -8,10 +8,11 @@ export type BookCore = {
   title: string;
   status: string | null;
   author_name: string | null;
+  owner_id: string;
 };
 
 export async function getBookCore(supabase: SupabaseClient, bookId: string) {
-  return supabase.from("books").select("id,title,status,author_name").eq("id", bookId).single<BookCore>();
+  return supabase.from("books").select("id,title,status,author_name,owner_id").eq("id", bookId).single<BookCore>();
 }
 
 export type CoherenceReportRow = {
