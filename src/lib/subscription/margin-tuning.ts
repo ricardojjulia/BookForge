@@ -13,8 +13,11 @@ type TierMarginDailyStatsRow = {
 
 // "Margin @ typical" from the redone tier cost analysis (docs/pricing plan) --
 // the band this job steers the credit cap toward, and the floor below which it
-// proposes (never applies) an allowlist review.
-const TARGET_MARGIN: Record<string, number> = { starter: 0.92, pro: 0.76, studio: 0.73, publisher: 0.52 };
+// proposes (never applies) an allowlist review. Publisher's target was raised
+// from 0.52 to 0.56 alongside its $199->$219 price correction (see
+// 202608200008_publisher_tier_price_correction.sql) -- the original 0.52 was
+// paired with a 9.5% worst-case floor margin that was flagged as too thin.
+const TARGET_MARGIN: Record<string, number> = { starter: 0.92, pro: 0.76, studio: 0.73, publisher: 0.56 };
 
 // "Credit cap ($)" column from the same table, expressed as a multiplier of
 // typical cost (e.g. Starter's $3.60 cap on ~$1.20 typical cost is ~3x). The
