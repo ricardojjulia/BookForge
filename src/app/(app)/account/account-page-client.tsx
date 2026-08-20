@@ -4,11 +4,14 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Alert,
+  Badge,
   Button,
+  Card,
   Divider,
   Group,
   Paper,
   PasswordInput,
+  SimpleGrid,
   Stack,
   Text,
   TextInput,
@@ -16,7 +19,9 @@ import {
 } from "@mantine/core";
 import { createClient } from "@/lib/supabase/client";
 
-type Props = { email: string; displayName: string };
+type BillingTier = { id: string; display_name: string; monthly_price_usd_cents: number };
+type BillingInfo = { tiers: BillingTier[]; currentTierId: string | null; balanceUsdMicros: number | null } | null;
+type Props = { email: string; displayName: string; billing: BillingInfo };
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -27,7 +32,77 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function AccountPageClient({ email, displayName }: Props) {
+function BillingSection({ billing }: { billing: NonNullable<BillingInfo> }) {
+  const [loadingTierId, setLoadingTierId] = useState<string | null>(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function redirectTo(path: string, body?: unknown) {
+    setError(null);
+    try {
+      const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+      const data = await res.json() as { url?: string; error?: string };
+      if (!res.ok || !data.url) throw new Error(data.error || "Failed.");
+      window.location.assign(data.url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed.");
+      setLoadingTierId(null);
+      setPortalLoading(false);
+    }
+  }
+
+  const currentTier = billing.tiers.find((t) => t.id === billing.currentTierId);
+
+  return (
+    <Section title="Billing">
+      {error && <Alert color="red" mb="sm">{error}</Alert>}
+      {currentTier ? (
+        <Stack gap="sm">
+          <Group>
+            <Text size="sm">
+              Current plan: <strong>{currentTier.display_name}</strong> (${(currentTier.monthly_price_usd_cents / 100).toFixed(2)}/mo)
+            </Text>
+            <Badge color="green" variant="light">Active</Badge>
+          </Group>
+          {billing.balanceUsdMicros !== null && (
+            <Text size="sm" c="dimmed">Credit balance: ${(billing.balanceUsdMicros / 1_000_000).toFixed(2)}</Text>
+          )}
+          <Group>
+            <Button
+              color="grape"
+              loading={portalLoading}
+              onClick={() => { setPortalLoading(true); redirectTo("/api/billing/portal"); }}
+            >
+              Manage billing
+            </Button>
+          </Group>
+        </Stack>
+      ) : (
+        <Stack gap="sm">
+          <Text size="sm" c="dimmed">Choose a plan to get started.</Text>
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+            {billing.tiers.map((tier) => (
+              <Card key={tier.id} withBorder radius="md" p="md">
+                <Text fw={600}>{tier.display_name}</Text>
+                <Text size="sm" c="dimmed" mb="sm">${(tier.monthly_price_usd_cents / 100).toFixed(2)}/mo</Text>
+                <Button
+                  fullWidth
+                  color="grape"
+                  loading={loadingTierId === tier.id}
+                  onClick={() => { setLoadingTierId(tier.id); redirectTo("/api/billing/checkout", { tierId: tier.id }); }}
+                >
+                  Subscribe
+                </Button>
+              </Card>
+            ))}
+          </SimpleGrid>
+        </Stack>
+      )}
+    </Section>
+  );
+}
+
+export function AccountPageClient({ email, displayName, billing }: Props) {
   const router = useRouter();
   const supabase = createClient();
 
@@ -130,6 +205,8 @@ export function AccountPageClient({ email, displayName }: Props) {
 
   return (
     <Stack gap={0}>
+      {billing && <BillingSection billing={billing} />}
+
       <Section title="Profile">
         <TextInput
           label="Display name"
