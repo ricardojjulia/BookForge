@@ -5,7 +5,8 @@ import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
 import { getReasoningModelCandidates } from "@/lib/lmstudio/model-selection";
 import { selectAndPrepareLmStudioModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
-import { assertModelAllowedForUser } from "@/lib/subscription/enforcement";
+import { assertModelAllowedForUser, reconcileCreditReservation, reserveCreditsForCall } from "@/lib/subscription/enforcement";
+import { computeCostUsdMicros, getCurrentModelPricing } from "@/lib/subscription/pricing";
 
 type SupabaseClient = Awaited<ReturnType<typeof import("@/lib/supabase/server").createClient>>;
 
@@ -204,17 +205,38 @@ async function runCloudJudge(
     const model = settings.standardSettings.model || meta?.defaultModels[0] || "gpt-4o";
 
     // This bypasses the orchestrator entirely (providerChatCompletion below,
-    // not createManagedChatCompletion), so it needs its own explicit gate --
+    // not createManagedChatCompletion), so it needs its own explicit gates --
     // see src/lib/subscription/enforcement.ts.
     await assertModelAllowedForUser(telemetry.supabase, { userId: telemetry.userId, model, task: "critic" });
+
+    const maxTokens = settings.standardSettings.maxOutputTokens ?? 2400;
+    const reservation = await reserveCreditsForCall(telemetry.supabase, {
+      userId: telemetry.userId,
+      model,
+      task: "critic",
+      promptTokensEstimate: Math.ceil(prompt.length / 3.2),
+      maxOutputTokens: maxTokens,
+    });
 
     const completion = await providerChatCompletion(settings.standardSettings, {
       model,
       temperature: settings.standardSettings.temperature ?? 0.35,
-      max_tokens: settings.standardSettings.maxOutputTokens ?? 2400,
+      max_tokens: maxTokens,
       messages: [{ role: "user", content: prompt }] as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
       response_format: { type: "json_object" },
     });
+
+    if (reservation) {
+      const promptTokens = completion.usage?.prompt_tokens ?? null;
+      const completionTokens = completion.usage?.completion_tokens ?? null;
+      const pricing = promptTokens !== null && completionTokens !== null ? await getCurrentModelPricing(telemetry.supabase, model) : null;
+      if (pricing && promptTokens !== null && completionTokens !== null) {
+        await reconcileCreditReservation(telemetry.supabase, {
+          reservationId: reservation.reservationId,
+          actualCostUsdMicros: computeCostUsdMicros(promptTokens, completionTokens, pricing),
+        });
+      }
+    }
 
     const raw = completion.choices[0]?.message?.content || "";
     return {

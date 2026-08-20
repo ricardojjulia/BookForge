@@ -40,7 +40,7 @@ export function validateLongFormOutput(text: string, input: { minimumWordFloor: 
   return { outcome, wordCount };
 }
 
-/** Fire-and-forget insert. Never throws — telemetry recording must not break a real generation call. */
+/** Fire-and-forget insert. Never throws — telemetry recording must not break a real generation call. Returns the inserted row's id (or null on failure) so callers can thread it into a credit-reservation reconciliation. */
 export async function recordModelCallEvent(
   supabase: SupabaseClient,
   input: {
@@ -57,9 +57,9 @@ export async function recordModelCallEvent(
     costUsdMicros?: number | null;
     tierId?: string | null;
   },
-) {
+): Promise<string | null> {
   try {
-    await supabase.from("model_call_events").insert({
+    const { data } = await supabase.from("model_call_events").insert({
       user_id: input.userId,
       model: input.model,
       task: input.task,
@@ -72,9 +72,11 @@ export async function recordModelCallEvent(
       completion_tokens: input.completionTokens ?? null,
       cost_usd_micros: input.costUsdMicros ?? null,
       tier_id: input.tierId ?? null,
-    });
+    }).select("id").single();
+    return data?.id ?? null;
   } catch {
     // Best-effort telemetry only.
+    return null;
   }
 }
 

@@ -15,8 +15,16 @@ import {
   type ModelCallTelemetry,
   type ModelTaskHealth,
 } from "@/lib/ai/model-performance";
-import { getUserSubscriptionTier } from "@/lib/subscription/enforcement";
+import { getUserSubscriptionTier, reconcileCreditReservation, reserveCreditsForCall } from "@/lib/subscription/enforcement";
 import { computeCostUsdMicros, getCurrentModelPricing } from "@/lib/subscription/pricing";
+
+/** ~3.2 chars/token, the same conservative ratio src/lib/lmstudio/runtime-limits.ts already uses for prompt budgeting -- reused here for a pessimistic pre-call token estimate. */
+const CHARS_PER_TOKEN_ESTIMATE = 3.2;
+
+function estimatePromptTokens(messages: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming["messages"]): number {
+  const charCount = messages.reduce((sum, message) => sum + (typeof message.content === "string" ? message.content.length : JSON.stringify(message.content ?? "").length), 0);
+  return Math.ceil(charCount / CHARS_PER_TOKEN_ESTIMATE);
+}
 
 export const DEFAULT_LMSTUDIO_BASE_URL = "http://localhost:1234/v1";
 
@@ -248,6 +256,25 @@ export async function createManagedChatCompletion(
   telemetryContext?: ModelCallTelemetryContext,
 ) {
   const startedAt = Date.now();
+  const resolvedModel = params.model || prepared.model;
+  const maxOutputTokens = params.max_tokens ?? prepared.runtimeLimits.maxOutputTokens;
+
+  // The money chokepoint -- reserved BEFORE the provider is ever invoked,
+  // worst-case from maxOutputTokens (never underestimates). Cloud only:
+  // local LM Studio calls have no real $ cost to reserve against. A single
+  // reservation covers the deprecated-temperature retry below too (that
+  // retry is the same logical request, not additional real generation).
+  let reservation: { reservationId: string } | null = null;
+  if (telemetryContext && prepared.isCloud) {
+    reservation = await reserveCreditsForCall(telemetryContext.supabase, {
+      userId: telemetryContext.userId,
+      model: resolvedModel,
+      task: telemetryContext.task,
+      promptTokensEstimate: estimatePromptTokens(params.messages),
+      maxOutputTokens,
+    });
+  }
+
   try {
     const paramsWithoutTopP = Object.fromEntries(
       Object.entries(params).filter(([key]) => key !== "top_p"),
@@ -255,7 +282,7 @@ export async function createManagedChatCompletion(
     const safeParams = prepared.isCloud ? paramsWithoutTopP : params;
     const completion = await client.chat.completions.create({
       ...safeParams,
-      model: params.model || prepared.model,
+      model: resolvedModel,
       // Trust an explicitly-passed max_tokens as-is; only fall back to the
       // prepared/account default when the caller didn't specify one. The
       // previous Math.min(params.max_tokens || default, default) is
@@ -266,9 +293,9 @@ export async function createManagedChatCompletion(
       // a no-op: it always got re-clamped back down to the account's
       // general cloud max-output setting (tuned for per-paragraph rewrite
       // calls), regardless of what the architecture route asked for.
-      max_tokens: params.max_tokens ?? prepared.runtimeLimits.maxOutputTokens,
+      max_tokens: maxOutputTokens,
     });
-    void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt);
+    void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
     return completion;
   } catch (error) {
     if (isDeprecatedTemperatureError(error) && "temperature" in params) {
@@ -282,10 +309,10 @@ export async function createManagedChatCompletion(
 
       const completion = await client.chat.completions.create({
         ...safeRetryParams,
-        model: params.model || prepared.model,
-        max_tokens: params.max_tokens ?? prepared.runtimeLimits.maxOutputTokens,
+        model: resolvedModel,
+        max_tokens: maxOutputTokens,
       });
-      void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt);
+      void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
       return completion;
     }
 
@@ -331,6 +358,7 @@ async function recordCompletionOutcome(
   validateOutcome: ((content: string) => { outcome: ModelCallOutcome; wordCount?: number }) | undefined,
   telemetryContext: ModelCallTelemetryContext | undefined,
   durationMs: number,
+  reservation: { reservationId: string } | null = null,
 ) {
   if (!telemetryContext) return;
   try {
@@ -358,7 +386,7 @@ async function recordCompletionOutcome(
         ? computeCostUsdMicros(promptTokens, completionTokens, pricing)
         : null;
 
-    await recordModelCallEvent(telemetryContext.supabase, {
+    const modelCallEventId = await recordModelCallEvent(telemetryContext.supabase, {
       userId: telemetryContext.userId,
       model,
       task: telemetryContext.task,
@@ -371,6 +399,18 @@ async function recordCompletionOutcome(
       costUsdMicros,
       tierId,
     });
+
+    // True up the pessimistic pre-call reservation now that real cost is
+    // known -- refunds the gap back to the user's balance. If cost couldn't
+    // be computed (no pricing row, missing usage), the reservation's
+    // worst-case estimate simply stands uncorrected rather than guessing.
+    if (reservation && costUsdMicros !== null) {
+      await reconcileCreditReservation(telemetryContext.supabase, {
+        reservationId: reservation.reservationId,
+        actualCostUsdMicros: costUsdMicros,
+        modelCallEventId,
+      });
+    }
   } catch {
     // Telemetry recording must never break a real generation call.
   }
