@@ -19,6 +19,7 @@ export default async function StewardLayout({ children }: { children: React.Reac
             <Link href="/steward" style={{ textDecoration: "none", fontWeight: 700 }}>Overview</Link>
             <Link href="/steward/accounts" style={{ textDecoration: "none", fontWeight: 700 }}>Accounts</Link>
             <Link href="/steward/books" style={{ textDecoration: "none", fontWeight: 700 }}>Books</Link>
+            <Link href="/steward/pricing" style={{ textDecoration: "none", fontWeight: 700 }}>Pricing</Link>
           </Group>
           <Badge color="grape" variant="light">Steward</Badge>
         </Group>

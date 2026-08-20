@@ -3,6 +3,14 @@
     {
       "path": "/api/internal/account-purge",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/internal/subscription/pricing-refresh",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/internal/subscription/margin-tuning",
+      "schedule": "0 7 * * 1"
     }
   ]
 }
