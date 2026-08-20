@@ -15,6 +15,8 @@ import {
   type ModelCallTelemetry,
   type ModelTaskHealth,
 } from "@/lib/ai/model-performance";
+import { getUserSubscriptionTier } from "@/lib/subscription/enforcement";
+import { computeCostUsdMicros, getCurrentModelPricing } from "@/lib/subscription/pricing";
 
 export const DEFAULT_LMSTUDIO_BASE_URL = "http://localhost:1234/v1";
 
@@ -266,7 +268,7 @@ export async function createManagedChatCompletion(
       // calls), regardless of what the architecture route asked for.
       max_tokens: params.max_tokens ?? prepared.runtimeLimits.maxOutputTokens,
     });
-    recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt);
+    void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt);
     return completion;
   } catch (error) {
     if (isDeprecatedTemperatureError(error) && "temperature" in params) {
@@ -283,7 +285,7 @@ export async function createManagedChatCompletion(
         model: params.model || prepared.model,
         max_tokens: params.max_tokens ?? prepared.runtimeLimits.maxOutputTokens,
       });
-      recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt);
+      void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt);
       return completion;
     }
 
@@ -323,7 +325,7 @@ function defaultValidateOutcome(content: string): { outcome: ModelCallOutcome; w
   return { outcome: "success", wordCount };
 }
 
-function recordCompletionOutcome(
+async function recordCompletionOutcome(
   prepared: PreparedLmStudioModel,
   completion: OpenAI.Chat.Completions.ChatCompletion,
   validateOutcome: ((content: string) => { outcome: ModelCallOutcome; wordCount?: number }) | undefined,
@@ -331,23 +333,47 @@ function recordCompletionOutcome(
   durationMs: number,
 ) {
   if (!telemetryContext) return;
-  const content = completion.choices[0]?.message.content || "";
-  const result = validateOutcome ? validateOutcome(content) : defaultValidateOutcome(content);
-  void recordModelCallEvent(telemetryContext.supabase, {
-    userId: telemetryContext.userId,
+  try {
+    const content = completion.choices[0]?.message.content || "";
+    const result = validateOutcome ? validateOutcome(content) : defaultValidateOutcome(content);
     // telemetryContext.model is captured once at model-selection time and
     // never updated -- a per-call `model` override (e.g. a retry falling
     // back to a different model after an empty completion) was previously
     // always attributed to the ORIGINAL model regardless of which one
     // actually served the request. completion.model is the API response's
     // own record of what really ran; prefer it.
-    model: completion.model || telemetryContext.model,
-    task: telemetryContext.task,
-    contextLength: prepared.runtimeLimits.configuredContextTokens,
-    outcome: result.outcome,
-    wordCount: result.wordCount ?? null,
-    durationMs,
-  });
+    const model = completion.model || telemetryContext.model;
+    const promptTokens = completion.usage?.prompt_tokens ?? null;
+    const completionTokens = completion.usage?.completion_tokens ?? null;
+
+    // Real $ cost, computed once real usage is known -- best-effort, same as
+    // the rest of this function: a pricing-lookup failure must never break
+    // telemetry recording, so cost is simply omitted rather than blocking.
+    const [pricing, tierId] = await Promise.all([
+      promptTokens !== null && completionTokens !== null ? getCurrentModelPricing(telemetryContext.supabase, model) : null,
+      getUserSubscriptionTier(telemetryContext.supabase, telemetryContext.userId),
+    ]);
+    const costUsdMicros =
+      pricing && promptTokens !== null && completionTokens !== null
+        ? computeCostUsdMicros(promptTokens, completionTokens, pricing)
+        : null;
+
+    await recordModelCallEvent(telemetryContext.supabase, {
+      userId: telemetryContext.userId,
+      model,
+      task: telemetryContext.task,
+      contextLength: prepared.runtimeLimits.configuredContextTokens,
+      outcome: result.outcome,
+      wordCount: result.wordCount ?? null,
+      durationMs,
+      promptTokens,
+      completionTokens,
+      costUsdMicros,
+      tierId,
+    });
+  } catch {
+    // Telemetry recording must never break a real generation call.
+  }
 }
 
 function isDeprecatedTemperatureError(error: unknown): boolean {
