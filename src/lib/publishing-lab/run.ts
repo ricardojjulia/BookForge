@@ -1,10 +1,11 @@
 import OpenAI from "openai";
-import { createProviderClient, providerChatCompletion } from "@/lib/ai/providers";
+import { createProviderClient, PROVIDER_META, providerChatCompletion } from "@/lib/ai/providers";
 import { createManagedChatCompletion, createLmStudioClient } from "@/lib/lmstudio/client";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
 import { getReasoningModelCandidates } from "@/lib/lmstudio/model-selection";
 import { selectAndPrepareLmStudioModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
+import { assertModelAllowedForUser } from "@/lib/subscription/enforcement";
 
 type SupabaseClient = Awaited<ReturnType<typeof import("@/lib/supabase/server").createClient>>;
 
@@ -115,10 +116,10 @@ export async function runPublishingLab(input: {
 
   const judges: JudgeRun[] = [];
 
-  const localJudge = await runLocalJudge(settings, prompt);
+  const localJudge = await runLocalJudge(settings, prompt, { supabase: input.supabase, userId: input.userId });
   if (localJudge) judges.push(localJudge);
 
-  const cloudJudge = await runCloudJudge(settings, prompt);
+  const cloudJudge = await runCloudJudge(settings, prompt, { supabase: input.supabase, userId: input.userId });
   if (cloudJudge) judges.push(cloudJudge);
 
   if (!judges.length) {
@@ -151,7 +152,11 @@ export async function runPublishingLab(input: {
   return enrichedBundle;
 }
 
-async function runLocalJudge(settings: Awaited<ReturnType<typeof getUserLmStudioSettings>>, prompt: string): Promise<JudgeRun | null> {
+async function runLocalJudge(
+  settings: Awaited<ReturnType<typeof getUserLmStudioSettings>>,
+  prompt: string,
+  telemetry: { supabase: SupabaseClient; userId: string },
+): Promise<JudgeRun | null> {
   try {
     const localPlan = await selectAndPrepareLmStudioModel(settings, {
       task: "critic",
@@ -159,14 +164,21 @@ async function runLocalJudge(settings: Awaited<ReturnType<typeof getUserLmStudio
       expectedCalls: 1,
       latencyPreference: "quality",
       allowModelLoad: false,
+      telemetry,
     });
 
     const client = createLmStudioClient(settings);
-    const completion = await createManagedChatCompletion(client, localPlan.preparedModel, {
-      temperature: 0.35,
-      top_p: settings.topP,
-      messages: [{ role: "user", content: prompt }],
-    });
+    const completion = await createManagedChatCompletion(
+      client,
+      localPlan.preparedModel,
+      {
+        temperature: 0.35,
+        top_p: settings.topP,
+        messages: [{ role: "user", content: prompt }],
+      },
+      undefined,
+      localPlan.telemetryContext,
+    );
 
     const raw = completion.choices[0]?.message?.content || "";
     return {
@@ -180,11 +192,24 @@ async function runLocalJudge(settings: Awaited<ReturnType<typeof getUserLmStudio
   }
 }
 
-async function runCloudJudge(settings: Awaited<ReturnType<typeof getUserLmStudioSettings>>, prompt: string): Promise<JudgeRun | null> {
+async function runCloudJudge(
+  settings: Awaited<ReturnType<typeof getUserLmStudioSettings>>,
+  prompt: string,
+  telemetry: { supabase: SupabaseClient; userId: string },
+): Promise<JudgeRun | null> {
   if (!settings.standardSettings) return null;
 
   try {
+    const meta = PROVIDER_META.find((p) => p.id === settings.standardSettings!.provider);
+    const model = settings.standardSettings.model || meta?.defaultModels[0] || "gpt-4o";
+
+    // This bypasses the orchestrator entirely (providerChatCompletion below,
+    // not createManagedChatCompletion), so it needs its own explicit gate --
+    // see src/lib/subscription/enforcement.ts.
+    await assertModelAllowedForUser(telemetry.supabase, { userId: telemetry.userId, model, task: "critic" });
+
     const completion = await providerChatCompletion(settings.standardSettings, {
+      model,
       temperature: settings.standardSettings.temperature ?? 0.35,
       max_tokens: settings.standardSettings.maxOutputTokens ?? 2400,
       messages: [{ role: "user", content: prompt }] as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
@@ -195,7 +220,7 @@ async function runCloudJudge(settings: Awaited<ReturnType<typeof getUserLmStudio
     return {
       judgeId: "cloud_provider",
       provider: "cloud",
-      model: settings.standardSettings.model || settings.standardSettings.provider,
+      model,
       content: normalizeJudgeContent(raw),
     };
   } catch {

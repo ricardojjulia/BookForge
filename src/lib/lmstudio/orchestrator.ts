@@ -19,6 +19,7 @@ import {
   type ModelCallTelemetry,
   type ModelTaskHealth,
 } from "@/lib/ai/model-performance";
+import { assertModelAllowedForUser } from "@/lib/subscription/enforcement";
 import type { LmStudioSettings } from "@/lib/types";
 
 type ModelCandidate = {
@@ -33,8 +34,15 @@ export type LmStudioTaskProfile = {
   latencyPreference?: "fast" | "balanced" | "quality";
   allowModelLoad?: boolean;
   allowUnload?: boolean;
-  /** When present, scoring is adjusted by empirical per-model history and the call is recorded to model_call_events. */
-  telemetry?: ModelCallTelemetry;
+  /**
+   * Required: scoring is adjusted by empirical per-model history, the call is
+   * recorded to model_call_events, and (for cloud calls) it's what
+   * selectAndPrepareActiveModel uses to run the subscription-tier
+   * allowlist check before any provider is invoked. Every real call site
+   * already has a userId/supabase available -- if a future route doesn't,
+   * that's a gap worth a compile error, not a silent skip.
+   */
+  telemetry: ModelCallTelemetry;
 };
 
 export type PreparedLmStudioTaskModel = {
@@ -359,6 +367,16 @@ export async function selectAndPrepareActiveModel(
     const meta = PROVIDER_META.find((p) => p.id === std.provider);
     const taskModel = std.taskModels?.[profile.task];
     const model = taskModel || std.model || meta?.defaultModels[0] || "gpt-4o";
+
+    // Fail-closed subscription-tier gate. Must run before any provider is
+    // invoked -- recordModelCallEvent's telemetry is fire-and-forget AFTER
+    // the call and can't serve this purpose. No-op on self-hosted deployments.
+    await assertModelAllowedForUser(profile.telemetry.supabase, {
+      userId: profile.telemetry.userId,
+      model,
+      task: profile.task,
+    });
+
     const maxOutputTokens = std.maxOutputTokens || 4096;
     const cloudPrepared: PreparedLmStudioModel = {
       model,
