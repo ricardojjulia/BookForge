@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { testLmStudioConnection } from "@/lib/lmstudio/client";
-import { providerChatCompletion } from "@/lib/ai/providers";
+import { PROVIDER_META, providerChatCompletion } from "@/lib/ai/providers";
+import { assertModelAllowedForUser } from "@/lib/subscription/enforcement";
+import { createClient } from "@/lib/supabase/server";
 import type { LlmProvider } from "@/lib/types";
 
 const schema = z.object({
@@ -13,9 +15,25 @@ const schema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ ok: false, error: "Authentication required." }, { status: 401 });
+
     const body = schema.parse(await request.json());
 
     if (body.provider) {
+      const meta = PROVIDER_META.find((p) => p.id === body.provider);
+      const model = body.model || meta?.defaultModels[0] || "gpt-4o";
+
+      // A caller-supplied apiKey means this ping is billed to the caller's
+      // own account, not BookForge's -- no tier gate needed. Without one,
+      // createProviderClient silently falls back to this server's own
+      // provider API key (see src/lib/ai/providers.ts), so an omitted key
+      // must be gated exactly like a real managed-SaaS call.
+      if (!body.apiKey) {
+        await assertModelAllowedForUser(supabase, { userId: user.id, model, task: "connection_test" });
+      }
+
       // Cloud provider check: a minimal chat completion is the one call shape
       // every provider here supports identically (unlike /models, which some
       // OpenAI-compatible endpoints don't implement).

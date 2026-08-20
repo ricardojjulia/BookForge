@@ -197,6 +197,15 @@ export const CLOUD_MODEL_CATALOG: CloudModelInfo[] = [
     bestFor: "Studio-tier opt-in for critic/revision passes that genuinely need flagship-level reasoning.",
     costTier: "high",
   },
+  {
+    provider: "openrouter",
+    id: "anthropic/claude-opus-5",
+    label: "Claude Opus 5 (OpenRouter)",
+    contextWindowTokens: 1_000_000,
+    strengths: ["flagship quality", "best-in-class prose/critique judgment"],
+    bestFor: "Studio/Publisher-tier critic and rewrite passes — the highest-leverage calls, gated away from high-volume extraction to keep flagship pricing off routine calls.",
+    costTier: "premium",
+  },
 ];
 
 export function getCloudModelsForProvider(provider: Exclude<LlmProvider, "lmstudio">): CloudModelInfo[] {

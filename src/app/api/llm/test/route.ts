@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
 import { createProviderClient, PROVIDER_META } from "@/lib/ai/providers";
+import { createClient } from "@/lib/supabase/server";
 import type { LlmProvider, StandardLlmSettings } from "@/lib/types";
 
 export async function POST(request: Request) {
   try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
     const body = (await request.json()) as {
       provider?: string;
       apiKey?: string;
