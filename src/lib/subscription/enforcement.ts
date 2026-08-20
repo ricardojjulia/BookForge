@@ -43,3 +43,15 @@ export async function assertModelAllowedForUser(
     throw new TierModelNotAllowedError(input.model, input.task);
   }
 }
+
+/**
+ * Best-effort tier lookup for telemetry snapshotting (see model_call_events.tier_id).
+ * Unlike assertModelAllowedForUser, this is never a gate -- returns null rather
+ * than throwing, since a telemetry-recording failure must never break a real call.
+ */
+export async function getUserSubscriptionTier(supabase: SupabaseClient, userId: string): Promise<string | null> {
+  if (!isManagedSaasDeployment()) return null;
+  const { data, error } = await supabase.rpc("get_user_subscription_tier", { p_user_id: userId });
+  if (error || typeof data !== "string") return null;
+  return data;
+}

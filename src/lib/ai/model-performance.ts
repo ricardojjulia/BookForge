@@ -52,6 +52,10 @@ export async function recordModelCallEvent(
     errorSignature?: string | null;
     wordCount?: number | null;
     durationMs?: number | null;
+    promptTokens?: number | null;
+    completionTokens?: number | null;
+    costUsdMicros?: number | null;
+    tierId?: string | null;
   },
 ) {
   try {
@@ -64,6 +68,10 @@ export async function recordModelCallEvent(
       error_signature: input.errorSignature ?? null,
       word_count: input.wordCount ?? null,
       duration_ms: input.durationMs ?? null,
+      prompt_tokens: input.promptTokens ?? null,
+      completion_tokens: input.completionTokens ?? null,
+      cost_usd_micros: input.costUsdMicros ?? null,
+      tier_id: input.tierId ?? null,
     });
   } catch {
     // Best-effort telemetry only.
