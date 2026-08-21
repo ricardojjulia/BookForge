@@ -48,7 +48,10 @@ export async function POST(request: Request) {
       customerId = customer.id;
       await admin
         .from("user_subscriptions")
-        .upsert({ user_id: user.id, stripe_customer_id: customerId, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+        .upsert(
+          { user_id: user.id, stripe_customer_id: customerId, status: "incomplete", updated_at: new Date().toISOString() },
+          { onConflict: "user_id" },
+        );
     }
 
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;
