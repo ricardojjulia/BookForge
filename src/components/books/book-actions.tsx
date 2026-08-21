@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { AiJobQueue, AiJobQueueInlineStatus, type AiJobQueueState } from "@/components/ai/ai-job-queue";
 import { AiTaskPreflight, type AiTaskPreflightData } from "@/components/ai/ai-task-preflight";
 import { estimateAiCallPlan } from "@/lib/ai/call-planner";
+import { runChunkedJob } from "@/lib/ai/run-chunked-job";
 import { criticLenses } from "@/lib/critic/prompts";
 import { CRITIC_LENS_COUNT } from "@/lib/critic/progress";
 import { fetchJson } from "@/lib/http/fetch-json";
@@ -850,7 +851,7 @@ export function BookActions({
 
   async function runQueuedGenerateDraft(preflight: AiTaskPreflightData | null) {
     const path = `/api/books/${bookId}/generate-draft`;
-    const totalUnits = Math.max(1, Math.min(plannedChapterCount, 3));
+    const totalUnits = Math.max(1, plannedChapterCount);
     const estimatedSecondsPerCall = preflight?.estimatedSecondsPerCall || 40;
     const startedAt = Date.now();
 
@@ -877,76 +878,56 @@ export function BookActions({
     });
 
     try {
-      const created = await fetchJson<{ content?: { jobId?: string; queued?: boolean; totalUnits?: number } }>(
+      // generate-draft processes one chapter per request -- runChunkedJob
+      // reuses the same jobId across calls until every planned chapter is
+      // drafted, driving real (not estimated) progress per chapter instead
+      // of the old single fire-and-forget call capped at 3 chapters/click.
+      const finalResult = await runChunkedJob(
         path,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(mergeMetadataSnapshotBody({ limit: totalUnits, serverManaged: true })),
+        mergeMetadataSnapshotBody({}),
+        "Generate Planned Draft",
+        (progress) => {
+          const generatedSoFar = (progress.totalGenerated as number) ?? 0;
+          const totalFromServer = (progress.totalUnits as number) || totalUnits;
+          const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+          setOutput(`Generated ${generatedSoFar} of ${totalFromServer} planned chapter(s)…`);
+          setQueue((current) => ({
+            ...current,
+            currentUnit: `Processing chapter ${generatedSoFar + 1} of ${totalFromServer}`,
+            totalUnits: totalFromServer,
+            completedUnits: generatedSoFar,
+            successfulUnits: generatedSoFar,
+            elapsedSeconds,
+            currentCallProgress: 1,
+            estimatedProgress: false,
+            status: "running",
+          }));
+          router.refresh();
         },
-        "Queue Planned Draft generation",
       );
 
-      const jobId = created.content?.jobId;
-      if (!jobId) {
-        throw new Error("Draft job was not created.");
-      }
-
-      setOutput(`Planned draft queued for ${totalUnits} chapter(s).`);
+      const totalGenerated = (finalResult.totalGenerated as number) ?? totalUnits;
+      setOutput(formatResultMessage(path, { content: finalResult }));
+      router.refresh();
       setQueue((current) => ({
         ...current,
-        currentUnit: `Processing ${totalUnits} planned chapter(s)`,
-        status: "running",
-        estimatedProgress: true,
+        currentUnit: "Complete",
+        totalUnits: (finalResult.totalUnits as number) || current.totalUnits,
+        completedUnits: totalGenerated,
+        successfulUnits: totalGenerated,
+        elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
+        currentCallElapsedSeconds: estimatedSecondsPerCall,
+        currentCallProgress: 1,
+        nextCallSeconds: 0,
+        estimatedSecondsRemaining: 0,
+        estimatedProgress: false,
+        status: "complete",
       }));
-
-      void fetchJson<{ content?: { generated?: number; remaining?: number } }>(
-        path,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(mergeMetadataSnapshotBody({ jobId, limit: totalUnits })),
-        },
-        "Generate Planned Draft worker",
-      )
-        .then((result) => {
-          setOutput(formatResultMessage(path, result));
-          router.refresh();
-          setQueue((current) => ({
-            ...current,
-            currentUnit: "Complete",
-            completedUnits: current.totalUnits,
-            successfulUnits: current.totalUnits,
-            elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
-            currentCallElapsedSeconds: estimatedSecondsPerCall,
-            currentCallProgress: 1,
-            nextCallSeconds: 0,
-            estimatedSecondsRemaining: 0,
-            estimatedProgress: false,
-            status: "complete",
-          }));
-        })
-        .catch((error) => {
-          setOutput(JSON.stringify({ error: error instanceof Error ? error.message : "Planned draft generation failed." }, null, 2));
-          setQueue((current) => ({
-            ...current,
-            failedUnits: Math.max(1, current.failedUnits),
-            completedUnits: Math.min(current.totalUnits, current.completedUnits + 1),
-            elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
-            currentCallProgress: 0,
-            nextCallSeconds: null,
-            estimatedProgress: false,
-            status: "cancelled",
-          }));
-        })
-        .finally(() => {
-          setLoading(null);
-        });
     } catch (error) {
       setOutput(
         JSON.stringify(
           {
-            error: describeTaskError(error, "Planned draft queue failed."),
+            error: describeTaskError(error, "Planned draft generation failed."),
           },
           null,
           2,
@@ -962,6 +943,7 @@ export function BookActions({
         estimatedProgress: false,
         status: "cancelled",
       }));
+    } finally {
       setLoading(null);
     }
   }

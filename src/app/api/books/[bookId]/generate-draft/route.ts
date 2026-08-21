@@ -2,7 +2,7 @@ import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildCreationDraftChapterPrompt } from "@/lib/creation/draft-prompt";
-import { createRevisionJobHeartbeat, mergeJobSettings, updateRevisionJobProgress } from "@/lib/ai/job-state";
+import { createRevisionJobHeartbeat, extractJobProgress, mergeJobSettings, type AiJobProgress, updateRevisionJobProgress } from "@/lib/ai/job-state";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
@@ -27,6 +27,11 @@ type ArchitectureChapter = {
   riskNotes?: unknown[];
   partTitle?: string;
 };
+
+// Complementary insurance alongside the single-chapter-per-request design
+// below -- leaves margin under a likely 60s Vercel cap. Adjust to match the
+// actual deployment's Vercel plan/Fluid Compute configuration.
+export const maxDuration = 55;
 
 const sceneBreakPattern = /^\s{0,3}(\*\s*\*\s*\*|#{3,}|-{3,}|_{3,})\s*$/m;
 
@@ -55,6 +60,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       typeof body.limit === "number" && Number.isFinite(body.limit)
         ? body.limit
         : Number.POSITIVE_INFINITY;
+    // Known limitation, flagged not hidden: unlike rewrite-execute's maxUnits
+    // (which subtracts cumulative `attempted` to turn it into a true
+    // whole-job remaining-budget cap), `limit` here is not corrected the same
+    // way -- doing so would require resolving the job's prior progress before
+    // plannedChapters is first computed, which currently happens earlier
+    // (this endpoint's model-selection/job-creation setup depends on
+    // plannedChapters.length). In practice this only matters if a caller
+    // passes a finite `limit` intending "stop after N chapters total, across
+    // every chunk call" for a single logical job -- no current caller does
+    // that (the "Generate Planned Draft" button now drives full continuation
+    // via runChunkedJob without a limit), but a future finite-limit caller
+    // would generate more chapters than requested rather than stopping short.
     const limit = Math.max(1, Math.min(200, requestedLimit));
 
     const supabase = await createClient();
@@ -116,7 +133,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       return NextResponse.json({
         content: {
           generated: 0,
-          remaining: 0,
+          remainingChapters: 0,
+          status: "completed",
           message: "No planned chapter shells need draft generation.",
         },
       });
@@ -135,6 +153,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     const runtimeWordCeiling = estimateModelWordCeiling(preparedModel.runtimeLimits.maxOutputTokens);
     const generated: Array<{ chapterNumber: number; title: string | null; paragraphCount: number }> = [];
     let jobId = body.jobId || "";
+    // Continuation calls (same jobId, one per chapter -- see the single-chapter
+    // execution below) carry the whole job's cumulative successful count and
+    // its frozen totalUnits forward from here, mirroring rewrite-execute's
+    // priorProgress handling.
+    let priorProgress: AiJobProgress | null = null;
 
     const initialJobSettings = mergeJobSettings(
       {
@@ -174,7 +197,32 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       if (existingJob.status === "completed") return NextResponse.json({ ok: true, message: "Draft job already completed." });
       if (existingJob.status === "failed") return NextResponse.json({ ok: true, message: "Draft job already failed." });
       currentJobSettings = existingJob.settings || initialJobSettings;
+      priorProgress = extractJobProgress(existingJob.settings);
     } else {
+      // Guard against launching a second draft-generation run for this book
+      // while one is already actively working through planned chapters --
+      // mirrors rewrite-execute's identical guard (added there after a real
+      // incident: 13 concurrent full_book_rewrite jobs on one book, running
+      // in true parallel for ~2 hours before being caught). Only checked here
+      // (no jobId): a continuation call always supplies the existing jobId
+      // and is exempt, same as rewrite-execute.
+      const { data: activeJob } = await supabase
+        .from("revision_jobs")
+        .select("id")
+        .eq("book_id", bookId)
+        .eq("mode", "creation_draft_generation")
+        .in("status", ["running", "queued"])
+        .limit(1)
+        .maybeSingle();
+      if (activeJob) {
+        return NextResponse.json(
+          {
+            error: `A draft generation run is already in progress for this book (job ${activeJob.id}). Wait for it to finish, or cancel it from Jobs History, before starting another.`,
+          },
+          { status: 409 },
+        );
+      }
+
       const { data: job, error: jobError } = await supabase
         .from("revision_jobs")
         .insert({
@@ -194,22 +242,35 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         return NextResponse.json({ content: { jobId, queued: true, totalUnits: plannedChapters.length } });
       }
     }
-    let successCount = 0;
+    // Frozen on whichever chunk call first sees this job -- plannedChapters
+    // shrinks on every later call as prior chapters flip from "planned" to
+    // "draft", so re-deriving totalUnits from it each time would make the
+    // progress bar's denominator shrink mid-run instead of the numerator
+    // climbing toward a stable target.
+    const totalUnits = priorProgress?.totalUnits || plannedChapters.length;
+    let successCount = priorProgress?.successful ?? 0;
 
     try {
-      for (const chapter of plannedChapters) {
+      // Exactly one chapter per request -- never the full plannedChapters
+      // list -- so a single HTTP request can't run long enough to hit
+      // Vercel's function timeout generating a whole book's worth of
+      // chapters. The caller (runChunkedJob) calls this route again with the
+      // same jobId while remainingChapters > 0; plannedChapters is re-derived
+      // fresh from durable state (chapters.status) on every such call, so an
+      // already-drafted chapter never gets regenerated.
+      for (const chapter of plannedChapters.slice(0, 1)) {
         const chapterLabel = `Chapter ${chapter.chapter_number}${chapter.title ? `: ${chapter.title}` : ""}`;
         currentJobSettings = await updateRevisionJobProgress(supabase, jobId, currentJobSettings, {
           currentUnit: chapterLabel,
           attempted: successCount,
           successful: successCount,
-          totalUnits: plannedChapters.length,
+          totalUnits,
         });
         const heartbeat = createRevisionJobHeartbeat(supabase, jobId, currentJobSettings, {
           currentUnit: chapterLabel,
           attempted: successCount,
           successful: successCount,
-          totalUnits: plannedChapters.length,
+          totalUnits,
         });
 
         try {
@@ -351,28 +412,33 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         }
       }
 
-      const remaining = Math.max(0, (chapters || []).filter((chapter) => chapter.status === "planned").length - generated.length);
+      // Recomputed from a fresh read at the top of THIS request, so this
+      // already reflects true current DB state -- chapters drafted by any
+      // earlier chunk call are no longer "planned" by the time this query ran.
+      const remainingChapters = Math.max(0, (chapters || []).filter((chapter) => chapter.status === "planned").length - generated.length);
+      const isJobDone = remainingChapters === 0;
+      const nowIso = new Date().toISOString();
       currentJobSettings = await updateRevisionJobProgress(supabase, jobId, currentJobSettings, {
-        currentUnit: `${generated.length} chapter${generated.length === 1 ? "" : "s"} generated`,
+        currentUnit: `${successCount} chapter${successCount === 1 ? "" : "s"} generated`,
         attempted: successCount,
         successful: successCount,
-        totalUnits: plannedChapters.length,
-        completedAt: new Date().toISOString(),
+        totalUnits,
+        completedAt: isJobDone ? nowIso : undefined,
       });
       await supabase
         .from("revision_jobs")
         .update({
-          status: "completed",
-          completed_at: new Date().toISOString(),
+          status: isJobDone ? "completed" : "running",
+          completed_at: isJobDone ? nowIso : null,
           settings: mergeJobSettings(currentJobSettings, {
             taskName: "Creation Draft Generation",
-            currentUnit: `${generated.length} chapter${generated.length === 1 ? "" : "s"} generated`,
-            totalUnits: plannedChapters.length,
+            currentUnit: `${successCount} chapter${successCount === 1 ? "" : "s"} generated`,
+            totalUnits,
             attempted: successCount,
             successful: successCount,
             failed: 0,
             skipped: 0,
-            completedAt: new Date().toISOString(),
+            completedAt: isJobDone ? nowIso : null,
           }),
         })
         .eq("id", jobId);
@@ -380,12 +446,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       await supabase
         .from("creation_projects")
         .update({
-          status: remaining > 0 ? "generating" : "created",
+          status: remainingChapters > 0 ? "generating" : "created",
           updated_at: new Date().toISOString(),
           metadata: {
             ...(typeof creationProject.metadata === "object" && creationProject.metadata ? creationProject.metadata : {}),
             lastDraftGenerationAt: new Date().toISOString(),
-            generatedChapterCount: ((chapters || []).length - remaining),
+            generatedChapterCount: ((chapters || []).length - remainingChapters),
           },
         })
         .eq("id", creationProject.id);
@@ -393,7 +459,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       await supabase
         .from("books")
         .update({
-          status: remaining > 0 ? "generating" : "created",
+          status: remainingChapters > 0 ? "generating" : "created",
           updated_at: new Date().toISOString(),
         })
         .eq("id", bookId)
@@ -403,9 +469,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
 
       return NextResponse.json({
         content: {
+          jobId,
           generated: generated.length,
-          remaining,
+          // successCount is cumulative across every chunk call for this job
+          // (seeded from priorProgress) -- generated.length is only this
+          // chunk's count (always 0 or 1 now), which callers can't use to
+          // show real across-chunk progress.
+          totalGenerated: successCount,
+          totalUnits,
+          remainingChapters,
           chapters: generated,
+          status: isJobDone ? "completed" : "running",
         },
       });
     } catch (error) {

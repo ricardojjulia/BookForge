@@ -5,6 +5,7 @@ import { Alert, Button, Group, Progress, Stack, Text, ThemeIcon, Loader } from "
 import { IconCheck } from "@tabler/icons-react";
 import { useRouter } from "next/navigation";
 import { getJobProgressDisplay } from "@/lib/ai/job-state";
+import { runChunkedJob } from "@/lib/ai/run-chunked-job";
 import { criticLenses } from "@/lib/critic/prompts";
 import { fetchJson } from "@/lib/http/fetch-json";
 import type { CriticLens } from "@/lib/types";
@@ -239,16 +240,31 @@ export function FocusedRewritePanel({ bookId }: { bookId: string }) {
         await runServerManagedStep(`/api/books/${bookId}/rewrite-plan`, { focusLenses: lenses }, "Planning rewrite", 0);
       }
       if (startStage <= 1) {
-        await runServerManagedStep(
+        setStageIndex(1);
+        setStageProgress(null);
+        setStatusText("Rewriting manuscript");
+        // rewrite-execute processes one bounded chunk (<=5 paragraphs) per
+        // request -- runChunkedJob reuses the same jobId across calls
+        // instead of the fire-and-forget-then-poll pattern runServerManagedStep
+        // uses for the other (still single-request) stages below.
+        await runChunkedJob(
           `/api/books/${bookId}/rewrite-execute`,
           {
-            maxUnits: 5000,
             distributeAcrossChapters: true,
             rewriteAccepted: accepted,
             rewriteExistingDrafts: accepted,
           },
           "Rewriting manuscript",
-          1,
+          (progress) => {
+            const totalUnits = (progress.totalUnits as number) || 0;
+            const attempted = (progress.attempted as number) || 0;
+            const successful = (progress.rewritten as number) || 0;
+            const failed = (progress.failed as number) || 0;
+            if (totalUnits > 1) {
+              setStageProgress(getJobProgressDisplay({ totalUnits, attempted, successful, failed }, progress.status as string));
+            }
+            setStatusText(`Rewriting manuscript: ${attempted} of ${totalUnits || "?"} paragraphs`);
+          },
         );
       }
       if (startStage <= 2) {

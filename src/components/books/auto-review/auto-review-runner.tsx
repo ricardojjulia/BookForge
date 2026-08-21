@@ -36,6 +36,7 @@ import {
 } from "@tabler/icons-react";
 import { useAutoReviewStatus } from "@/lib/hooks/use-auto-review-status";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
+import { runChunkedJob } from "@/lib/ai/run-chunked-job";
 
 type Mode = "full_review" | "make_shorter" | "make_longer";
 type StageStatus = "pending" | "running" | "done" | "failed" | "skipped";
@@ -133,8 +134,6 @@ const STRATEGY_BY_MODE: Record<Mode, { strategyId: string; strategySettings: Rec
 
 /** Maximum rewrite+critic cycles before forcing export regardless of scores. */
 const MAX_ITERATIONS = 3;
-/** Paragraphs per rewrite batch call. Tuned for LM Studio context windows. */
-const REWRITE_BATCH_SIZE = 40;
 
 /** Formats milliseconds as a human-readable duration string (e.g. "2m 14s"). */
 function fmtDuration(ms: number): string {
@@ -366,37 +365,31 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
         }
 
         const strategy = STRATEGY_BY_MODE[mode];
-        let batchResult = { ok: true, data: {} as Record<string, unknown> };
-        let totalUnitsProcessed = 0;
         let batchNumber = 0;
+        let totalUnitsProcessed = 0;
 
-        // Batch until no paragraphs remain or we hit the safety cap.
-        for (let i = 0; i < 200; i++) {
-          batchResult = await callApi(`/api/books/${bookId}/rewrite-execute`, {
-            maxUnits: REWRITE_BATCH_SIZE,
-            ...strategy,
-            distributeAcrossChapters: true,
-          });
-          if (!batchResult.ok) throw new Error(String(batchResult.data.error || "Rewrite execute failed"));
-
-          const content = batchResult.data.content as Record<string, unknown> | undefined;
-          // Route returns `rewritten` (paragraphs actually written) and `attempted` (total tried).
-          const unitsInBatch = (content?.rewritten as number) ?? (content?.attempted as number) ?? 0;
-          totalUnitsProcessed += unitsInBatch;
-          batchNumber++;
-
-          addLog(`Rewrite batch ${batchNumber}: ${unitsInBatch} paragraph(s) processed`);
-          setStatus(stageId, "running", `Batch ${batchNumber} · ${totalUnitsProcessed} total`);
-
-          if (unitsInBatch === 0) break; // nothing left to rewrite
-        }
-        result = batchResult;
+        // rewrite-execute processes one bounded chunk (<=5 paragraphs) per
+        // request -- runChunkedJob reuses the same jobId across calls,
+        // stopping once the route reports no eligible paragraphs remain.
+        await runChunkedJob(
+          `/api/books/${bookId}/rewrite-execute`,
+          { ...strategy, distributeAcrossChapters: true },
+          "Rewrite execute",
+          (progress) => {
+            batchNumber += 1;
+            // Route returns cumulative `rewritten`/`attempted` across the whole job, not just this chunk.
+            totalUnitsProcessed = (progress.rewritten as number) ?? (progress.attempted as number) ?? totalUnitsProcessed;
+            addLog(`Rewrite chunk ${batchNumber}: ${totalUnitsProcessed} paragraph(s) processed so far`);
+            setStatus(stageId, "running", `Chunk ${batchNumber} · ${totalUnitsProcessed} total`);
+          },
+        );
+        result = { ok: true, data: {} };
 
         // Record total paragraphs rewritten for analytics
         setStatus(stageId, "done", `${totalUnitsProcessed} paragraphs rewritten`);
         await advanceJob(stageId, {
           durationMs: Date.now() - startMs,
-          message: `Rewrite complete — ${totalUnitsProcessed} paragraphs in ${batchNumber} batch(es)`,
+          message: `Rewrite complete — ${totalUnitsProcessed} paragraphs in ${batchNumber} chunk(s)`,
           metadata: { batchCount: batchNumber, totalUnitsProcessed },
         });
         addLog(`✓ Done: ${stageId} · ${totalUnitsProcessed} paragraphs (${fmtDuration(Date.now() - startMs)})`);
