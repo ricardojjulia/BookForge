@@ -26,6 +26,7 @@ import {
 } from "@tabler/icons-react";
 import { createClient } from "@/lib/supabase/client";
 import { PROVIDER_META } from "@/lib/ai/providers";
+import { isManagedSaasDeployment } from "@/lib/deployment/mode";
 import { OPENROUTER_TASK_MODEL_DEFAULTS } from "@/lib/ai/model-catalog";
 import { useWizardAutoOpen, WizardShell } from "@/components/onboarding/wizard-shell";
 import { markOnboardingStepDone, ONBOARDING_STEPS } from "@/lib/onboarding/steps";
@@ -367,7 +368,7 @@ export function SetupWizard({
   const router = useRouter();
   const [opened, setOpened] = useWizardAutoOpen(needsSetup && !completedSteps.includes(ONBOARDING_STEPS.aiSetup));
   const [active, setActive] = useState(0);
-  const [engine, setEngine] = useState<Engine>("lmstudio");
+  const [engine, setEngine] = useState<Engine>(isManagedSaasDeployment() ? "cloud" : "lmstudio");
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -432,17 +433,20 @@ export function SetupWizard({
         {active === 0 && (
           <Stack>
             <Text c="dimmed" size="sm">
-              BookForge runs AI locally via LM Studio (private, free, requires your machine) or
-              via a cloud provider (instant, pay-per-use, nothing to install).
+              {isManagedSaasDeployment()
+                ? "Choose a cloud AI provider — OpenAI, Anthropic, Google, or OpenRouter. You supply your own API key."
+                : "BookForge runs AI locally via LM Studio (private, free, requires your machine) or via a cloud provider (instant, pay-per-use, nothing to install)."}
             </Text>
-            <EngineCard
-              icon={<IconCpu size={20} />}
-              title="LM Studio (local)"
-              description="Runs entirely on your machine. Your manuscript never leaves. Requires a GPU or Apple Silicon for good performance."
-              badge="Private"
-              selected={engine === "lmstudio"}
-              onClick={() => setEngine("lmstudio")}
-            />
+            {!isManagedSaasDeployment() && (
+              <EngineCard
+                icon={<IconCpu size={20} />}
+                title="LM Studio (local)"
+                description="Runs entirely on your machine. Your manuscript never leaves. Requires a GPU or Apple Silicon for good performance."
+                badge="Private"
+                selected={engine === "lmstudio"}
+                onClick={() => setEngine("lmstudio")}
+              />
+            )}
             <EngineCard
               icon={<IconCloud size={20} />}
               title="Cloud provider"

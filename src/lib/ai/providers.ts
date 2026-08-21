@@ -69,6 +69,11 @@ export const PROVIDER_META: ProviderMeta[] = [
   },
 ];
 
+// LM Studio is a local server on the user's own machine -- unreachable from
+// managed-SaaS's Vercel-hosted runtime (see CLOUD_PROVIDER_TIMEOUT_MS comment
+// below), so it's excluded wherever a managed-SaaS user picks a provider.
+export const CLOUD_PROVIDER_META: ProviderMeta[] = PROVIDER_META.filter((p) => p.id !== "lmstudio");
+
 // ---------------------------------------------------------------------------
 // Client factory
 // ---------------------------------------------------------------------------

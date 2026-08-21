@@ -22,10 +22,11 @@ import {
   type ModelRecommendation,
   type QualityProfile,
 } from "@/lib/ai/model-recommendations";
-import { PROVIDER_META } from "@/lib/ai/providers";
+import { CLOUD_PROVIDER_META, PROVIDER_META } from "@/lib/ai/providers";
 import { OPENROUTER_TASK_MODEL_DEFAULTS } from "@/lib/ai/model-catalog";
 import type { LlmProvider, LmStudioTaskKind } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
+import { isManagedSaasDeployment } from "@/lib/deployment/mode";
 
 type ExecutionMode = "auto" | "local" | "cloud";
 
@@ -112,7 +113,7 @@ export function SettingsForm({
     temperature: Number(initial?.temperature ?? 0.7),
     top_p: Number(initial?.top_p ?? 0.9),
     repeat_penalty: Number(initial?.repeat_penalty ?? 1.05),
-    llm_provider: (initial?.llm_provider as LlmProvider) || "lmstudio",
+    llm_provider: (initial?.llm_provider as LlmProvider) || (isManagedSaasDeployment() ? "openrouter" : "lmstudio"),
     llm_api_key: initial?.llm_api_key || "",
     llm_model: initial?.llm_model || "",
     llm_base_url: initial?.llm_base_url || "",
@@ -122,7 +123,7 @@ export function SettingsForm({
     llm_rewrite_model: initial?.llm_rewrite_model || "",
     llm_planning_model: initial?.llm_planning_model || "",
     llm_extraction_model: initial?.llm_extraction_model || "",
-    execution_mode: (initial?.execution_mode as ExecutionMode) || "auto",
+    execution_mode: (initial?.execution_mode as ExecutionMode) || (isManagedSaasDeployment() ? "cloud" : "auto"),
   });
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -266,6 +267,7 @@ export function SettingsForm({
     selectedProviderMeta && selectedProviderMeta.defaultModels.length > 0
       ? selectedProviderMeta.defaultModels.map((m) => ({ value: m, label: m }))
       : undefined;
+  const managedSaas = isManagedSaasDeployment();
 
   return (
     <Paper withBorder radius="md" p="xl" bg="white">
@@ -274,43 +276,45 @@ export function SettingsForm({
         {status && <Alert color="green">{status}</Alert>}
         {error && <Alert color="red">{error}</Alert>}
 
-        <Paper withBorder radius="sm" p="md" bg="#f8f7ff">
-          <Stack gap="xs">
-            <Select
-              label="Execution mode"
-              description={
-                settings.execution_mode === "auto"
-                  ? "Critic and Planning tasks use your cloud provider for stronger reasoning. Summaries, Blueprint, and Rewrite use LM Studio to keep costs low."
-                  : settings.execution_mode === "cloud"
-                    ? "All AI tasks are sent to your configured cloud provider. LM Studio is not used for execution."
-                    : "All AI tasks run through LM Studio. The cloud provider is ignored for execution."
-              }
-              data={[
-                { value: "auto", label: "Auto — optimize by task type (recommended)" },
-                { value: "local", label: "LM Studio only" },
-                { value: "cloud", label: "Cloud provider only" },
-              ]}
-              value={settings.execution_mode}
-              onChange={(value) => update("execution_mode", (value as ExecutionMode) || "auto")}
-            />
-            {settings.execution_mode !== "local" && settings.llm_provider === "lmstudio" && (
-              <Alert color="yellow" variant="light" p="xs">
-                <Text size="xs">No cloud provider configured. Set one on the Cloud Provider tab before using cloud or auto mode.</Text>
-              </Alert>
-            )}
-          </Stack>
-        </Paper>
+        {!managedSaas && (
+          <Paper withBorder radius="sm" p="md" bg="#f8f7ff">
+            <Stack gap="xs">
+              <Select
+                label="Execution mode"
+                description={
+                  settings.execution_mode === "auto"
+                    ? "Critic and Planning tasks use your cloud provider for stronger reasoning. Summaries, Blueprint, and Rewrite use LM Studio to keep costs low."
+                    : settings.execution_mode === "cloud"
+                      ? "All AI tasks are sent to your configured cloud provider. LM Studio is not used for execution."
+                      : "All AI tasks run through LM Studio. The cloud provider is ignored for execution."
+                }
+                data={[
+                  { value: "auto", label: "Auto — optimize by task type (recommended)" },
+                  { value: "local", label: "LM Studio only" },
+                  { value: "cloud", label: "Cloud provider only" },
+                ]}
+                value={settings.execution_mode}
+                onChange={(value) => update("execution_mode", (value as ExecutionMode) || "auto")}
+              />
+              {settings.execution_mode !== "local" && settings.llm_provider === "lmstudio" && (
+                <Alert color="yellow" variant="light" p="xs">
+                  <Text size="xs">No cloud provider configured. Set one on the Cloud Provider tab before using cloud or auto mode.</Text>
+                </Alert>
+              )}
+            </Stack>
+          </Paper>
+        )}
 
-        <Tabs defaultValue="lmstudio">
+        <Tabs defaultValue={managedSaas ? "cloud" : "lmstudio"}>
           <Tabs.List>
-            <Tabs.Tab value="lmstudio">LM Studio (local)</Tabs.Tab>
+            {!managedSaas && <Tabs.Tab value="lmstudio">LM Studio (local)</Tabs.Tab>}
             <Tabs.Tab value="cloud">Cloud Provider</Tabs.Tab>
           </Tabs.List>
 
           {/* ------------------------------------------------------------------ */}
-          {/* LM Studio tab                                                       */}
+          {/* LM Studio tab -- self-hosted only, see managedSaas guard above     */}
           {/* ------------------------------------------------------------------ */}
-          <Tabs.Panel value="lmstudio" pt="md">
+          {!managedSaas && <Tabs.Panel value="lmstudio" pt="md">
             <Stack>
               <Text c="dimmed" size="sm">
                 Choose a profile, then optimize against the models currently loaded in LM Studio. Model names stay
@@ -504,7 +508,7 @@ export function SettingsForm({
                 </Button>
               </Group>
             </Stack>
-          </Tabs.Panel>
+          </Tabs.Panel>}
 
           {/* ------------------------------------------------------------------ */}
           {/* Cloud provider tab                                                  */}
@@ -512,19 +516,20 @@ export function SettingsForm({
           <Tabs.Panel value="cloud" pt="md">
             <Stack>
               <Text c="dimmed" size="sm">
-                Use a hosted LLM provider instead of (or alongside) LM Studio. The selected provider will be used
-                for all AI tasks when the active provider is set to anything other than LM Studio.
+                {managedSaas
+                  ? "Choose your AI provider. All AI tasks are sent to your configured cloud provider."
+                  : "Use a hosted LLM provider instead of (or alongside) LM Studio. The selected provider will be used for all AI tasks when the active provider is set to anything other than LM Studio."}
               </Text>
               <SimpleGrid cols={{ base: 1, md: 2 }}>
                 <Select
                   label="Active provider"
-                  data={PROVIDER_META.map((p) => ({ value: p.id, label: p.label }))}
+                  data={CLOUD_PROVIDER_META.map((p) => ({ value: p.id, label: p.label }))}
                   value={settings.llm_provider}
                   onChange={(value) => {
-                    const provider = (value as LlmProvider) || "lmstudio";
+                    const provider = (value as LlmProvider) || CLOUD_PROVIDER_META[0].id;
                     update("llm_provider", provider);
                     // Always reset model to first default when switching providers
-                    const meta = PROVIDER_META.find((p) => p.id === provider);
+                    const meta = CLOUD_PROVIDER_META.find((p) => p.id === provider);
                     if (meta?.defaultModels[0]) {
                       update("llm_model", meta.defaultModels[0]);
                     }

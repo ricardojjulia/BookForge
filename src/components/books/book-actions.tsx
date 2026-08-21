@@ -156,6 +156,9 @@ export function BookActions({
   const detailedQueuePrefHydrated = useRef(false);
 
   useEffect(() => {
+    // Deliberate one-time post-mount sync from localStorage, not a cascading
+    // update loop -- see the hydration-mismatch comment above.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAlwaysShowDetailedQueue(window.localStorage.getItem("bookforge.alwaysShowDetailedQueue") === "1");
     detailedQueuePrefHydrated.current = true;
   }, []);
@@ -1369,7 +1372,7 @@ export function BookActions({
             )}, but no paragraphs currently have accepted text -- the manuscript has been reset since then.`}
           </Text>
           <Text size="sm" c="dimmed">
-            That run's critic scores and revised text no longer reflect the current manuscript. A fresh Auto-Review is recommended rather than assuming the old results still apply.
+            {"That run's critic scores and revised text no longer reflect the current manuscript. A fresh Auto-Review is recommended rather than assuming the old results still apply."}
           </Text>
         </Alert>
       )}

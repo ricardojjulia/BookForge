@@ -74,7 +74,7 @@ create table if not exists public.collaborator_invites (
   invited_by uuid references auth.users(id) on delete cascade not null,
   email text not null,
   role text not null check (role in ('viewer', 'editor', 'admin')),
-  token text not null unique default encode(gen_random_bytes(24), 'base64url'),
+  token text not null unique default encode(extensions.gen_random_bytes(24), 'base64url'),
   accepted_at timestamptz,
   expires_at timestamptz not null default (now() + interval '7 days'),
   created_at timestamptz default now()

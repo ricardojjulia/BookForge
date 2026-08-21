@@ -85,6 +85,8 @@ export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, in
         return;
       }
       const baseVersion = versionFromDate(paragraph.updated_at);
+      // Event-handler-only tie-break suffix, never read during render.
+      // eslint-disable-next-line react-hooks/purity
       const idSuffix = `${paragraphId}-${Date.now()}`;
       const result = await fetchJson<{
         content?: { conflicts?: unknown[] };

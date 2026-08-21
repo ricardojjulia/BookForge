@@ -39,6 +39,7 @@ by `NEXT_PUBLIC_DEPLOYMENT_MODE`:
 | `NEXT_PUBLIC_DEPLOYMENT_MODE` | unset, or `self_hosted` | `managed_saas` |
 | Supabase project | Your own (local or your own cloud project) | BookForge's |
 | AI cost | Your own local model, or your own provider API key(s) | Included in your subscription, metered automatically |
+| AI engine choice (Settings / onboarding) | LM Studio (local) or any cloud provider | Cloud providers only — LM Studio is hidden, since it's a server on *your* machine and unreachable from BookForge's hosted runtime |
 | Billing/subscription code | Never runs — there is nothing to bypass, since self-hosted deployments never call it | Stripe checkout, credit ledger, tier enforcement |
 | CreativeWriter collaboration panels (reader comments, contributor suggestions) | Off — no per-user entitlement system exists yet, so they're off deployment-wide rather than open to everyone | On |
 
