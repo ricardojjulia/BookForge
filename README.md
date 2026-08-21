@@ -14,7 +14,7 @@
 [![OpenRouter](https://img.shields.io/badge/Cloud%20Routing-OpenRouter-0F172A)](https://openrouter.ai/)
 [![Languages](https://img.shields.io/badge/Book%20language-Any-orange)](#language--script-support)
 
-[Quick Start](#quick-start) · [CreativeWriter](#bookforge-creativewriter) · [How-To Guide](docs/HOWTO.md) · [Changelog](CHANGELOG.md) · [Architecture](docs/ARCHITECTURE.md)
+[Quick Start](#quick-start) · [Self-Hosting Guide](docs/SELF_HOSTING.md) · [CreativeWriter](#bookforge-creativewriter) · [How-To Guide](docs/HOWTO.md) · [Changelog](CHANGELOG.md) · [Architecture](docs/ARCHITECTURE.md)
 
 </div>
 
@@ -197,17 +197,20 @@ Open `http://localhost:4747`. Start LM Studio, enable its local server, and load
 
 New to the app? **[docs/HOWTO.md](docs/HOWTO.md)** walks through real scenarios end to end: revising an existing manuscript, creating a book from an idea, tuning dialogue density, running Auto-Review, and reading the Model Status panel when something misbehaves.
 
+Running this for real — a server you keep up, a full environment variable reference, cloud provider setup, production deployment, updates, troubleshooting? **[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)** covers all of it.
+
 ### Environment
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
 # Optional — defaults shown
 LMSTUDIO_BASE_URL=http://localhost:1234/v1
 LMSTUDIO_API_KEY=lm-studio
 ```
 
-Never commit `.env.local`.
+Never commit `.env.local`. Full reference for every variable, including cloud provider keys and production deployment settings: [docs/SELF_HOSTING.md §5](docs/SELF_HOSTING.md#5-environment-variables).
 
 ---
 
