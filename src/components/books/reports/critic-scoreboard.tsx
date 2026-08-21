@@ -75,6 +75,10 @@ export function CriticScoreboard({ reports }: { reports: CriticReport[] }) {
   // number larger than the 8 possible lenses could ever produce.
   const criticReports = reports.filter((report) => isCriticReportType(report.report_type));
   const latestByLens = getLatestReportByLens(criticReports);
+  // Intentionally reads wall-clock time at render for the "recent" freshness
+  // badge -- not a ticking clock, just a snapshot compared against report
+  // timestamps each time this re-renders with new report data.
+  // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
 
   const lensRows = (Object.keys(criticLenses) as CriticLens[]).map((lens) => {
