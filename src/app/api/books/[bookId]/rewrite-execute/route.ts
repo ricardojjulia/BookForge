@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { buildJobProgress, createRevisionJobHeartbeat, getRevisionJobStatus, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
+import { buildJobProgress, createRevisionJobHeartbeat, extractJobProgress, getRevisionJobStatus, type AiJobProgress, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
 import { buildCloudRewriteModelSelection, selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
@@ -14,6 +14,12 @@ import { applyRewritePlanDefaults } from "@/lib/rewrite/plan-defaults";
 import { clampStrategySettings, getRewriteStrategy, rewriteStrategies } from "@/lib/rewrite/strategies";
 import { getExistingRevisionState, shouldSkipParagraph, type ExistingRevisionRow } from "@/lib/rewrite/eligibility";
 import { createClient } from "@/lib/supabase/server";
+
+// Complementary insurance alongside the single-chunk-per-request design below
+// (never rely on maxDuration alone to bound a request) -- leaves margin under
+// a likely 60s Vercel cap. Adjust to match the actual deployment's Vercel
+// plan/Fluid Compute configuration.
+export const maxDuration = 55;
 
 // Same low cost tier as the default rewrite model (deepseek/deepseek-v4-pro)
 // but a different provider -- see the "Rewrite-pass alternate to DeepSeek V4
@@ -243,11 +249,17 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     let jobId = body.jobId || "";
     let jobStatus = "running";
+    // Continuation calls (same jobId, one per chunk -- see the single-chunk
+    // execution below) carry the whole job's cumulative attempted/successful/
+    // failed counts and its frozen totalUnits forward from here, so the
+    // progress bar accumulates across chunks instead of resetting against a
+    // shrinking denominator on every single chunk response.
+    let priorProgress: AiJobProgress | null = null;
 
     if (jobId) {
       const { data: existingJob, error: existingJobError } = await supabase
         .from("revision_jobs")
-        .select("id,status")
+        .select("id,status,settings")
         .eq("id", jobId)
         .eq("book_id", bookId)
         .eq("created_by", user.id)
@@ -257,6 +269,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       if (existingJob.status === "completed") return NextResponse.json({ ok: true, message: "Rewrite job already completed." });
       if (existingJob.status === "failed") return NextResponse.json({ ok: true, message: "Rewrite job already failed." });
       jobStatus = String(existingJob.status || "running");
+      priorProgress = extractJobProgress(existingJob.settings);
     } else {
       // Guard against launching a second full-book rewrite while one is
       // already actively working through this book's paragraphs. Nothing
@@ -367,9 +380,16 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       if (campaignStartError) throw campaignStartError;
     }
 
-    let attempted = 0;
-    let rewritten = 0;
-    let failed = 0;
+    // Seeded from the job's prior chunk(s) when continuing (jobId passed in) so
+    // these accumulate across the whole logical job -- see priorProgress above.
+    let attempted = priorProgress?.attempted ?? 0;
+    let rewritten = priorProgress?.successful ?? 0;
+    let failed = priorProgress?.failed ?? 0;
+    // Unlike attempted/rewritten/failed, skipped/skippedExistingDrafts/
+    // skippedAccepted stay fresh-per-request: the eligibility loop below
+    // always re-scans every chapter/paragraph in the book (never just this
+    // chunk), so by construction they're already an accurate whole-book
+    // snapshot at whatever moment they're computed -- no accumulation needed.
     let skipped = 0;
     let skippedExistingDrafts = 0;
     let skippedAccepted = 0;
@@ -445,20 +465,33 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       if (body.paragraphId && chapterUnits.length > 0) break;
     }
 
+    // body.maxUnits caps the WHOLE job's total scope, not this one request's
+    // freshly-recomputed pool -- eligibility is re-derived from scratch on
+    // every chunk call, so re-applying the raw maxUnits each time would keep
+    // re-capping to (say) 12 units of an ever-refilling multi-hundred-unit
+    // pool instead of ever converging on "12 units total, then done."
+    // Subtracting what's already been attempted (seeded from priorProgress)
+    // turns it into a remaining-budget cap instead.
+    const maxUnitsRemaining = body.maxUnits ? Math.max(0, body.maxUnits - attempted) : undefined;
     const eligibleUnits = limitEligibleUnits(
       body.distributeAcrossChapters ? roundRobinUnits(eligibleByChapter) : eligibleByChapter.flat(),
-      body.maxUnits,
+      maxUnitsRemaining,
     );
-    attempted = 0;
+    // Frozen on whichever chunk call first sees this job -- eligibleUnits
+    // shrinks on every later chunk call as prior work lands revision_versions
+    // rows, so re-deriving totalUnits from it each time would make the
+    // progress bar's denominator shrink mid-run instead of the numerator
+    // climbing toward a stable target.
+    const totalUnits = priorProgress?.totalUnits || eligibleUnits.length;
     jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
       taskName: "Full-book rewrite draft",
-      currentUnit: eligibleUnits.length ? `Rewrite unit 1 of ${eligibleUnits.length}` : "No eligible units",
-      totalUnits: eligibleUnits.length,
-      attempted: 0,
-      successful: 0,
-      failed: 0,
+      currentUnit: eligibleUnits.length ? `Rewrite unit ${attempted + 1} of ${totalUnits}` : "No eligible units",
+      totalUnits,
+      attempted,
+      successful: rewritten,
+      failed,
       skipped,
-      startedAt,
+      startedAt: priorProgress?.startedAt || startedAt,
       estimatedSecondsPerUnit: estimateSecondsPerRewriteUnit(model),
       message:
         skipped > 0
@@ -549,131 +582,164 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       return { unit, parsed, revisedText, emptyCompletionAttempts: maxCompletionAttempts };
     }
 
-    for (let chunkStart = 0; chunkStart < eligibleUnits.length; ) {
-      if (hardError) break;
+    // Exactly one chapter-bounded batch (<=CONCURRENCY paragraphs) per request --
+    // never the full eligibleUnits list -- so a single HTTP request can't run
+    // long enough to hit Vercel's function timeout on a full-book pass. The
+    // caller (runChunkedJob, src/lib/ai/run-chunked-job.ts) is responsible for
+    // calling this route again with the same jobId while remainingUnits > 0;
+    // eligibleUnits is re-derived fresh from durable state (revision_versions
+    // rows) on every such call, so a completed paragraph never gets
+    // reprocessed and there's no separate cursor to keep in sync.
+    let chunkProcessedCount = 0;
+    if (eligibleUnits.length > 0 && !hardError) {
       const pauseStatus = await waitWhileRevisionJobPaused(supabase, jobId);
-      if (pauseStatus === "cancelled") break;
-      const currentStatus = await getRevisionJobStatus(supabase, jobId);
-      if (currentStatus === "cancelled") break;
+      const currentStatus = pauseStatus === "cancelled" ? "cancelled" : await getRevisionJobStatus(supabase, jobId);
 
-      // Never let a chunk span two chapters: chapters are rewritten strictly one
-      // after another (chapter N fully finishes before N+1 starts) to preserve
-      // paragraph-to-paragraph and chapter-to-chapter drift/consistency. Only
-      // paragraphs within the same chapter are ever run concurrently.
-      const chunkStartIndex = chunkStart;
-      const chunk = [eligibleUnits[chunkStartIndex]];
-      while (
-        chunk.length < CONCURRENCY &&
-        chunkStartIndex + chunk.length < eligibleUnits.length &&
-        eligibleUnits[chunkStartIndex + chunk.length].chapter.id === chunk[0].chapter.id
-      ) {
-        chunk.push(eligibleUnits[chunkStartIndex + chunk.length]);
-      }
-      chunkStart += chunk.length;
-      const heartbeat = createRevisionJobHeartbeat(supabase, jobId, jobSettings, {
-        currentUnit: `Rewrite units ${chunkStartIndex + 1}-${chunkStartIndex + chunk.length} of ${eligibleUnits.length}`,
-        totalUnits: eligibleUnits.length,
-        attempted,
-        successful: rewritten,
-        failed,
-        skipped,
-      });
-      const settled = await Promise.allSettled(chunk.map((unit) => runUnit(unit)));
-      heartbeat.stop();
-
-      for (const [chunkIndex, result] of settled.entries()) {
-        const unit = chunk[chunkIndex];
-        const { chapter, paragraph } = unit;
-        const unitLabel = `chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`;
-        attempted += 1;
-
-        if (result.status === "rejected") {
-          failed += 1;
-          const message = getErrorMessage(result.reason);
-          failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
-          hardError = hardError || result.reason;
-          jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
-            currentUnit: `Failed at ${unitLabel}`,
-            totalUnits: eligibleUnits.length,
-            attempted,
-            successful: rewritten,
-            failed,
-            skipped,
-            message,
-            failedUnits: failedUnitsLog,
-          });
-          break;
+      if (currentStatus !== "cancelled") {
+        // Never let a chunk span two chapters: chapters are rewritten strictly one
+        // after another (chapter N fully finishes before N+1 starts) to preserve
+        // paragraph-to-paragraph and chapter-to-chapter drift/consistency. Only
+        // paragraphs within the same chapter are ever run concurrently.
+        const chunk = [eligibleUnits[0]];
+        while (
+          chunk.length < CONCURRENCY &&
+          chunk.length < eligibleUnits.length &&
+          eligibleUnits[chunk.length].chapter.id === chunk[0].chapter.id
+        ) {
+          chunk.push(eligibleUnits[chunk.length]);
         }
-
-        const { parsed, revisedText, emptyCompletionAttempts } = result.value;
-        if (!revisedText) {
-          failed += 1;
-          const message = `Model returned an empty completion after ${emptyCompletionAttempts} attempt(s); paragraph left untouched.`;
-          failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
-          jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
-            currentUnit: `Empty completion at ${unitLabel}`,
-            totalUnits: eligibleUnits.length,
-            attempted,
-            successful: rewritten,
-            failed,
-            skipped,
-            message,
-            failedUnits: failedUnitsLog,
-          });
-          continue;
-        }
-
-        const continuityWarnings = extractArray(parsed, "continuityWarnings");
-        const { error: versionError } = await supabase.from("revision_versions").insert({
-          revision_job_id: jobId,
-          book_id: bookId,
-          chapter_id: chapter.id,
-          scene_id: paragraph.scene_id,
-          paragraph_id: paragraph.id,
-          original_text: paragraph.original_text,
-          revised_text: revisedText,
-          revision_notes: extractString(parsed, "revisionNotes") || "Full-book rewrite draft.",
-          continuity_warnings: continuityWarnings,
-        });
-        if (versionError) {
-          failed += 1;
-          const message = getErrorMessage(versionError);
-          failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
-          hardError = hardError || versionError;
-          jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
-            currentUnit: `Failed to save ${unitLabel}`,
-            totalUnits: eligibleUnits.length,
-            attempted,
-            successful: rewritten,
-            failed,
-            skipped,
-            message,
-            failedUnits: failedUnitsLog,
-          });
-          break;
-        }
-
-        rewritten += 1;
-        warnings.push(...continuityWarnings);
-        jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
-          currentUnit:
-            attempted >= eligibleUnits.length
-              ? "Finalizing rewrite job"
-              : `Rewrite unit ${attempted + 1} of ${eligibleUnits.length}`,
-          totalUnits: eligibleUnits.length,
+        chunkProcessedCount = chunk.length;
+        const heartbeat = createRevisionJobHeartbeat(supabase, jobId, jobSettings, {
+          currentUnit: `Rewrite units ${attempted + 1}-${attempted + chunk.length} of ${totalUnits}`,
+          totalUnits,
           attempted,
           successful: rewritten,
           failed,
           skipped,
-          failedUnits: failedUnitsLog,
         });
+        const settled = await Promise.allSettled(chunk.map((unit) => runUnit(unit)));
+        heartbeat.stop();
+
+        for (const [chunkIndex, result] of settled.entries()) {
+          const unit = chunk[chunkIndex];
+          const { chapter, paragraph } = unit;
+          const unitLabel = `chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`;
+          attempted += 1;
+
+          if (result.status === "rejected") {
+            failed += 1;
+            const message = getErrorMessage(result.reason);
+            failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
+            hardError = hardError || result.reason;
+            jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+              currentUnit: `Failed at ${unitLabel}`,
+              totalUnits,
+              attempted,
+              successful: rewritten,
+              failed,
+              skipped,
+              message,
+              failedUnits: failedUnitsLog,
+            });
+            break;
+          }
+
+          const { parsed, revisedText, emptyCompletionAttempts } = result.value;
+          if (!revisedText) {
+            failed += 1;
+            const message = `Model returned an empty completion after ${emptyCompletionAttempts} attempt(s); paragraph left untouched.`;
+            failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
+            jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+              currentUnit: `Empty completion at ${unitLabel}`,
+              totalUnits,
+              attempted,
+              successful: rewritten,
+              failed,
+              skipped,
+              message,
+              failedUnits: failedUnitsLog,
+            });
+            continue;
+          }
+
+          const continuityWarnings = extractArray(parsed, "continuityWarnings");
+          const { error: versionError } = await supabase.from("revision_versions").insert({
+            revision_job_id: jobId,
+            book_id: bookId,
+            chapter_id: chapter.id,
+            scene_id: paragraph.scene_id,
+            paragraph_id: paragraph.id,
+            original_text: paragraph.original_text,
+            revised_text: revisedText,
+            revision_notes: extractString(parsed, "revisionNotes") || "Full-book rewrite draft.",
+            continuity_warnings: continuityWarnings,
+          });
+          if (versionError) {
+            failed += 1;
+            const message = getErrorMessage(versionError);
+            failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
+            hardError = hardError || versionError;
+            jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+              currentUnit: `Failed to save ${unitLabel}`,
+              totalUnits,
+              attempted,
+              successful: rewritten,
+              failed,
+              skipped,
+              message,
+              failedUnits: failedUnitsLog,
+            });
+            break;
+          }
+
+          rewritten += 1;
+          warnings.push(...continuityWarnings);
+          jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+            currentUnit: `Rewrite unit ${attempted} of ${totalUnits}`,
+            totalUnits,
+            attempted,
+            successful: rewritten,
+            failed,
+            skipped,
+            failedUnits: failedUnitsLog,
+          });
+        }
       }
     }
 
     if (hardError) throw hardError;
 
+    const remainingUnits = Math.max(0, eligibleUnits.length - chunkProcessedCount);
+    const statusAfterChunk = await getRevisionJobStatus(supabase, jobId);
+    const isCancelledAfterChunk = statusAfterChunk === "cancelled";
+
+    if (!isCancelledAfterChunk && remainingUnits > 0) {
+      // More eligible work remains -- stop here rather than looping into
+      // another chunk within this same request. The job stays "running"; the
+      // caller is expected to call this route again with the same jobId.
+      // None of the "job finished" bookkeeping below (coherence report,
+      // campaign stats, completed_at) runs until a chunk call finds zero
+      // remaining eligible units.
+      return NextResponse.json({
+        content: {
+          revisionJobId: jobId,
+          jobId,
+          model,
+          attempted,
+          rewritten,
+          failed,
+          skipped,
+          skippedExistingDrafts,
+          skippedAccepted,
+          totalUnits,
+          remainingUnits,
+          status: "running",
+        },
+      });
+    }
+
     const completedAt = new Date().toISOString();
-    const finalStatus = await getRevisionJobStatus(supabase, jobId);
+    const finalStatus = isCancelledAfterChunk ? "cancelled" : statusAfterChunk;
     const completedStatus = finalStatus === "cancelled" ? "cancelled" : "completed";
     const { error: updateError } = await supabase
       .from("revision_jobs")
@@ -705,13 +771,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           progress: buildJobProgress({
             taskName: "Full-book rewrite draft",
             currentUnit: completedStatus === "cancelled" ? "Cancelled" : "Complete",
-            totalUnits: eligibleUnits.length,
+            totalUnits,
             attempted,
             successful: rewritten,
             failed,
             skipped,
             failedUnits: failedUnitsLog,
-            startedAt,
+            startedAt: priorProgress?.startedAt || startedAt,
             completedAt,
             estimatedSecondsPerUnit: estimateSecondsPerRewriteUnit(model),
             message:
@@ -756,6 +822,16 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       if (campaignUpdateError) throw campaignUpdateError;
     }
 
+    // Known limitation of the chunking refactor, flagged not hidden:
+    // `warnings` only holds THIS final chunk's continuity warnings, not the
+    // whole job's -- unlike attempted/rewritten/failed, warnings were never
+    // persisted anywhere between chunks (only their count, via
+    // `warningCount`), so there's nothing to seed them from here. A book
+    // whose earlier chunks produced continuity warnings will undercount them
+    // in this report. attempted/rewritten/failed/skipped counts above remain
+    // fully accurate (cumulative), and this cap already existed pre-refactor
+    // (`.slice(0, 100)`), so this narrows an existing imprecision rather than
+    // introducing a new class of one.
     await supabase.from("coherence_reports").insert({
       book_id: bookId,
       report_type: "rewrite_execution",
@@ -769,7 +845,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         skippedExistingDrafts,
         skippedAccepted,
         continuityWarnings: warnings.slice(0, 100),
-        startedAt,
+        startedAt: priorProgress?.startedAt || startedAt,
         completedAt,
         nextStep: "Review revision versions, accept or reject changes, then rerun all BookForge Critic lenses.",
       },
@@ -778,6 +854,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     return NextResponse.json({
       content: {
         revisionJobId: jobId,
+        jobId,
         model,
         attempted,
         rewritten,
@@ -785,6 +862,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         skipped,
         skippedExistingDrafts,
         skippedAccepted,
+        totalUnits,
+        remainingUnits: 0,
         continuityWarningCount: warnings.length,
         status: completedStatus,
       },
@@ -816,7 +895,11 @@ function roundRobinUnits(groups: RewriteUnit[][]) {
 }
 
 function limitEligibleUnits(units: RewriteUnit[], maxUnits?: number) {
-  return maxUnits ? units.slice(0, maxUnits) : units;
+  // maxUnits === 0 (whole job's budget already exhausted, see
+  // maxUnitsRemaining above) must return an empty list, not the unbounded
+  // one -- a `maxUnits ? ... : units` ternary would treat 0 as falsy and
+  // silently ignore the cap.
+  return maxUnits === undefined ? units : units.slice(0, maxUnits);
 }
 
 async function getRetryParagraphIds(

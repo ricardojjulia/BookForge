@@ -73,6 +73,16 @@ export const PROVIDER_META: ProviderMeta[] = [
 // Client factory
 // ---------------------------------------------------------------------------
 
+// Comfortably under rewrite-execute/generate-draft/critic's `maxDuration = 55`
+// -- without this, the OpenAI SDK's own default (10 minutes) means a single
+// slow cloud call can run well past whatever Vercel timeout the route has,
+// guaranteeing a hard mid-request kill instead of a clean, retryable failure.
+// Scoped to cloud providers only: local LM Studio calls aren't reachable from
+// Vercel's serverless functions at all (self-hosted deployments that use it
+// don't run under any Vercel timeout in the first place), and a large local
+// model on modest hardware may legitimately need longer than this per call.
+const CLOUD_PROVIDER_TIMEOUT_MS = 45_000;
+
 /**
  * Returns an OpenAI SDK client configured for the chosen provider.
  * Anthropic supports the OpenAI-compatible messages API at
@@ -84,6 +94,7 @@ export function createProviderClient(settings: StandardLlmSettings): OpenAI {
       return new OpenAI({
         apiKey: settings.apiKey || process.env.OPENAI_API_KEY || "",
         baseURL: settings.baseUrl,
+        timeout: CLOUD_PROVIDER_TIMEOUT_MS,
       });
 
     case "anthropic": {
@@ -95,6 +106,7 @@ export function createProviderClient(settings: StandardLlmSettings): OpenAI {
           "anthropic-version": "2023-06-01",
           "x-api-key": anthropicKey,
         },
+        timeout: CLOUD_PROVIDER_TIMEOUT_MS,
       });
     }
 
@@ -104,6 +116,7 @@ export function createProviderClient(settings: StandardLlmSettings): OpenAI {
         baseURL:
           settings.baseUrl ||
           "https://generativelanguage.googleapis.com/v1beta/openai",
+        timeout: CLOUD_PROVIDER_TIMEOUT_MS,
       });
 
     case "openrouter":
@@ -114,6 +127,7 @@ export function createProviderClient(settings: StandardLlmSettings): OpenAI {
           "HTTP-Referer": process.env.OPENROUTER_APP_URL || "https://bookforge.app",
           "X-Title": "BookForge",
         },
+        timeout: CLOUD_PROVIDER_TIMEOUT_MS,
       });
 
     case "lmstudio":
