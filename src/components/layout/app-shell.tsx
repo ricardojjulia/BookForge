@@ -68,7 +68,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setSigningOut(true);
     try {
       await createClient().auth.signOut();
-      router.push("/auth");
+      router.push("/");
       router.refresh();
     } finally {
       setSigningOut(false);

@@ -222,7 +222,7 @@ export function AccountPageClient({ email, displayName, billing }: Props) {
       const data = await res.json() as { error?: string };
       if (!res.ok) throw new Error(data.error || "Failed.");
       await supabase.auth.signOut();
-      router.push("/auth");
+      router.push("/");
     } catch (e) {
       setDeleteMsg({ ok: false, text: e instanceof Error ? e.message : "Failed." });
       setDeleteLoading(false);
