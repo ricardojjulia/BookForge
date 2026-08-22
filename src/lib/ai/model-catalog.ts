@@ -232,6 +232,41 @@ export const OPENROUTER_TASK_MODEL_DEFAULTS: Record<LmStudioTaskKind, string> = 
   planning: "anthropic/claude-haiku-4.5",
 };
 
+/**
+ * Per-task fallback order used to resolve OPENROUTER_TASK_MODEL_DEFAULTS down
+ * to a model the caller's subscription tier actually allows -- see
+ * resolveManagedSaasTaskModelDefaults(). Each list's first entry mirrors this
+ * file's own recommended pick above (re-pointed at "google/gemini-2.5-flash",
+ * the id that actually exists in subscription_tier_models/model_pricing --
+ * "-lite" doesn't); every list ends in deepseek-v4-pro, the one model every
+ * tier allows for every task (see 202608200001_subscription_tiers.sql).
+ */
+const MANAGED_SAAS_TASK_MODEL_PRIORITY: Record<LmStudioTaskKind, string[]> = {
+  critic: ["google/gemini-2.5-flash", "deepseek/deepseek-v4-pro"],
+  extraction: ["google/gemini-2.5-flash", "deepseek/deepseek-v4-pro"],
+  rewrite: ["deepseek/deepseek-v4-pro"],
+  planning: ["anthropic/claude-haiku-4.5", "deepseek/deepseek-v4-pro"],
+};
+
+/**
+ * "Optimize per feature"'s managed-SaaS-safe defaults: resolves each task to
+ * the best model actually in `allowedModels` (the caller's real tier
+ * allowlist, task='*' rows from subscription_tier_models) instead of the
+ * static OPENROUTER_TASK_MODEL_DEFAULTS, which has no idea what a given
+ * user's plan permits and will happily hand back a model the tier-gate then
+ * rejects at call time (e.g. Claude Haiku on Starter). Falls back to
+ * deepseek-v4-pro when nothing else in a task's priority list is allowed --
+ * that model is on every tier's allowlist, so this never returns something
+ * ungated.
+ */
+export function resolveManagedSaasTaskModelDefaults(allowedModels: ReadonlySet<string>): Record<LmStudioTaskKind, string> {
+  const result = {} as Record<LmStudioTaskKind, string>;
+  for (const task of Object.keys(MANAGED_SAAS_TASK_MODEL_PRIORITY) as LmStudioTaskKind[]) {
+    result[task] = MANAGED_SAAS_TASK_MODEL_PRIORITY[task].find((m) => allowedModels.has(m)) ?? "deepseek/deepseek-v4-pro";
+  }
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Local (LM Studio) model families
 // ---------------------------------------------------------------------------

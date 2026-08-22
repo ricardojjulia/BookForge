@@ -23,10 +23,11 @@ import {
   type QualityProfile,
 } from "@/lib/ai/model-recommendations";
 import { CLOUD_PROVIDER_META, PROVIDER_META } from "@/lib/ai/providers";
-import { OPENROUTER_TASK_MODEL_DEFAULTS } from "@/lib/ai/model-catalog";
+import { OPENROUTER_TASK_MODEL_DEFAULTS, resolveManagedSaasTaskModelDefaults } from "@/lib/ai/model-catalog";
 import type { LlmProvider, LmStudioTaskKind } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
 import { isManagedSaasDeployment } from "@/lib/deployment/mode";
+import { fetchAllowedModelsForCurrentUser } from "@/lib/subscription/client-tier-models";
 
 type ExecutionMode = "auto" | "local" | "cloud";
 
@@ -613,16 +614,19 @@ export function SettingsForm({
                 label="Optimize per feature"
                 description="Use a cheap fast model for high-volume calls (critics, extraction) and a stronger one for full-book rewrites, instead of one model for everything. Falls back to the model above for anything left blank."
                 checked={perFeature}
-                onChange={(event) => {
+                onChange={async (event) => {
                   const checked = event.currentTarget.checked;
                   setPerFeature(checked);
                   if (checked && !settings.llm_critic_model && !settings.llm_rewrite_model && settings.llm_provider === "openrouter") {
+                    const defaults = managedSaas
+                      ? resolveManagedSaasTaskModelDefaults(await fetchAllowedModelsForCurrentUser())
+                      : OPENROUTER_TASK_MODEL_DEFAULTS;
                     setSettings((current) => ({
                       ...current,
-                      llm_critic_model: OPENROUTER_TASK_MODEL_DEFAULTS.critic,
-                      llm_rewrite_model: OPENROUTER_TASK_MODEL_DEFAULTS.rewrite,
-                      llm_planning_model: OPENROUTER_TASK_MODEL_DEFAULTS.planning,
-                      llm_extraction_model: OPENROUTER_TASK_MODEL_DEFAULTS.extraction,
+                      llm_critic_model: defaults.critic,
+                      llm_rewrite_model: defaults.rewrite,
+                      llm_planning_model: defaults.planning,
+                      llm_extraction_model: defaults.extraction,
                     }));
                   }
                 }}
