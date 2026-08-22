@@ -364,7 +364,7 @@ export default async function Home() {
           <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 40, flexWrap: "wrap" }}>
             <div>
               <div style={{ fontFamily: "var(--font-plex-mono)", fontSize: 11.5, letterSpacing: ".18em", textTransform: "uppercase", color: "#7FC0FF" }}>
-                The forge, in four heats
+                Four steps, start to finish
               </div>
               <h2
                 style={{
@@ -377,7 +377,7 @@ export default async function Home() {
                   maxWidth: "20em",
                 }}
               >
-                From messy draft to submission-ready in one pass.
+                Import, critique, revise, and export — with full author control at every step.
               </h2>
             </div>
             <p style={{ fontSize: 16.5, lineHeight: 1.65, color: "rgba(242,244,249,.6)", maxWidth: "26em", margin: 0 }}>
