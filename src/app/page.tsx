@@ -16,7 +16,14 @@ const STEPS = [
   { n: "04", title: "Ship", text: "Export clean, with a full revision history you can hand to an agent or editor.", tint: true },
 ];
 
-const MARQUEE_ITEMS = ["Debut novelists", "Indie presses", "Ghostwriting studios", "Series authors", "Developmental editors"];
+const MARQUEE_ITEMS = [
+  "Structured manuscript import",
+  "8 Critic evaluator lenses",
+  "Local AI via LM Studio",
+  "Full revision history",
+  "Self-hosted or managed",
+  "AGPL-3.0 open source",
+];
 
 export default async function Home() {
   let loggedIn = false;
