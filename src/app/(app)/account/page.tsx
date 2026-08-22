@@ -37,13 +37,19 @@ export default async function AccountPage() {
   if (managedSaas) {
     const [{ data: tiers }, { data: subscription }, { data: balance }] = await Promise.all([
       supabase.from("subscription_tiers").select("id,display_name,monthly_price_usd_cents").eq("is_active", true).order("sort_order"),
-      supabase.from("user_subscriptions").select("tier_id,status").eq("user_id", user.id).maybeSingle(),
+      supabase.from("user_subscriptions").select("tier_id,status,trial_ends_at").eq("user_id", user.id).maybeSingle(),
       supabase.from("user_credit_balances").select("balance_usd_micros").eq("user_id", user.id).maybeSingle(),
     ]);
+    const isTrialing = subscription?.status === "trialing";
+    const trialEndsAt = subscription?.trial_ends_at ?? null;
+    // Server component, route is force-dynamic -- computed fresh per request, not during a render pass.
+    // eslint-disable-next-line react-hooks/purity
+    const trialActive = isTrialing && !!trialEndsAt && new Date(trialEndsAt).getTime() > Date.now();
     billing = {
       tiers: tiers || [],
       currentTierId: subscription?.status === "active" ? subscription.tier_id : null,
       balanceUsdMicros: balance?.balance_usd_micros ?? null,
+      trial: isTrialing ? { active: trialActive, endsAt: trialEndsAt, tierId: subscription?.tier_id ?? null } : null,
     };
   }
 
