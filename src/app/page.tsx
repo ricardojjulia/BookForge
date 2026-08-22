@@ -1,6 +1,7 @@
 import { IBM_Plex_Mono, IBM_Plex_Sans, Space_Grotesk } from "next/font/google";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
+import { isManagedSaasDeployment } from "@/lib/deployment/mode";
 import { CriticLensDemo } from "@/components/landing/critic-lens-demo";
 
 export const dynamic = "force-dynamic";
@@ -16,14 +17,16 @@ const STEPS = [
   { n: "04", title: "Ship", text: "Export clean, with a full revision history you can hand to an agent or editor.", tint: true },
 ];
 
-const MARQUEE_ITEMS = [
-  "Structured manuscript import",
-  "8 Critic evaluator lenses",
-  "Local AI via LM Studio",
-  "Full revision history",
-  "Self-hosted or managed",
-  "AGPL-3.0 open source",
-];
+function getMarqueeItems(managedSaas: boolean): string[] {
+  return [
+    "Structured manuscript import",
+    "8 Critic evaluator lenses",
+    managedSaas ? "OpenAI, Anthropic, Google & OpenRouter" : "Local AI via LM Studio",
+    "Full revision history",
+    "Self-hosted or managed",
+    "AGPL-3.0 open source",
+  ];
+}
 
 export default async function Home() {
   let loggedIn = false;
@@ -36,6 +39,7 @@ export default async function Home() {
   }
   const importHref = loggedIn ? "/books/new" : "/auth";
   const ctaLabel = loggedIn ? "Import Manuscript" : "Start forging free";
+  const managedSaas = isManagedSaasDeployment();
 
   return (
     <div className={`${spaceGrotesk.variable} ${plexSans.variable} ${plexMono.variable}`}>
@@ -349,7 +353,7 @@ export default async function Home() {
           >
             {[0, 1].map((rep) => (
               <div key={rep} style={{ display: "flex", gap: 56 }}>
-                {MARQUEE_ITEMS.map((item) => (
+                {getMarqueeItems(managedSaas).map((item) => (
                   <span key={item} style={{ display: "flex", gap: 56 }}>
                     <span>{item}</span>
                     <span style={{ color: "#F0C46A" }}>◆</span>
@@ -430,12 +434,14 @@ export default async function Home() {
               Your book never leaves your control.
             </h3>
             <p style={{ margin: 0, fontSize: 16.5, lineHeight: 1.65, color: "rgba(242,244,249,.65)", maxWidth: "46em" }}>
-              AI runs locally through LM Studio by default — your manuscript stays on your machine. Need cloud
-              speed for a full-book pass? Connect OpenAI, Anthropic or Google from Settings, per project, and
-              switch back whenever you like. Your text lives in your own Supabase project, not our warehouse.
+              {managedSaas
+                ? "Choose OpenAI, Anthropic, Google, or OpenRouter from Settings, per project, and switch anytime. Your data is isolated to your account by row-level security in our database — no other customer can ever read it."
+                : "AI runs locally through LM Studio by default — your manuscript stays on your machine. Need cloud speed for a full-book pass? Connect OpenAI, Anthropic or Google from Settings, per project, and switch back whenever you like. Your text lives in your own Supabase project, not our warehouse."}
             </p>
             <div style={{ display: "flex", gap: 10, marginTop: 24, flexWrap: "wrap", fontFamily: "var(--font-plex-mono)", fontSize: 12, letterSpacing: ".1em", textTransform: "uppercase" }}>
-              <span style={{ padding: "8px 14px", borderRadius: 999, border: "1px solid rgba(127,192,255,.3)", color: "#7FC0FF" }}>Local by default</span>
+              <span style={{ padding: "8px 14px", borderRadius: 999, border: "1px solid rgba(127,192,255,.3)", color: "#7FC0FF" }}>
+                {managedSaas ? "Isolated to your account" : "Local by default"}
+              </span>
               <span style={{ padding: "8px 14px", borderRadius: 999, border: "1px solid rgba(127,192,255,.3)", color: "#7FC0FF" }}>No training on your work</span>
               <span style={{ padding: "8px 14px", borderRadius: 999, border: "1px solid rgba(127,192,255,.3)", color: "#7FC0FF" }}>Auditable history</span>
             </div>
