@@ -243,19 +243,31 @@ function CloudStep({
   const [taskModels, setTaskModels] = useState<TaskModels>({});
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; error?: string } | null>(null);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const managedSaas = isManagedSaasDeployment();
 
-  async function handleProviderChange(p: CloudProvider) {
+  function handleProviderChange(p: CloudProvider) {
     setProvider(p);
     setModel(CLOUD_MODELS[p][0]);
     setPerFeature(p === "openrouter");
     if (p !== "openrouter") {
       setTaskModels({});
-    } else if (isManagedSaasDeployment()) {
-      setTaskModels(resolveManagedSaasTaskModelDefaults(await fetchAllowedModelsForCurrentUser()));
-    } else {
+    } else if (!managedSaas) {
+      // Self-hosted: no tier gating, no network round-trip -- safe to fill instantly.
       setTaskModels(OPENROUTER_TASK_MODEL_DEFAULTS);
+    } else {
+      setTaskModels({});
     }
     setResult(null);
+  }
+
+  async function getMyModels() {
+    setFetchingModels(true);
+    try {
+      setTaskModels(resolveManagedSaasTaskModelDefaults(await fetchAllowedModelsForCurrentUser()));
+    } finally {
+      setFetchingModels(false);
+    }
   }
 
   async function test() {
@@ -309,17 +321,11 @@ function CloudStep({
         label="Optimize per feature"
         description="Use a cheap fast model for high-volume calls (critics, extraction) and a stronger one for full-book rewrites, instead of one model for everything."
         checked={perFeature}
-        onChange={async (e) => {
+        onChange={(e) => {
           const checked = e.currentTarget.checked;
           setPerFeature(checked);
-          if (checked && Object.keys(taskModels).length === 0) {
-            if (provider !== "openrouter") {
-              setTaskModels(Object.fromEntries(TASK_INFO.map((t) => [t.task, model])));
-            } else if (isManagedSaasDeployment()) {
-              setTaskModels(resolveManagedSaasTaskModelDefaults(await fetchAllowedModelsForCurrentUser()));
-            } else {
-              setTaskModels(OPENROUTER_TASK_MODEL_DEFAULTS);
-            }
+          if (checked && Object.keys(taskModels).length === 0 && provider !== "openrouter") {
+            setTaskModels(Object.fromEntries(TASK_INFO.map((t) => [t.task, model])));
           }
         }}
       />
@@ -327,6 +333,16 @@ function CloudStep({
       {perFeature && (
         <Paper withBorder radius="sm" p="md" bg="#fbfaf8">
           <Stack gap="sm">
+            {managedSaas && provider === "openrouter" && (
+              <Group justify="space-between" wrap="nowrap">
+                <Text size="sm" c="dimmed">
+                  Fills in the fields below with the best model your plan allows for each task.
+                </Text>
+                <Button variant="light" color="grape" size="xs" loading={fetchingModels} onClick={getMyModels}>
+                  Get my models
+                </Button>
+              </Group>
+            )}
             {TASK_INFO.map(({ task, label, hint }) => (
               <Select
                 key={task}
