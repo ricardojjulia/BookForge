@@ -46,12 +46,21 @@ export async function POST(request: Request) {
     if (!customerId) {
       const customer = await stripe.customers.create({ email: user.email, metadata: { supabase_user_id: user.id } });
       customerId = customer.id;
-      await admin
-        .from("user_subscriptions")
-        .upsert(
-          { user_id: user.id, stripe_customer_id: customerId, status: "incomplete", updated_at: new Date().toISOString() },
-          { onConflict: "user_id" },
-        );
+      if (existingSubscription) {
+        // A row already exists here in practice (the signup trigger creates
+        // one for every user) -- only attach the new Stripe customer id.
+        // Never touch status/tier_id: overwriting a still-valid 'trialing'
+        // row to 'incomplete' would revoke trial access the instant someone
+        // merely opens checkout, before they've decided whether to pay.
+        await admin
+          .from("user_subscriptions")
+          .update({ stripe_customer_id: customerId, updated_at: new Date().toISOString() })
+          .eq("user_id", user.id);
+      } else {
+        await admin
+          .from("user_subscriptions")
+          .insert({ user_id: user.id, stripe_customer_id: customerId, status: "incomplete", updated_at: new Date().toISOString() });
+      }
     }
 
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;

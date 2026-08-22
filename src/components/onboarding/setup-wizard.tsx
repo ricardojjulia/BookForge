@@ -27,7 +27,8 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { PROVIDER_META } from "@/lib/ai/providers";
 import { isManagedSaasDeployment } from "@/lib/deployment/mode";
-import { OPENROUTER_TASK_MODEL_DEFAULTS } from "@/lib/ai/model-catalog";
+import { OPENROUTER_TASK_MODEL_DEFAULTS, resolveManagedSaasTaskModelDefaults } from "@/lib/ai/model-catalog";
+import { fetchAllowedModelsForCurrentUser } from "@/lib/subscription/client-tier-models";
 import { useWizardAutoOpen, WizardShell } from "@/components/onboarding/wizard-shell";
 import { markOnboardingStepDone, ONBOARDING_STEPS } from "@/lib/onboarding/steps";
 import type { LmStudioTaskKind } from "@/lib/types";
@@ -243,11 +244,17 @@ function CloudStep({
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; error?: string } | null>(null);
 
-  function handleProviderChange(p: CloudProvider) {
+  async function handleProviderChange(p: CloudProvider) {
     setProvider(p);
     setModel(CLOUD_MODELS[p][0]);
     setPerFeature(p === "openrouter");
-    setTaskModels(p === "openrouter" ? OPENROUTER_TASK_MODEL_DEFAULTS : {});
+    if (p !== "openrouter") {
+      setTaskModels({});
+    } else if (isManagedSaasDeployment()) {
+      setTaskModels(resolveManagedSaasTaskModelDefaults(await fetchAllowedModelsForCurrentUser()));
+    } else {
+      setTaskModels(OPENROUTER_TASK_MODEL_DEFAULTS);
+    }
     setResult(null);
   }
 
@@ -302,11 +309,17 @@ function CloudStep({
         label="Optimize per feature"
         description="Use a cheap fast model for high-volume calls (critics, extraction) and a stronger one for full-book rewrites, instead of one model for everything."
         checked={perFeature}
-        onChange={(e) => {
+        onChange={async (e) => {
           const checked = e.currentTarget.checked;
           setPerFeature(checked);
           if (checked && Object.keys(taskModels).length === 0) {
-            setTaskModels(provider === "openrouter" ? OPENROUTER_TASK_MODEL_DEFAULTS : Object.fromEntries(TASK_INFO.map((t) => [t.task, model])));
+            if (provider !== "openrouter") {
+              setTaskModels(Object.fromEntries(TASK_INFO.map((t) => [t.task, model])));
+            } else if (isManagedSaasDeployment()) {
+              setTaskModels(resolveManagedSaasTaskModelDefaults(await fetchAllowedModelsForCurrentUser()));
+            } else {
+              setTaskModels(OPENROUTER_TASK_MODEL_DEFAULTS);
+            }
           }
         }}
       />

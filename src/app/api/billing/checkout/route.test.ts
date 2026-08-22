@@ -21,7 +21,8 @@ function adminClient(config: {
   tier?: { id: string; stripe_price_id: string | null } | null;
   subscription?: { status: string; stripe_customer_id: string | null } | null;
 }) {
-  const upsertCalls: Record<string, unknown>[] = [];
+  const insertCalls: Record<string, unknown>[] = [];
+  const updateCalls: Record<string, unknown>[] = [];
   const from = vi.fn((table: string) => {
     if (table === "subscription_tiers") {
       return { select: vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ maybeSingle: vi.fn().mockResolvedValue({ data: config.tier ?? null, error: null }) }) }) };
@@ -29,15 +30,19 @@ function adminClient(config: {
     if (table === "user_subscriptions") {
       return {
         select: vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ maybeSingle: vi.fn().mockResolvedValue({ data: config.subscription ?? null, error: null }) }) }),
-        upsert: vi.fn((payload: Record<string, unknown>) => {
-          upsertCalls.push(payload);
+        insert: vi.fn((payload: Record<string, unknown>) => {
+          insertCalls.push(payload);
           return Promise.resolve({ error: null });
+        }),
+        update: vi.fn((payload: Record<string, unknown>) => {
+          updateCalls.push(payload);
+          return { eq: vi.fn().mockResolvedValue({ error: null }) };
         }),
       };
     }
     throw new Error(`unexpected table ${table}`);
   });
-  return { admin: { from }, upsertCalls };
+  return { admin: { from }, insertCalls, updateCalls };
 }
 
 function request(body: unknown) {
@@ -91,9 +96,9 @@ describe("billing checkout route", () => {
     expect(body.error).toMatch(/already have an active subscription/i);
   });
 
-  it("creates a new Stripe customer for a first-time subscriber and returns the checkout URL", async () => {
+  it("creates a new Stripe customer for a first-time subscriber (no row at all) and returns the checkout URL", async () => {
     mockCreateClient.mockResolvedValue(sessionClient({ id: "user-1" }));
-    const { admin, upsertCalls } = adminClient({ tier: { id: "pro", stripe_price_id: "price_pro" }, subscription: null });
+    const { admin, insertCalls } = adminClient({ tier: { id: "pro", stripe_price_id: "price_pro" }, subscription: null });
     mockCreateAdminClient.mockReturnValue(admin);
 
     const customersCreate = vi.fn().mockResolvedValue({ id: "cus_new" });
@@ -106,7 +111,7 @@ describe("billing checkout route", () => {
     expect(response.status).toBe(200);
     expect(body.url).toBe("https://checkout.stripe.com/session_1");
     expect(customersCreate).toHaveBeenCalledWith(expect.objectContaining({ metadata: { supabase_user_id: "user-1" } }));
-    expect(upsertCalls).toEqual([expect.objectContaining({ user_id: "user-1", stripe_customer_id: "cus_new" })]);
+    expect(insertCalls).toEqual([expect.objectContaining({ user_id: "user-1", stripe_customer_id: "cus_new", status: "incomplete" })]);
     expect(sessionsCreate).toHaveBeenCalledWith(expect.objectContaining({
       mode: "subscription",
       customer: "cus_new",
@@ -117,7 +122,7 @@ describe("billing checkout route", () => {
 
   it("reuses an existing Stripe customer instead of creating a new one", async () => {
     mockCreateClient.mockResolvedValue(sessionClient({ id: "user-1" }));
-    const { admin, upsertCalls } = adminClient({
+    const { admin, insertCalls, updateCalls } = adminClient({
       tier: { id: "pro", stripe_price_id: "price_pro" },
       subscription: { status: "canceled", stripe_customer_id: "cus_existing" },
     });
@@ -130,8 +135,27 @@ describe("billing checkout route", () => {
     const response = await POST(request({ tierId: "pro" }));
     expect(response.status).toBe(200);
     expect(customersCreate).not.toHaveBeenCalled();
-    expect(upsertCalls).toHaveLength(0);
+    expect(insertCalls).toHaveLength(0);
+    expect(updateCalls).toHaveLength(0);
     expect(sessionsCreate).toHaveBeenCalledWith(expect.objectContaining({ customer: "cus_existing" }));
+  });
+
+  it("does not overwrite an existing trial's status when the user starts checkout without a Stripe customer yet", async () => {
+    mockCreateClient.mockResolvedValue(sessionClient({ id: "user-1" }));
+    const { admin, updateCalls } = adminClient({
+      tier: { id: "pro", stripe_price_id: "price_pro" },
+      subscription: { status: "trialing", stripe_customer_id: null },
+    });
+    mockCreateAdminClient.mockReturnValue(admin);
+
+    const customersCreate = vi.fn().mockResolvedValue({ id: "cus_new" });
+    const sessionsCreate = vi.fn().mockResolvedValue({ url: "https://checkout.stripe.com/session_3" });
+    mockGetStripeClient.mockReturnValue({ customers: { create: customersCreate }, checkout: { sessions: { create: sessionsCreate } } });
+
+    const response = await POST(request({ tierId: "pro" }));
+    expect(response.status).toBe(200);
+    expect(updateCalls).toEqual([expect.objectContaining({ stripe_customer_id: "cus_new" })]);
+    expect(updateCalls[0]).not.toHaveProperty("status");
   });
 
   it("returns a generic failure without leaking the underlying Stripe error", async () => {
