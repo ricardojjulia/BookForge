@@ -20,8 +20,18 @@ import {
 import { createClient } from "@/lib/supabase/client";
 
 type BillingTier = { id: string; display_name: string; monthly_price_usd_cents: number };
-type BillingInfo = { tiers: BillingTier[]; currentTierId: string | null; balanceUsdMicros: number | null } | null;
+type TrialInfo = { active: boolean; endsAt: string | null; tierId: string | null };
+type BillingInfo = {
+  tiers: BillingTier[];
+  currentTierId: string | null;
+  balanceUsdMicros: number | null;
+  trial: TrialInfo | null;
+} | null;
 type Props = { email: string; displayName: string; billing: BillingInfo };
+
+function daysLeft(endsAt: string): number {
+  return Math.max(0, Math.ceil((new Date(endsAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -52,6 +62,8 @@ function BillingSection({ billing }: { billing: NonNullable<BillingInfo> }) {
   }
 
   const currentTier = billing.tiers.find((t) => t.id === billing.currentTierId);
+  const trial = billing.trial;
+  const trialTier = trial?.tierId ? billing.tiers.find((t) => t.id === trial.tierId) : undefined;
 
   return (
     <Section title="Billing">
@@ -79,7 +91,21 @@ function BillingSection({ billing }: { billing: NonNullable<BillingInfo> }) {
         </Stack>
       ) : (
         <Stack gap="sm">
-          <Text size="sm" c="dimmed">Choose a plan to get started.</Text>
+          {trial ? (
+            trial.active && trial.endsAt ? (
+              <Alert color="grape" variant="light">
+                You&apos;re on a free trial of <strong>{trialTier?.display_name ?? "Starter"}</strong> —{" "}
+                <strong>{daysLeft(trial.endsAt)} day{daysLeft(trial.endsAt) === 1 ? "" : "s"} left</strong>. Pick a
+                plan below anytime to keep access after it ends.
+              </Alert>
+            ) : (
+              <Alert color="orange" variant="light">
+                Your free trial has ended. Choose a plan below to keep using AI features.
+              </Alert>
+            )
+          ) : (
+            <Text size="sm" c="dimmed">Choose a plan to get started.</Text>
+          )}
           <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
             {billing.tiers.map((tier) => (
               <Card key={tier.id} withBorder radius="md" p="md">

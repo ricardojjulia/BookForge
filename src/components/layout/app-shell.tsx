@@ -3,10 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Anchor, AppShell as MantineAppShell, Button, Group, Menu, Text, UnstyledButton } from "@mantine/core";
-import { IconChevronDown, IconLogout, IconShieldCog } from "@tabler/icons-react";
+import { Alert, Anchor, AppShell as MantineAppShell, Button, Group, Menu, Text, UnstyledButton } from "@mantine/core";
+import { IconChevronDown, IconClock, IconLogout, IconShieldCog } from "@tabler/icons-react";
 import { createClient } from "@/lib/supabase/client";
 import { GlobalJobIndicator } from "@/components/layout/global-job-indicator";
+import { isManagedSaasDeployment } from "@/lib/deployment/mode";
+
+type TrialBanner = { daysLeft: number; expired: boolean } | null;
 
 const NAV_LINKS = [
   { href: "/dashboard", label: "My Book Room" },
@@ -24,6 +27,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [email, setEmail] = useState<string | null>(null);
   const [isSteward, setIsSteward] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [trial, setTrial] = useState<TrialBanner>(null);
 
   useEffect(() => {
     const supabase = createClient();
@@ -32,10 +36,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setEmail(userEmail);
       if (!userId) {
         setIsSteward(false);
+        setTrial(null);
         return;
       }
       const { data: profile } = await supabase.from("profiles").select("platform_role").eq("id", userId).maybeSingle();
       setIsSteward(profile?.platform_role === "steward");
+
+      if (isManagedSaasDeployment()) {
+        const { data: subscription } = await supabase
+          .from("user_subscriptions")
+          .select("status,trial_ends_at")
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (subscription?.status === "trialing" && subscription.trial_ends_at) {
+          const msLeft = new Date(subscription.trial_ends_at).getTime() - Date.now();
+          setTrial({ daysLeft: Math.max(0, Math.ceil(msLeft / (24 * 60 * 60 * 1000))), expired: msLeft <= 0 });
+        } else {
+          setTrial(null);
+        }
+      }
     }
 
     supabase.auth.getUser().then(({ data }) => syncUser(data.user?.id ?? null, data.user?.email ?? null));
@@ -162,7 +181,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Group>
         </Group>
       </MantineAppShell.Header>
-      <MantineAppShell.Main bg="#fbfaf8">{children}</MantineAppShell.Main>
+      <MantineAppShell.Main bg="#fbfaf8">
+        {trial && (
+          <Alert icon={<IconClock size={16} />} color={trial.expired ? "orange" : "grape"} radius="md" mb="md">
+            <Group justify="space-between" wrap="wrap" gap="xs">
+              <Text size="sm">
+                {trial.expired
+                  ? "Your free trial has ended. Choose a plan to keep using AI features."
+                  : `You're on a free trial — ${trial.daysLeft} day${trial.daysLeft === 1 ? "" : "s"} left.`}
+              </Text>
+              <Anchor component={Link} href="/account" size="sm" fw={600}>
+                {trial.expired ? "Choose a plan" : "Upgrade"}
+              </Anchor>
+            </Group>
+          </Alert>
+        )}
+        {children}
+      </MantineAppShell.Main>
     </MantineAppShell>
   );
 }
