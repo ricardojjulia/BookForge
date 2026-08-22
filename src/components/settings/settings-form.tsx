@@ -140,6 +140,7 @@ export function SettingsForm({
   const [perFeature, setPerFeature] = useState(
     Boolean(initial?.llm_critic_model || initial?.llm_rewrite_model || initial?.llm_planning_model || initial?.llm_extraction_model),
   );
+  const [fetchingModels, setFetchingModels] = useState(false);
 
   function update<K extends keyof Settings>(key: K, value: Settings[K]) {
     setSettings((current) => ({ ...current, [key]: value }));
@@ -614,49 +615,79 @@ export function SettingsForm({
                 label="Optimize per feature"
                 description="Use a cheap fast model for high-volume calls (critics, extraction) and a stronger one for full-book rewrites, instead of one model for everything. Falls back to the model above for anything left blank."
                 checked={perFeature}
-                onChange={async (event) => {
+                onChange={(event) => {
                   const checked = event.currentTarget.checked;
                   setPerFeature(checked);
-                  if (checked && !settings.llm_critic_model && !settings.llm_rewrite_model && settings.llm_provider === "openrouter") {
-                    const defaults = managedSaas
-                      ? resolveManagedSaasTaskModelDefaults(await fetchAllowedModelsForCurrentUser())
-                      : OPENROUTER_TASK_MODEL_DEFAULTS;
+                  if (checked && !managedSaas && !settings.llm_critic_model && !settings.llm_rewrite_model && settings.llm_provider === "openrouter") {
+                    // Self-hosted: no tier gating, no network round-trip -- safe to fill instantly.
                     setSettings((current) => ({
                       ...current,
-                      llm_critic_model: defaults.critic,
-                      llm_rewrite_model: defaults.rewrite,
-                      llm_planning_model: defaults.planning,
-                      llm_extraction_model: defaults.extraction,
+                      llm_critic_model: OPENROUTER_TASK_MODEL_DEFAULTS.critic,
+                      llm_rewrite_model: OPENROUTER_TASK_MODEL_DEFAULTS.rewrite,
+                      llm_planning_model: OPENROUTER_TASK_MODEL_DEFAULTS.planning,
+                      llm_extraction_model: OPENROUTER_TASK_MODEL_DEFAULTS.extraction,
                     }));
                   }
                 }}
               />
               {perFeature && (
                 <Paper withBorder radius="sm" p="md" bg="#fbfaf8">
-                  <SimpleGrid cols={{ base: 1, md: 2 }}>
-                    {TASK_INFO.map(({ field, label, hint }) =>
-                      providerModelOptions ? (
-                        <Select
-                          key={field}
-                          label={label}
-                          description={hint}
-                          data={providerModelOptions}
-                          value={(settings[field] as string) || settings.llm_model || providerModelOptions[0]?.value}
-                          onChange={(value) => update(field, (value || "") as Settings[typeof field])}
-                          searchable
-                        />
-                      ) : (
-                        <TextInput
-                          key={field}
-                          label={label}
-                          description={hint}
-                          placeholder={settings.llm_model || "Falls back to Model above"}
-                          value={settings[field] as string}
-                          onChange={(event) => update(field, event.currentTarget.value as Settings[typeof field])}
-                        />
-                      ),
+                  <Stack gap="sm">
+                    {managedSaas && settings.llm_provider === "openrouter" && (
+                      <Group justify="space-between" wrap="nowrap">
+                        <Text size="sm" c="dimmed">
+                          Fills in the fields below with the best model your plan allows for each task.
+                        </Text>
+                        <Button
+                          variant="light"
+                          color="grape"
+                          size="xs"
+                          loading={fetchingModels}
+                          onClick={async () => {
+                            setFetchingModels(true);
+                            try {
+                              const defaults = resolveManagedSaasTaskModelDefaults(await fetchAllowedModelsForCurrentUser());
+                              setSettings((current) => ({
+                                ...current,
+                                llm_critic_model: defaults.critic,
+                                llm_rewrite_model: defaults.rewrite,
+                                llm_planning_model: defaults.planning,
+                                llm_extraction_model: defaults.extraction,
+                              }));
+                            } finally {
+                              setFetchingModels(false);
+                            }
+                          }}
+                        >
+                          Get my models
+                        </Button>
+                      </Group>
                     )}
-                  </SimpleGrid>
+                    <SimpleGrid cols={{ base: 1, md: 2 }}>
+                      {TASK_INFO.map(({ field, label, hint }) =>
+                        providerModelOptions ? (
+                          <Select
+                            key={field}
+                            label={label}
+                            description={hint}
+                            data={providerModelOptions}
+                            value={(settings[field] as string) || settings.llm_model || providerModelOptions[0]?.value}
+                            onChange={(value) => update(field, (value || "") as Settings[typeof field])}
+                            searchable
+                          />
+                        ) : (
+                          <TextInput
+                            key={field}
+                            label={label}
+                            description={hint}
+                            placeholder={settings.llm_model || "Falls back to Model above"}
+                            value={settings[field] as string}
+                            onChange={(event) => update(field, event.currentTarget.value as Settings[typeof field])}
+                          />
+                        ),
+                      )}
+                    </SimpleGrid>
+                  </Stack>
                 </Paper>
               )}
 
