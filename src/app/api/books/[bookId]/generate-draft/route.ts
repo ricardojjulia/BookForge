@@ -28,10 +28,16 @@ type ArchitectureChapter = {
   partTitle?: string;
 };
 
-// Complementary insurance alongside the single-chapter-per-request design
-// below -- leaves margin under a likely 60s Vercel cap. Adjust to match the
-// actual deployment's Vercel plan/Fluid Compute configuration.
-export const maxDuration = 55;
+// Single chapter per request, up to 12,000 output tokens of real prose --
+// at the ~39 tokens/sec measured for deepseek-v4-pro through OpenRouter
+// (see src/lib/critic/run.ts), generation alone can take 5+ minutes before
+// any network/queueing overhead. The stale 55s value here predates the
+// Vercel Pro upgrade and was missed in the sweep that fixed the same
+// missing-maxDuration bug on critic/concept/architecture/etc -- found live
+// when a real chapter-draft job died silently mid-run and got force-failed
+// by the 10-minute stale-heartbeat sweep with no real error ever thrown.
+export const maxDuration = 780;
+const CHAPTER_COMPLETION_TIMEOUT_MS = 760_000;
 
 const sceneBreakPattern = /^\s{0,3}(\*\s*\*\s*\*|#{3,}|-{3,}|_{3,})\s*$/m;
 
@@ -318,6 +324,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
             },
             (content) => validateLongFormOutput(parseChapterCompletion(content, chapter.title || "").chapterText, { minimumWordFloor }),
             telemetryContext,
+            { timeoutMs: CHAPTER_COMPLETION_TIMEOUT_MS },
           )
           .catch((error) => {
             throw new Error(
