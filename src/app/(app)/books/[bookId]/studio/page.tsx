@@ -3,7 +3,9 @@ import Link from "next/link";
 import { AutoReviewWizard } from "@/components/books/auto-review/auto-review-wizard";
 import { BookActions } from "@/components/books/book-actions";
 import { PersistentAiJobsPanel } from "@/components/books/jobs/persistent-ai-jobs-panel";
+import { CriticScoreboard } from "@/components/books/reports/critic-scoreboard";
 import { detectAndHealStaleJobs } from "@/lib/ai/job-state";
+import { getBookCriticReports } from "@/lib/books/book-data";
 import { isManagedSaasDeployment } from "@/lib/deployment/mode";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -37,6 +39,8 @@ export default async function StudioPage({ params }: { params: Promise<{ bookId:
       </Container>
     );
   }
+
+  const { reports: criticReports } = await getBookCriticReports(supabase, bookId);
 
   const {
     data: { user },
@@ -136,6 +140,8 @@ export default async function StudioPage({ params }: { params: Promise<{ bookId:
             summarizedChapterCount={summarizedChapterCount}
           />
         </div>
+
+        <CriticScoreboard reports={criticReports} />
 
         <PersistentAiJobsPanel bookId={bookId} />
       </Stack>
