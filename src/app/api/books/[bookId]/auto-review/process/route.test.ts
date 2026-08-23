@@ -119,6 +119,131 @@ describe("POST /api/books/[bookId]/auto-review/process", () => {
     fetchSpy.mockRestore();
   });
 
+  it("keeps dispatching rewrite-execute chunks until remainingUnits reaches zero", async () => {
+    // The actual bug this covers: rewrite-execute processes one bounded
+    // chunk (<=CONCURRENCY paragraphs) per call and expects the caller to
+    // re-invoke it with the same jobId while remainingUnits > 0. Before the
+    // fix, callStage fired exactly one "run" call and then just polled the
+    // job row for status:"completed" -- which rewrite-execute never sets
+    // while remainingUnits > 0 -- so a real multi-chunk rewrite never
+    // progressed past its first chunk. This asserts every chunk actually
+    // gets dispatched with the same job id, in sequence, until done.
+    const completedStages = [
+      "analyze",
+      "summarize",
+      "critic_baseline:story_structure",
+      "critic_baseline:prose_quality",
+      "critic_baseline:continuity",
+      "critic_baseline:character_depth",
+      "critic_baseline:market_fit",
+      "critic_baseline:contemporary_view",
+      "critic_baseline:revision_priorities",
+      "critic_baseline:dialogue_density",
+      "rewrite_plan",
+      // Everything after rewrite_execute is already marked complete so the
+      // loop stops right after it -- this test is only about the chunk
+      // dispatch behavior, not the rest of the pipeline.
+      "auto_accept@0",
+      "drift_check@0",
+      "critic_post:story_structure@0",
+      "critic_post:prose_quality@0",
+      "critic_post:continuity@0",
+      "critic_post:character_depth@0",
+      "critic_post:market_fit@0",
+      "critic_post:contemporary_view@0",
+      "critic_post:revision_priorities@0",
+      "critic_post:dialogue_density@0",
+      "critics_check@0",
+      "export",
+      "mark_finished",
+    ];
+
+    const initialJob = {
+      id: "11111111-1111-4111-8111-111111111111",
+      status: "running",
+      current_stage: "rewrite_execute",
+      stages_completed: completedStages,
+      iteration: 0,
+      config: null,
+      log: [],
+      error: null,
+      export_id: null,
+      created_at: new Date().toISOString(),
+      completed_at: null,
+    };
+
+    const from = vi.fn((table: string) => {
+      if (table === "auto_review_jobs") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                eq: vi.fn(() => ({
+                  single: vi.fn(async () => ({ data: initialJob, error: null })),
+                })),
+                single: vi.fn(async () => ({ data: initialJob, error: null })),
+              })),
+            })),
+          })),
+          update: vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) })),
+        };
+      }
+      throw new Error(`Unexpected table ${table}`);
+    });
+
+    mockCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn(async () => ({ data: { user: { id: "user-1" } } })),
+      },
+      from,
+    });
+
+    let chunkCallCount = 0;
+    const fetchSpy = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const payload = init?.body ? JSON.parse(String(init.body)) : {};
+
+      if (url.includes("/rewrite-execute") && payload.serverManaged) {
+        return new Response(
+          JSON.stringify({ content: { revisionJobId: "chunked-rewrite-1", queued: true } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (url.includes("/rewrite-execute") && payload.jobId) {
+        expect(payload.jobId).toBe("chunked-rewrite-1");
+        chunkCallCount += 1;
+        // Three chunks total: remainingUnits > 0 for the first two, 0 on
+        // the third (matching rewrite-execute's own real response shape).
+        const remainingUnits = chunkCallCount >= 3 ? 0 : 3 - chunkCallCount;
+        return new Response(
+          JSON.stringify({ content: { revisionJobId: "chunked-rewrite-1", remainingUnits, status: "running" } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      throw new Error(`Unexpected fetch call: ${url}`);
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/books/book-1/auto-review/process", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jobId: "11111111-1111-4111-8111-111111111111",
+          mode: "full_review",
+        }),
+      }),
+      { params: Promise.resolve({ bookId: "book-1" }) },
+    );
+
+    const payload = await response.json();
+    expect(response.status, JSON.stringify(payload)).toBe(200);
+    expect(chunkCallCount).toBe(3);
+    expect(fetchSpy).toHaveBeenCalledTimes(4); // 1 queue call + 3 chunk calls
+    fetchSpy.mockRestore();
+  });
+
   it("actually re-runs rewrite/critic stages on a failed quality gate instead of exporting immediately", async () => {
     const completedStages = [
       "analyze",
