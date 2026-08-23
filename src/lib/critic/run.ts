@@ -170,6 +170,18 @@ export async function runCriticLens(input: {
     },
     undefined,
     telemetryContext,
+    // Default CLOUD_PROVIDER_TIMEOUT_MS (45s) undersold a single critic
+    // lens: a real production stall traced back to this call hitting a
+    // platform-level kill (no maxDuration on the calling route) before the
+    // SDK timeout, network error, or anything else ever got a chance to
+    // throw a catchable error -- the job just sat "running" with a stale
+    // heartbeat until the 10-minute stale-job sweep force-failed it. A
+    // Starter-tier account runs every task (including critic, originally
+    // budgeted around a faster model) on deepseek-v4-pro, live-measured at
+    // ~39 tokens/sec through OpenRouter's current routing -- the default
+    // 4,096-token cloud budget alone can need ~105s. See maxDuration on the
+    // calling route(s) for the matching platform-level budget.
+    { timeoutMs: 140_000 },
   );
 
   const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({

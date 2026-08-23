@@ -41,6 +41,15 @@ function getErrorMessage(error: unknown) {
   return "BookForge Critic failed.";
 }
 
+// Dispatched as its own serverless invocation from auto-review/process's
+// server-managed handoff (a real internal fetch, not an in-process call) --
+// without this, the function ran under Vercel's platform default duration,
+// which a real critic-lens call on a slower cloud model can exceed well
+// before the SDK-level timeout in src/lib/critic/run.ts ever gets a chance
+// to throw a catchable error. See that file's comment for the incident this
+// traces back to.
+export const maxDuration = 150;
+
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
   try {
     const { bookId } = await context.params;
