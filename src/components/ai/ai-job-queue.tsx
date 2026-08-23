@@ -1,6 +1,6 @@
 "use client";
 
-import { Badge, Button, Group, Paper, Progress, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { Badge, Button, Group, Loader, Paper, Progress, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { motion } from "framer-motion";
 
 export type AiJobQueueState = {
@@ -349,20 +349,29 @@ function QueueField({ label, value }: { label: string; value: string | number })
 export function AiJobQueueInlineStatus({ job, visible }: { job: AiJobQueueState; visible: boolean }) {
   if (!visible || job.status === "idle") return null;
 
-  const progress = job.totalUnits ? Math.round((job.completedUnits / job.totalUnits) * 100) : 0;
+  const rawProgress = job.totalUnits ? Math.round((job.completedUnits / job.totalUnits) * 100) : 0;
+  // A bar frozen at a real 0% is indistinguishable from a stalled job --
+  // there's no width for the "animated" stripe to move across, so a slow
+  // first unit (e.g. one long chapter-draft call) reads as dead for
+  // however many minutes it takes. Floor it to a visible sliver whenever
+  // the job is genuinely running, so there's always something moving.
+  const progress = job.status === "running" ? Math.max(6, rawProgress) : rawProgress;
 
   return (
     <Paper withBorder radius="md" p="sm" bg="#f8f4ff">
       <Group justify="space-between" mb={4}>
-        <Text size="sm" fw={600}>
-          {job.status === "running"
-            ? `Working: ${job.currentUnit || job.currentTask}`
-            : job.status === "paused"
-              ? "Paused"
-              : job.status === "complete"
-                ? "Done"
-                : "Stopped"}
-        </Text>
+        <Group gap={8}>
+          {job.status === "running" && <Loader size="xs" color="grape" />}
+          <Text size="sm" fw={600}>
+            {job.status === "running"
+              ? `Working: ${job.currentUnit || job.currentTask}`
+              : job.status === "paused"
+                ? "Paused"
+                : job.status === "complete"
+                  ? "Done"
+                  : "Stopped"}
+          </Text>
+        </Group>
         <Badge color={statusColor(job.status)} size="sm">{job.status}</Badge>
       </Group>
       <Progress value={progress} animated={job.status === "running"} color="grape" size="sm" />
@@ -372,6 +381,9 @@ export function AiJobQueueInlineStatus({ job, visible }: { job: AiJobQueueState;
           ? ` -- about ${formatDuration(job.estimatedSecondsRemaining)} left`
           : ""}
         {" -- "}{job.completedUnits}/{job.totalUnits} done
+        {job.status === "running" && job.completedUnits === 0 && job.estimatedSecondsRemaining == null
+          ? " -- the first unit can take several minutes on a cloud model"
+          : ""}
       </Text>
     </Paper>
   );
