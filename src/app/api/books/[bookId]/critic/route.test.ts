@@ -24,8 +24,14 @@ describe("POST /api/books/[bookId]/critic", () => {
       insert,
     };
 
+    const paragraphsBuilder = {
+      select: vi.fn(() => paragraphsBuilder),
+      eq: vi.fn(async () => ({ count: 1, error: null })),
+    };
+
     const from = vi.fn((table: string) => {
       if (table === "revision_jobs") return revisionJobsBuilder;
+      if (table === "paragraphs") return paragraphsBuilder;
       throw new Error(`Unexpected table ${table}`);
     });
 

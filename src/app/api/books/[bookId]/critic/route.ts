@@ -10,6 +10,7 @@ import {
 import { criticLenses } from "@/lib/critic/prompts";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { runCriticLens } from "@/lib/critic/run";
+import { bookHasDraftedParagraphs, UNDRAFTED_MANUSCRIPT_ERROR } from "@/lib/manuscript/draft-guard";
 import { createClient } from "@/lib/supabase/server";
 
 const schema = z.object({
@@ -59,6 +60,10 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
+    if (!(await bookHasDraftedParagraphs(supabase, bookId))) {
+      return NextResponse.json({ error: UNDRAFTED_MANUSCRIPT_ERROR }, { status: 400 });
+    }
 
     const startedAt = new Date().toISOString();
     let jobId = requestedJobId || "";

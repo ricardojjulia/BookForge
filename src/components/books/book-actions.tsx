@@ -411,7 +411,7 @@ export function BookActions({
         task === "auto-review"
           ? 9
           : task === "critic-all"
-          ? 7
+          ? CRITIC_LENS_COUNT
           : task === "generate-draft"
           ? Math.min(Math.max(plannedChapterCount, 1), 3)
           : task === "chapter-summaries"
@@ -425,7 +425,7 @@ export function BookActions({
         task === "auto-review"
           ? 9
           : task === "critic-all"
-          ? 7
+          ? CRITIC_LENS_COUNT
           : task === "generate-draft"
           ? Math.min(Math.max(plannedChapterCount, 1), 3)
           : task === "chapter-summaries"
@@ -436,6 +436,11 @@ export function BookActions({
         ...(runtimeLimits?.warnings || []),
         ...plan.warnings,
         ...(selectedModel ? [] : [`${configured?.label || "Required"} model is not configured.`]),
+        ...(paragraphCount === 0 && (task === "critic" || task === "critic-all" || task === "auto-review")
+          ? [
+              'This book has no drafted manuscript prose yet -- Critic and Auto-Review evaluate chapter text, not outline summaries. Run "Write Your Chapters" first.',
+            ]
+          : []),
         ...(paragraphCount > 0 && task === "book-bible"
           ? [
               `This book has ${chapterCount.toLocaleString()} chapters, ${sceneCount.toLocaleString()} scenes, and ${paragraphCount.toLocaleString()} paragraphs. BookForge will use structured context instead of a whole-book rewrite.`,
@@ -448,7 +453,7 @@ export function BookActions({
           : []),
         ...(task === "critic-all"
           ? [
-              "BookForge will run all seven baseline Critic lenses. This is the fastest way to clear rewrite-planning Critic coverage.",
+              `BookForge will run all ${CRITIC_LENS_COUNT} baseline Critic lenses. This is the fastest way to clear rewrite-planning Critic coverage.`,
             ]
           : []),
         ...(task === "auto-review"
@@ -515,6 +520,7 @@ export function BookActions({
           selectedModel,
           lmStudioConnected: status.connected || isCloudReadyForTask,
           modelAvailable: Boolean(configured?.available) || isCloudReadyForTask,
+          blocked: paragraphCount === 0 && (task === "critic" || task === "critic-all" || task === "auto-review"),
           estimatedUnits,
           expectedAiCalls,
           qualityProfile: status.qualityProfile,

@@ -53,6 +53,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     ]);
     const bookStats = { chapters: chapterCount ?? 0, paragraphs: paragraphCount ?? 0 };
 
+    if (bookStats.paragraphs === 0) {
+      return NextResponse.json(
+        {
+          error:
+            'This book has no drafted manuscript prose yet. Auto-Review evaluates chapter text, not outline summaries. Run "Write Your Chapters" first, then try again.',
+        },
+        { status: 400 },
+      );
+    }
+
     // auto_review_jobs currently accepts running/completed/failed/cancelled only.
     // Keep serverManaged semantics at the API layer, but persist as running.
     const status = "running";
