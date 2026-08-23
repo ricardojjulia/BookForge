@@ -4,7 +4,7 @@ import { AutoReviewWizard } from "@/components/books/auto-review/auto-review-wiz
 import { BookActions } from "@/components/books/book-actions";
 import { PersistentAiJobsPanel } from "@/components/books/jobs/persistent-ai-jobs-panel";
 import { CriticScoreboard } from "@/components/books/reports/critic-scoreboard";
-import { detectAndHealStaleJobs } from "@/lib/ai/job-state";
+import { detectAndHealStaleJobs, logJobCompletionSummaries } from "@/lib/ai/job-state";
 import { getBookCriticReports } from "@/lib/books/book-data";
 import { isManagedSaasDeployment } from "@/lib/deployment/mode";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
@@ -53,6 +53,26 @@ export default async function StudioPage({ params }: { params: Promise<{ bookId:
       .in("status", ["running", "queued"]);
     if (activeJobs?.length) {
       await detectAndHealStaleJobs(supabase, user.id, activeJobs);
+    }
+
+    // logJobCompletionSummaries previously only ran from the rarely-visited
+    // Jobs History page, so estimation-history basically never accumulated
+    // real samples (confirmed live: only 1 logged completion existed
+    // platform-wide for bookforge_critic_batch, against a 3-sample minimum)
+    // -- the AI Task Preflight kept falling back to the static local-model
+    // formula (10-1000x off for cloud accounts, per that formula's own code
+    // comment) for a task type real users complete constantly. Studio is
+    // the page everyone actually lands on after a run finishes, so log
+    // terminal jobs opportunistically here instead.
+    const { data: terminalJobs } = await supabase
+      .from("revision_jobs")
+      .select("id,mode,status,settings,started_at,completed_at")
+      .eq("book_id", bookId)
+      .in("status", ["completed", "failed"])
+      .order("completed_at", { ascending: false })
+      .limit(10);
+    if (terminalJobs?.length) {
+      await logJobCompletionSummaries(supabase, user.id, terminalJobs);
     }
   }
 
