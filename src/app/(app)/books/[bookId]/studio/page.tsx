@@ -21,12 +21,14 @@ export default async function StudioPage({ params }: { params: Promise<{ bookId:
 
   const { bookId } = await params;
   const supabase = await createClient();
-  const [{ data: book, error }, { data: chapters }, { count: scenes }, { count: paragraphs }] = await Promise.all([
-    supabase.from("books").select("id,title").eq("id", bookId).single(),
-    supabase.from("chapters").select("id,status,original_text").eq("book_id", bookId),
-    supabase.from("scenes").select("id", { count: "exact", head: true }).eq("book_id", bookId),
-    supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId),
-  ]);
+  const [{ data: book, error }, { data: chapters }, { count: scenes }, { count: paragraphs }, { data: bookBible }] =
+    await Promise.all([
+      supabase.from("books").select("id,title").eq("id", bookId).single(),
+      supabase.from("chapters").select("id,status,original_text,summary").eq("book_id", bookId),
+      supabase.from("scenes").select("id", { count: "exact", head: true }).eq("book_id", bookId),
+      supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId),
+      supabase.from("book_bibles").select("updated_at").eq("book_id", bookId).maybeSingle(),
+    ]);
 
   if (error || !book) {
     return (
@@ -58,6 +60,7 @@ export default async function StudioPage({ params }: { params: Promise<{ bookId:
           chapter.original_text || "",
         ),
     ).length || 0;
+  const summarizedChapterCount = chapters?.filter((chapter) => Boolean(chapter.summary)).length || 0;
 
   const quickLinks: { label: string; href: string }[] = [
     { label: "World Bible", href: `/books/${bookId}/world` },
@@ -129,6 +132,8 @@ export default async function StudioPage({ params }: { params: Promise<{ bookId:
             sceneCount={scenes || 0}
             paragraphCount={paragraphs || 0}
             plannedChapterCount={plannedChapterCount}
+            bookBibleUpdatedAt={bookBible?.updated_at || null}
+            summarizedChapterCount={summarizedChapterCount}
           />
         </div>
 
