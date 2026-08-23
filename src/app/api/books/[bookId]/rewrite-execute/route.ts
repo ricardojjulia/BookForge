@@ -15,11 +15,16 @@ import { clampStrategySettings, getRewriteStrategy, rewriteStrategies } from "@/
 import { getExistingRevisionState, shouldSkipParagraph, type ExistingRevisionRow } from "@/lib/rewrite/eligibility";
 import { createClient } from "@/lib/supabase/server";
 
-// Complementary insurance alongside the single-chunk-per-request design below
-// (never rely on maxDuration alone to bound a request) -- leaves margin under
-// a likely 60s Vercel cap. Adjust to match the actual deployment's Vercel
-// plan/Fluid Compute configuration.
-export const maxDuration = 55;
+// Up to CONCURRENCY (5) paragraphs run in parallel per request, each with up
+// to 3 sequential completion attempts (see maxCompletionAttempts below) if
+// earlier attempts come back empty -- worst-case wall time is bounded by the
+// single slowest unit's retry chain, not 5x it, but that chain alone can run
+// several minutes. The stale 55s value here predated the Vercel Pro upgrade
+// and was missed in the sweep that fixed the same missing-maxDuration bug on
+// generate-draft/critic/concept/architecture/etc -- found live: a real
+// full-book rewrite job's heartbeat went stale on unit 1 of 25.
+export const maxDuration = 400;
+const REWRITE_UNIT_COMPLETION_TIMEOUT_MS = 120_000;
 
 // Same low cost tier as the default rewrite model (deepseek/deepseek-v4-pro)
 // but a different provider -- see the "Rewrite-pass alternate to DeepSeek V4
@@ -573,6 +578,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           },
           undefined,
           telemetryContext,
+          { timeoutMs: REWRITE_UNIT_COMPLETION_TIMEOUT_MS },
         );
         parsed = parseRewriteResponse(completion.choices[0]?.message.content || "{}");
         revisedText = extractRevisedText(parsed);
