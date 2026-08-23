@@ -37,6 +37,34 @@ const STRATEGY_BY_MODE: Record<"full_review" | "make_shorter" | "make_longer", {
   },
 };
 
+// This is the one route that most needed an explicit ceiling and never had
+// one -- it's a single long-lived request that loops through the ENTIRE
+// stage sequence (analyze, chapter summaries, all 8 critic lenses, rewrite
+// plan, ...) in one HTTP invocation, individually dispatching and polling
+// each stage's own worker route. Every downstream stage route was hardened
+// with its own maxDuration; this orchestrator wrapping all of them was not.
+// Confirmed via a real production failure: Vercel silently killed this
+// function mid-loop (platform default, far short of what a real multi-stage
+// run needs) with no exception path -- no auto_review_jobs status update, no
+// log entry, no further stage dispatched -- leaving the run to be cleaned up
+// only minutes later by the unrelated stage-staleness/heartbeat watchdogs,
+// which report a generic "stalled" error with no hint of the real cause.
+//
+// 800s is Vercel Pro's practical ceiling, not a guarantee: a long enough
+// review (many chapters, several critic lenses each needing close to their
+// own worst-case budget) can still exceed even this in one request. The
+// complete fix is making this route checkpoint and re-invoke itself before
+// running out of budget, the same chunked/resumable pattern PR #128 proved
+// for rewrite-execute/generate-draft -- this route already tracks
+// current_stage/stages_completed, so the resumability plumbing exists, it's
+// just not self-triggered yet. Out of scope for this pass.
+export const maxDuration = 800;
+
+// Leaves ~100s margin under maxDuration for the current stage's own
+// in-flight cleanup plus the self-continuation fetch below -- see the
+// checkpoint check at the bottom of the stage loop.
+const SELF_CONTINUE_AFTER_MS = 700_000;
+
 const MAX_ITERATIONS = 3;
 const STAGE_MAX_ATTEMPTS = 3;
 
@@ -129,6 +157,7 @@ function getError(e: unknown) {
 }
 
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
+  const requestStartedAt = Date.now();
   let parsedBody: z.infer<typeof schema> | null = null;
   let currentStage = "analyze";
   let currentUserId: string | null = null;
@@ -585,6 +614,23 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         await addStage(stage, "Book marked finished.");
       }
       stageIndex += 1;
+
+      // Checkpoint at a clean stage boundary rather than letting Vercel
+      // silently kill this request mid-loop once it runs past maxDuration --
+      // that's the exact failure this replaces: no exception path, no log,
+      // no further stage ever dispatched, the job just sits until an
+      // unrelated staleness watchdog notices minutes later with a generic
+      // error. Self-chains a continuation request (same fire-and-forget
+      // pattern the wizard's own initial launch already uses) instead of
+      // requiring the user to notice a stall and click Resume by hand.
+      if (stageIndex < stageOrder.length && Date.now() - requestStartedAt > SELF_CONTINUE_AFTER_MS) {
+        void fetch(new URL(`/api/books/${bookId}/auto-review/process`, baseUrl).toString(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", cookie },
+          body: JSON.stringify({ jobId: body.jobId, mode: body.mode }),
+        }).catch(() => {});
+        return NextResponse.json({ ok: true, jobId: body.jobId, checkpointed: true, nextStage: stageOrder[stageIndex] });
+      }
     }
 
     await updateJob({
