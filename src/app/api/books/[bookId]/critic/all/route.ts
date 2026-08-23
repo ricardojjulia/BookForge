@@ -26,6 +26,14 @@ function getErrorMessage(error: unknown) {
   return "BookForge Critic batch failed.";
 }
 
+// Runs up to 8 lenses sequentially in one invocation -- same undersized-
+// timeout risk as src/app/api/books/[bookId]/critic/route.ts (see that
+// file's comment), just multiplied. Near Vercel Pro's 800s ceiling; a real
+// worst-case run (every lens needing the full ~140s a slow cloud model can
+// take) can still exceed even this -- not fully solved by a bigger number,
+// same residual risk noted on the architecture route.
+export const maxDuration = 780;
+
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
   try {
     const { bookId } = await context.params;
