@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { testLmStudioConnection } from "@/lib/lmstudio/client";
-import { PROVIDER_META, providerChatCompletion } from "@/lib/ai/providers";
+import { assertNotOpenRouterManagementKey, PROVIDER_META, providerChatCompletion } from "@/lib/ai/providers";
 import { assertModelAllowedForUser, reconcileCreditReservation, reserveCreditsForCall } from "@/lib/subscription/enforcement";
 import { computeCostUsdMicros, getCurrentModelPricing } from "@/lib/subscription/pricing";
 import { createClient } from "@/lib/supabase/server";
@@ -25,6 +25,10 @@ export async function POST(request: Request) {
     if (body.provider) {
       const meta = PROVIDER_META.find((p) => p.id === body.provider);
       const model = body.model || meta?.defaultModels[0] || "gpt-4o";
+
+      if (body.provider === "openrouter" && body.apiKey) {
+        await assertNotOpenRouterManagementKey(body.apiKey);
+      }
 
       // A caller-supplied apiKey means this ping is billed to the caller's
       // own account, not BookForge's -- no tier gate/credit reservation
