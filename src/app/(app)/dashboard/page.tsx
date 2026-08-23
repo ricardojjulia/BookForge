@@ -4,6 +4,7 @@ import { DashboardMetrics } from "@/components/dashboard/dashboard-metrics";
 import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
 import { GettingStartedChecklist } from "@/components/onboarding/getting-started-checklist";
 import { SetupWizard } from "@/components/onboarding/setup-wizard";
+import { PriceAdvisoryBanner } from "@/components/settings/price-advisory-banner";
 import { buildOnboardingChecklist, CHECKLIST_DISMISSED_STEP } from "@/lib/onboarding/checklist";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -126,6 +127,7 @@ export default async function DashboardPage() {
   return (
     <Container size="xl">
       <DataFreshnessBanner routeKey="dashboard" fetchedAt={freshnessFetchedAt} label="Dashboard data" variant="subtle" />
+      <PriceAdvisoryBanner />
       <Group justify="space-between" align="flex-start" mb={8} wrap="wrap">
         <div>
           <Title style={{ fontSize: 28, letterSpacing: "-0.01em" }}>My Book Room</Title>
