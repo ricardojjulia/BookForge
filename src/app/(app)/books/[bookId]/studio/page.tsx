@@ -96,7 +96,7 @@ export default async function StudioPage({ params }: { params: Promise<{ bookId:
                 LOCAL AI VIA LM STUDIO
               </span>
             </div>
-            <AutoReviewWizard bookId={bookId} bookTitle={book.title} />
+            <AutoReviewWizard bookId={bookId} bookTitle={book.title} plannedChapterCount={plannedChapterCount} />
           </div>
           <p style={{ margin: "0 0 18px", fontSize: 14, color: "oklch(0.5 0.005 90)" }}>
             Analyze, evaluate, revise, review, and export this manuscript from one controlled workflow.

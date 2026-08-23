@@ -5,6 +5,7 @@ import { resolveMetadataSnapshotContext } from "@/lib/book-metadata/timeline";
 import { criticLenses } from "@/lib/critic/prompts";
 import { preloadCriticModelExecution, preloadCriticRunContext, runCriticLens } from "@/lib/critic/run";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
+import { bookHasDraftedParagraphs, UNDRAFTED_MANUSCRIPT_ERROR } from "@/lib/manuscript/draft-guard";
 import { createClient } from "@/lib/supabase/server";
 import type { CriticLens } from "@/lib/types";
 
@@ -44,6 +45,10 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
+    if (!(await bookHasDraftedParagraphs(supabase, bookId))) {
+      return NextResponse.json({ error: UNDRAFTED_MANUSCRIPT_ERROR }, { status: 400 });
+    }
 
     const metadataContext = await resolveMetadataSnapshotContext(supabase, bookId, {
       metadataSnapshotId: body.metadataSnapshotId || null,

@@ -108,6 +108,9 @@ describe("POST /api/books/[bookId]/critic/all", () => {
           insert: coherenceInsert,
         };
       }
+      if (table === "paragraphs") {
+        return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ count: 1, error: null })) })) };
+      }
       throw new Error(`Unexpected table ${table}`);
     });
 
@@ -218,7 +221,7 @@ describe("POST /api/books/[bookId]/critic/all", () => {
         return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ count: 0, error: null })) })) };
       }
       if (table === "paragraphs") {
-        return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ count: 0, error: null })) })) };
+        return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ count: 1, error: null })) })) };
       }
       throw new Error(`Unexpected table ${table}`);
     });

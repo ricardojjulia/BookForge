@@ -35,6 +35,7 @@ export type AiTaskPreflightData = {
   modelSizeB?: number | null;
   quantization?: string | null;
   warnings: string[];
+  blocked?: boolean;
 };
 
 export function AiTaskPreflight({
@@ -67,7 +68,7 @@ export function AiTaskPreflight({
           <SimpleGrid cols={{ base: 1, md: 2 }}>
             <PreflightField label="Required model type" value={data.requiredModelType} />
             <PreflightField label="Selected model" value={data.selectedModel || "Not configured"} />
-            <PreflightField label="LM Studio status" value={data.lmStudioConnected ? "Connected" : "Disconnected"} />
+            <PreflightField label="AI provider status" value={data.lmStudioConnected ? "Connected" : "Disconnected"} />
             <PreflightField label="Model availability" value={data.modelAvailable ? "Available" : "Unavailable"} />
             <PreflightField label="Estimated manuscript units" value={data.estimatedUnits} />
             <PreflightField label="AI calls expected" value={data.expectedAiCalls} />
@@ -121,7 +122,12 @@ export function AiTaskPreflight({
               <Button variant="subtle" color="dark" onClick={onCancel}>
                 Cancel
               </Button>
-              <Button color="grape" loading={loading} disabled={!data.lmStudioConnected || !data.modelAvailable} onClick={onProceed}>
+              <Button
+                color="grape"
+                loading={loading}
+                disabled={!data.lmStudioConnected || !data.modelAvailable || data.blocked}
+                onClick={onProceed}
+              >
                 Proceed
               </Button>
             </Group>
