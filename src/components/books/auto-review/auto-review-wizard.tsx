@@ -71,6 +71,37 @@ type ResumableJob = {
   error: string | null;
 };
 
+type ModelStatusResponse = {
+  connected?: boolean;
+  configuredModels?: Array<{ key: string; model: string; available: boolean }>;
+  cloudProvider?: { model: string | null; usedForPlanning: boolean; usedForRewrite: boolean } | null;
+};
+
+type ModelReadiness = { ready: boolean; missing: string[] };
+
+// Auto-Review's pipeline needs a working model for two distinct task
+// buckets -- planning/critic/extraction (blueprint, summaries, all 16
+// critic calls) and rewrite (every paragraph rewrite) -- but nothing
+// upstream of the pipeline itself ever checked either before this. A user
+// with no reasoning or rewrite model configured could click Full Review and
+// only find out ~5 stages deep, after blueprint/summaries/critic had
+// already run and spent real time and (on managed-SaaS) real credit.
+function computeModelReadiness(status: ModelStatusResponse): ModelReadiness {
+  const configured = new Map((status.configuredModels || []).map((item) => [item.key, item]));
+  const localAvailable = (key: string) => Boolean(status.connected && configured.get(key)?.available);
+  const cloudReady = (forRewrite: boolean) =>
+    Boolean(status.cloudProvider?.model && (forRewrite ? status.cloudProvider.usedForRewrite : status.cloudProvider.usedForPlanning));
+
+  const planningReady = localAvailable("reasoningModel") || localAvailable("extractionModel") || cloudReady(false);
+  const rewriteReady = localAvailable("primaryRewriteModel") || cloudReady(true);
+
+  const missing: string[] = [];
+  if (!planningReady) missing.push("a reasoning/extraction model for Blueprint, Summaries, and Critic");
+  if (!rewriteReady) missing.push("a rewrite model for paragraph rewriting");
+
+  return { ready: planningReady && rewriteReady, missing };
+}
+
 export function AutoReviewWizard({ bookId, bookTitle, plannedChapterCount = 0 }: Props) {
   const needsDraftingFirst = plannedChapterCount > 0;
   const [open, setOpen] = useState(false);
@@ -81,6 +112,25 @@ export function AutoReviewWizard({ bookId, bookTitle, plannedChapterCount = 0 }:
   const [resumableJob, setResumableJob] = useState<ResumableJob | null>(null);
   const [checkingResume, setCheckingResume] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [modelReadiness, setModelReadiness] = useState<ModelReadiness | null>(null);
+  const [checkingModels, setCheckingModels] = useState(false);
+
+  async function checkModelReadiness() {
+    setCheckingModels(true);
+    try {
+      const res = await fetch("/api/lmstudio/status", { cache: "no-store" });
+      const status = (await res.json()) as ModelStatusResponse;
+      setModelReadiness(computeModelReadiness(status));
+    } catch {
+      // Unreachable status check shouldn't block the wizard on its own --
+      // the job-creation/pipeline routes still fail clearly if a model
+      // genuinely isn't usable. Only block on a confirmed gap, not a
+      // failed check.
+      setModelReadiness(null);
+    } finally {
+      setCheckingModels(false);
+    }
+  }
 
   async function checkForResumableJob() {
     setCheckingResume(true);
@@ -164,6 +214,7 @@ export function AutoReviewWizard({ bookId, bookTitle, plannedChapterCount = 0 }:
     setStartError(null);
     setOpen(true);
     checkForResumableJob();
+    checkModelReadiness();
   }
 
   return (
@@ -214,6 +265,17 @@ export function AutoReviewWizard({ bookId, bookTitle, plannedChapterCount = 0 }:
               </Alert>
             )}
 
+            {modelReadiness && !modelReadiness.ready && (
+              <Alert color="red" title="Missing model setup">
+                <Text size="sm" mb="xs">
+                  Auto-Review can&apos;t run yet -- it&apos;s missing {modelReadiness.missing.join(" and ")}.
+                </Text>
+                <Button component={Link} href="/settings" size="xs" color="red" variant="light">
+                  Configure in Settings
+                </Button>
+              </Alert>
+            )}
+
             {resumableJob && (
               <Alert color="orange" icon={<IconPlayerPlay size={16} />} title="Resume available">
                 <Text size="sm" mb="xs">
@@ -221,37 +283,47 @@ export function AutoReviewWizard({ bookId, bookTitle, plannedChapterCount = 0 }:
                   Resume continues from the next stage and skips completed work.
                 </Text>
                 {resumableJob.error && <Text size="xs" c="dimmed" mb="xs">Last stop reason: {resumableJob.error}</Text>}
-                <Button size="xs" color="orange" leftSection={<IconPlayerPlay size={14} />} onClick={() => start(resumableJob)}>
+                <Button
+                  size="xs"
+                  color="orange"
+                  leftSection={<IconPlayerPlay size={14} />}
+                  disabled={Boolean(modelReadiness && !modelReadiness.ready)}
+                  onClick={() => start(resumableJob)}
+                >
                   Resume from stage {resumableJob.stages_completed.length + 1}
                 </Button>
               </Alert>
             )}
 
             <Text c="dimmed" size="sm">
-              {checkingResume
-                ? "Checking for previous runs..."
+              {checkingResume || checkingModels
+                ? "Checking model setup and previous runs..."
                 : "Choose a mode. The first three run the full pipeline automatically and publish when complete. Guided lets you review and approve each stage yourself."}
             </Text>
 
             <Stack gap="sm">
-              {[...MODES, GUIDED_OPTION].map((mode) => (
+              {[...MODES, GUIDED_OPTION].map((mode) => {
+                const blocked = mode.value !== "guided" && Boolean(modelReadiness && !modelReadiness.ready);
+                return (
                 <Card
                   key={mode.value}
                   withBorder
                   radius="md"
                   p="md"
                   style={{
-                    cursor: "pointer",
+                    cursor: blocked ? "not-allowed" : "pointer",
+                    opacity: blocked ? 0.5 : 1,
                     border: selected === mode.value ? `2px solid var(--mantine-color-${mode.color}-6)` : undefined,
                     background: selected === mode.value ? `var(--mantine-color-${mode.color}-0)` : undefined,
                   }}
-                  onClick={() => setSelected(mode.value)}
+                  onClick={() => !blocked && setSelected(mode.value)}
                 >
                   <Group wrap="nowrap" align="flex-start">
                     <Radio
                       value={mode.value}
                       checked={selected === mode.value}
-                      onChange={() => setSelected(mode.value)}
+                      disabled={blocked}
+                      onChange={() => !blocked && setSelected(mode.value)}
                       color={mode.color}
                     />
                     <ThemeIcon color={mode.color} variant="light" size="xl" radius="md">
@@ -266,7 +338,8 @@ export function AutoReviewWizard({ bookId, bookTitle, plannedChapterCount = 0 }:
                     </Box>
                   </Group>
                 </Card>
-              ))}
+                );
+              })}
             </Stack>
 
             <Group justify="flex-end" mt="sm">
@@ -278,7 +351,7 @@ export function AutoReviewWizard({ bookId, bookTitle, plannedChapterCount = 0 }:
               ) : (
                 <Button
                   color="grape"
-                  disabled={!selected}
+                  disabled={!selected || Boolean(modelReadiness && !modelReadiness.ready)}
                   onClick={() => start()}
                 >
                   Start Auto-Review
