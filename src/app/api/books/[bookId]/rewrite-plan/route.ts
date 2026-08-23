@@ -49,6 +49,15 @@ function getErrorMessage(error: unknown) {
   return "Rewrite plan generation failed.";
 }
 
+// A direct (non-serverManaged) call runs its model call synchronously
+// in-request, with no explicit max_tokens (falls through to the account's
+// general cloud output-budget setting, which can be sizable) -- no
+// maxDuration meant this ran under Vercel's platform default rather than
+// the 45s client-side SDK timeout, which a real cloud-model call can exceed
+// on a slower model/tier. See src/lib/critic/run.ts for the incident this
+// pattern traces back to.
+export const maxDuration = 150;
+
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
   try {
     const { bookId } = await context.params;
@@ -286,6 +295,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         },
         undefined,
         telemetryContext,
+        { timeoutMs: 140_000 },
       );
 
       const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({

@@ -37,6 +37,15 @@ function getErrorMessage(
   return "Chapter summary generation failed.";
 }
 
+// A direct (non-serverManaged) call runs one createManagedChatCompletion
+// call per chapter, sequentially, all inside this one request -- unlike the
+// single-call routes fixed alongside this one, the per-chapter timeout
+// override isn't enough by itself; the route's own overall budget has to
+// cover every chapter in the book, not just one call. Near Vercel Pro's
+// 800s ceiling; a book with enough chapters can still exceed even this --
+// same residual risk already noted on critic/all and creation/architecture.
+export const maxDuration = 780;
+
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
   try {
     const { bookId } = await context.params;
@@ -224,6 +233,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           },
           undefined,
           telemetryContext,
+          { timeoutMs: 90_000 },
         );
 
         const raw = completion.choices[0]?.message.content || "{}";
