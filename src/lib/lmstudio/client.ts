@@ -254,6 +254,15 @@ export async function createManagedChatCompletion(
   },
   validateOutcome?: (content: string) => { outcome: ModelCallOutcome; wordCount?: number },
   telemetryContext?: ModelCallTelemetryContext,
+  // Overrides createProviderClient's flat CLOUD_PROVIDER_TIMEOUT_MS for this
+  // one call. Needed for single large planning-style calls (e.g. book
+  // architecture, which can legitimately run 2min+) that would otherwise
+  // hit the client-level timeout tuned for the high-volume, tightly-chunked
+  // routes -- see requestTimeoutMs's call sites for why each value was
+  // picked; don't raise the shared default instead, that would blow the
+  // per-chunk budget those routes depend on to stay under their own
+  // maxDuration.
+  requestOptions?: { timeoutMs?: number },
 ) {
   const startedAt = Date.now();
   const resolvedModel = params.model || prepared.model;
@@ -280,21 +289,24 @@ export async function createManagedChatCompletion(
       Object.entries(params).filter(([key]) => key !== "top_p"),
     ) as typeof params;
     const safeParams = prepared.isCloud ? paramsWithoutTopP : params;
-    const completion = await client.chat.completions.create({
-      ...safeParams,
-      model: resolvedModel,
-      // Trust an explicitly-passed max_tokens as-is; only fall back to the
-      // prepared/account default when the caller didn't specify one. The
-      // previous Math.min(params.max_tokens || default, default) is
-      // mathematically always equal to `default` whenever a caller passes
-      // anything larger than it — silently discarding every explicit
-      // request for more output, for every call site in the codebase. This
-      // is what made a book architecture's own increased max_tokens budget
-      // a no-op: it always got re-clamped back down to the account's
-      // general cloud max-output setting (tuned for per-paragraph rewrite
-      // calls), regardless of what the architecture route asked for.
-      max_tokens: maxOutputTokens,
-    });
+    const completion = await client.chat.completions.create(
+      {
+        ...safeParams,
+        model: resolvedModel,
+        // Trust an explicitly-passed max_tokens as-is; only fall back to the
+        // prepared/account default when the caller didn't specify one. The
+        // previous Math.min(params.max_tokens || default, default) is
+        // mathematically always equal to `default` whenever a caller passes
+        // anything larger than it — silently discarding every explicit
+        // request for more output, for every call site in the codebase. This
+        // is what made a book architecture's own increased max_tokens budget
+        // a no-op: it always got re-clamped back down to the account's
+        // general cloud max-output setting (tuned for per-paragraph rewrite
+        // calls), regardless of what the architecture route asked for.
+        max_tokens: maxOutputTokens,
+      },
+      requestOptions?.timeoutMs ? { timeout: requestOptions.timeoutMs } : undefined,
+    );
     void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
     return completion;
   } catch (error) {
@@ -307,11 +319,14 @@ export async function createManagedChatCompletion(
       ) as typeof paramsWithoutTemperature;
       const safeRetryParams = prepared.isCloud ? paramsWithoutTopP : paramsWithoutTemperature;
 
-      const completion = await client.chat.completions.create({
-        ...safeRetryParams,
-        model: resolvedModel,
-        max_tokens: maxOutputTokens,
-      });
+      const completion = await client.chat.completions.create(
+        {
+          ...safeRetryParams,
+          model: resolvedModel,
+          max_tokens: maxOutputTokens,
+        },
+        requestOptions?.timeoutMs ? { timeout: requestOptions.timeoutMs } : undefined,
+      );
       void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
       return completion;
     }
