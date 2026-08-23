@@ -525,7 +525,21 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       // wizard's UI has no way to tell a stage is running versus stalled,
       // since current_stage otherwise still points at the previous
       // (already-completed) stage for the entire duration.
-      await supabase.from("auto_review_jobs").update({ current_stage: stage }).eq("id", body.jobId);
+      //
+      // Also re-asserts status: "running" here, not just once at the top of
+      // this request -- confirmed live: the opportunistic stale-job sweep
+      // (detectAndHealStaleAutoReviewJobs) can race a resumed run within
+      // milliseconds of it restarting, reading a snapshot from just before
+      // the resume and writing status="failed" on a job that's actually
+      // alive and about to keep completing real stages (proven by log
+      // entries with later timestamps than the "failure"). There's no
+      // cheap way to fully close that race without real locking, so this
+      // self-heals it instead: every stage start corrects the status back
+      // to "running", so a spurious mid-air "failed" from the sweep gets
+      // overwritten within one stage's completion time rather than
+      // sticking on the job forever while the backend quietly keeps
+      // working underneath a UI that says it died.
+      await supabase.from("auto_review_jobs").update({ current_stage: stage, status: "running" }).eq("id", body.jobId);
 
       if (stage === "analyze") {
         await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/analyze`, {}));
