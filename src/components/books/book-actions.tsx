@@ -129,12 +129,16 @@ export function BookActions({
   sceneCount,
   paragraphCount,
   plannedChapterCount = 0,
+  bookBibleUpdatedAt = null,
+  summarizedChapterCount = 0,
 }: {
   bookId: string;
   chapterCount: number;
   sceneCount: number;
   paragraphCount: number;
   plannedChapterCount?: number;
+  bookBibleUpdatedAt?: string | null;
+  summarizedChapterCount?: number;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
@@ -1443,6 +1447,11 @@ export function BookActions({
                 >
                   {remoteOnly ? "Already running -- see progress below" : "Generate Manuscript Blueprint"}
                 </Button>
+                {bookBibleUpdatedAt && !localActive && !remoteJob && (
+                  <Text size="xs" c="teal">
+                    ✓ Generated {new Date(bookBibleUpdatedAt).toLocaleString()}
+                  </Text>
+                )}
                 <AiJobQueueInlineStatus
                   job={localActive ? queue : remoteJob ? remoteJobAsQueueState(remoteJob) : queue}
                   visible={localActive || Boolean(remoteJob)}
@@ -1469,6 +1478,13 @@ export function BookActions({
                 <Text size="xs" c="dimmed">
                   This opens AI Task Preflight. Click Proceed in that dialog to start summary generation.
                 </Text>
+                {summarizedChapterCount > 0 && !localActive && !remoteJob && (
+                  <Text size="xs" c={summarizedChapterCount >= chapterCount ? "teal" : "orange"}>
+                    {summarizedChapterCount >= chapterCount
+                      ? `✓ All ${chapterCount} chapter(s) summarized`
+                      : `${summarizedChapterCount} of ${chapterCount} chapter(s) summarized -- run again to cover the rest`}
+                  </Text>
+                )}
                 <AiJobQueueInlineStatus
                   job={localActive ? queue : remoteJob ? remoteJobAsQueueState(remoteJob) : queue}
                   visible={localActive || Boolean(remoteJob)}
