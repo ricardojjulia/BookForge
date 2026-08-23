@@ -679,7 +679,7 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
         <Alert color="red" icon={<IconX size={18} />} title="Workflow failed">
           <Text size="sm" mb="xs">
             {effectiveErrorMsg}. {likelyTransientFailure
-              ? "This is often transient (LM Studio restart, brief network timeout, or provider hiccup). Resume to continue from the next unfinished stage."
+              ? "This is often transient (a brief network timeout or AI provider hiccup). Resume to continue from the next unfinished stage."
               : "Fix the issue, then resume. Completed stages will be skipped."}
           </Text>
           <Button size="xs" color="orange" onClick={onDone}>
