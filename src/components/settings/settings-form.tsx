@@ -27,7 +27,7 @@ import { OPENROUTER_TASK_MODEL_DEFAULTS, resolveManagedSaasTaskModelDefaults } f
 import type { LlmProvider, LmStudioTaskKind } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
 import { isManagedSaasDeployment } from "@/lib/deployment/mode";
-import { fetchAllowedModelsForCurrentUser } from "@/lib/subscription/client-tier-models";
+import { fetchAllowedModelsForCurrentUser, fetchCurrentModelPricing } from "@/lib/subscription/client-tier-models";
 
 type ExecutionMode = "auto" | "local" | "cloud";
 
@@ -646,7 +646,11 @@ export function SettingsForm({
                           onClick={async () => {
                             setFetchingModels(true);
                             try {
-                              const defaults = resolveManagedSaasTaskModelDefaults(await fetchAllowedModelsForCurrentUser());
+                              const [allowedModels, pricing] = await Promise.all([
+                                fetchAllowedModelsForCurrentUser(),
+                                fetchCurrentModelPricing(),
+                              ]);
+                              const defaults = resolveManagedSaasTaskModelDefaults(allowedModels, pricing);
                               setSettings((current) => ({
                                 ...current,
                                 llm_critic_model: defaults.critic,
