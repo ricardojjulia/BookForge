@@ -11,15 +11,30 @@ import { estimateWordsForPages } from "@/lib/manuscript/page-estimate";
 import { createClient } from "@/lib/supabase/server";
 
 // Single synchronous LLM call requesting up to 32,000 output tokens for
-// cloud models (see architectureMaxTokens below) -- the code that raised
-// that ceiling already documented this "can run 30s-2min+" for a full
-// architecture. Not chunked like rewrite-execute/generate-draft/critic, so
-// give it real headroom instead of their tightly-budgeted 55s (now that the
-// Vercel plan actually supports it). See CLOUD_PROVIDER_TIMEOUT_MS in
-// src/lib/ai/providers.ts for why the client-level default can't just be
-// raised globally instead.
-export const maxDuration = 150;
-const REQUEST_TIMEOUT_MS = 140_000;
+// cloud models (see architectureMaxTokens below). Not chunked like
+// rewrite-execute/generate-draft/critic, so this needs real headroom
+// instead of their tightly-budgeted 55s (now that the Vercel Pro plan
+// supports up to 800s). The original "30s-2min+" estimate in this file's
+// history undersold it badly: a live production test of the much smaller
+// concept call (3,500-token budget) measured only ~39 tokens/sec through
+// OpenRouter's current routing for deepseek-v4-pro (provider "StreamLake"
+// at the time) -- at that rate the full 32,000-token ceiling could need
+// 800s+, and a "typical" architecture (targetPages/8 chapters, ~2,000
+// tokens/chapter per this file's own comment below) can realistically
+// approach 30,000 tokens even outside the worst case. Budgeted near Pro's
+// practical ceiling rather than a number that looked generous against the
+// old estimate. See CLOUD_PROVIDER_TIMEOUT_MS in src/lib/ai/providers.ts
+// for why the client-level default can't just be raised globally instead.
+//
+// This is a real UX tradeoff, not just an infra number: a user can now
+// wait up to ~13 minutes on this one call with no incremental progress.
+// The complete fix is the same chunked/resumable-job pattern PR #128 gave
+// rewrite-execute/generate-draft/critic; that was offered as an
+// alternative to the Pro upgrade and declined in favor of the upgrade, so
+// this raises the ceiling instead. Revisit if the wait proves too long in
+// practice.
+export const maxDuration = 780;
+const REQUEST_TIMEOUT_MS = 760_000;
 
 const schema = z.object({
   creationProjectId: z.string().uuid(),
