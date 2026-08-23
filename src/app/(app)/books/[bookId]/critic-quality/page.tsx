@@ -8,6 +8,7 @@ import { RewritePlanActions } from "@/components/books/rewrite/rewrite-plan-acti
 import { RewritePlanView } from "@/components/books/rewrite/rewrite-plan-view";
 import { ResetRewriteButton } from "@/components/books/rewrite/reset-rewrite-button";
 import { ReadinessStatusGrid } from "@/components/books/rewrite/readiness-status-grid";
+import { isManagedSaasDeployment } from "@/lib/deployment/mode";
 import { PostRunQualityGate } from "@/components/books/rewrite/post-run-quality-gate";
 import { CriticComparisonPanel } from "@/components/books/reports/critic-comparison-panel";
 import { CriticReportsPanel } from "@/components/books/reports/critic-reports-panel";
@@ -242,7 +243,7 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
         />
       </div>
 
-      <RewriteModelEvaluator bookId={bookId} />
+      {!isManagedSaasDeployment() && <RewriteModelEvaluator bookId={bookId} />}
 
       <Paper id="planning-gate" withBorder radius="md" p="xl" bg="white" mb="xl">
         <Stack>
