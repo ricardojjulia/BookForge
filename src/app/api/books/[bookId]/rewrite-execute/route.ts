@@ -48,6 +48,13 @@ const schema = z.object({
   // Set true to bypass it for a deliberate, narrowly-targeted repair call.
   forceTinyParagraphs: z.boolean().default(false),
   retryJobId: z.string().uuid().optional(),
+  // Set by a caller that already drives the chunk-by-chunk loop itself
+  // (the auto-review orchestrator's callStage) so this route's own
+  // self-chain below doesn't ALSO dispatch the next chunk -- both drivers
+  // running at once would race the same chunk concurrently, exactly the
+  // class of bug a real prior incident already burned this codebase on
+  // (13 duplicate full_book_rewrite jobs in parallel for ~2 hours).
+  externalDriver: z.boolean().optional(),
   distributeAcrossChapters: z.boolean().default(false),
   coverageMode: z.enum(["normal", "uncovered_chapter_sample"]).default("normal"),
   strategyId: z.enum([
@@ -721,11 +728,33 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     if (!isCancelledAfterChunk && remainingUnits > 0) {
       // More eligible work remains -- stop here rather than looping into
-      // another chunk within this same request. The job stays "running"; the
-      // caller is expected to call this route again with the same jobId.
-      // None of the "job finished" bookkeeping below (coherence report,
-      // campaign stats, completed_at) runs until a chunk call finds zero
-      // remaining eligible units.
+      // another chunk within this same request. The job stays "running".
+      //
+      // This used to leave dispatching the next chunk entirely up to the
+      // caller -- fine when the orchestrator's own server-side loop is
+      // driving it, but the manual Rewrite Architect flow drives this from
+      // the BROWSER (runChunkedJob's client-side loop), so navigating away,
+      // closing the tab, or the tab getting backgrounded/throttled just
+      // silently stops all further progress. Found live: a real full-book
+      // rewrite sat at "unit 1 of 25" for hours with no auto_review_jobs
+      // row driving it at all. Self-chain a continuation here too, same
+      // fire-and-forget pattern the auto-review orchestrator already uses,
+      // so the server keeps making progress on its own regardless of
+      // whether anyone's still watching. A still-open browser tab's own
+      // call becomes redundant but harmless -- eligibility is re-derived
+      // fresh from revision_versions every call, so whichever caller (this
+      // self-chain or the browser) gets there first just does the work;
+      // the other finds it already done and skips it.
+      if (!body.externalDriver) {
+        const cookie = request.headers.get("cookie") || "";
+        const selfUrl = new URL(request.url);
+        void fetch(selfUrl.toString(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", cookie },
+          body: JSON.stringify({ ...body, jobId }),
+        }).catch(() => {});
+      }
+
       return NextResponse.json({
         content: {
           revisionJobId: jobId,

@@ -417,6 +417,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             body: JSON.stringify({
               ...bodyPayload,
               serverManaged: true,
+              externalDriver: true,
               metadataSnapshotId: selection.metadataSnapshotId || undefined,
               metadataBranchName: selection.metadataBranchName || undefined,
               metadataSelectionSource: selection.metadataSelectionSource || undefined,
@@ -442,6 +443,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             body: JSON.stringify({
               ...bodyPayload,
               jobId: chunkJobId,
+              externalDriver: true,
               metadataSnapshotId: selection.metadataSnapshotId || undefined,
               metadataBranchName: selection.metadataBranchName || undefined,
               metadataSelectionSource: selection.metadataSelectionSource || undefined,

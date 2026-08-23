@@ -474,6 +474,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
 
       revalidatePath(`/books/${bookId}`);
 
+      // This route only ever drafts one chapter per call and relies on the
+      // caller (the browser's runChunkedJob, via book-actions.tsx's "Write
+      // Your Chapters" button) to call it again while remainingChapters > 0
+      // -- so navigating away, closing the tab, or the tab getting
+      // backgrounded/throttled silently stops all further drafting. Same
+      // bug and same fix as rewrite-execute: self-chain a continuation so
+      // the server keeps making progress regardless of whether anyone's
+      // still watching. A still-open tab's own next call becomes redundant
+      // but harmless -- it just finds this chapter already drafted.
+      if (!isJobDone) {
+        const cookie = request.headers.get("cookie") || "";
+        void fetch(new URL(request.url).toString(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", cookie },
+          body: JSON.stringify({ ...body, jobId }),
+        }).catch(() => {});
+      }
+
       return NextResponse.json({
         content: {
           jobId,
