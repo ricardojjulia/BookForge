@@ -10,6 +10,17 @@ import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { estimateWordsForPages } from "@/lib/manuscript/page-estimate";
 import { createClient } from "@/lib/supabase/server";
 
+// Single synchronous LLM call requesting up to 32,000 output tokens for
+// cloud models (see architectureMaxTokens below) -- the code that raised
+// that ceiling already documented this "can run 30s-2min+" for a full
+// architecture. Not chunked like rewrite-execute/generate-draft/critic, so
+// give it real headroom instead of their tightly-budgeted 55s (now that the
+// Vercel plan actually supports it). See CLOUD_PROVIDER_TIMEOUT_MS in
+// src/lib/ai/providers.ts for why the client-level default can't just be
+// raised globally instead.
+export const maxDuration = 150;
+const REQUEST_TIMEOUT_MS = 140_000;
+
 const schema = z.object({
   creationProjectId: z.string().uuid(),
   concept: z.record(z.string(), z.unknown()),
@@ -122,6 +133,7 @@ export async function POST(request: Request) {
       },
       undefined,
       telemetryContext,
+      { timeoutMs: REQUEST_TIMEOUT_MS },
     );
     const truncated = completion.choices[0]?.finish_reason === "length";
 

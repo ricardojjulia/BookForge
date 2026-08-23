@@ -11,6 +11,14 @@ import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { createClient } from "@/lib/supabase/server";
 
+// Single synchronous LLM call, not chunked -- give it real headroom rather
+// than the tightly-budgeted 55s the chunked routes rely on (now that the
+// Vercel plan actually supports it). See CLOUD_PROVIDER_TIMEOUT_MS in
+// src/lib/ai/providers.ts for why the client-level default can't just be
+// raised globally instead.
+export const maxDuration = 60;
+const REQUEST_TIMEOUT_MS = 55_000;
+
 const schema = z.object({
   creationProjectId: z.string().uuid().optional(),
   workingTitle: z.string().trim().min(1).max(180),
@@ -92,6 +100,7 @@ export async function POST(request: Request) {
       },
       undefined,
       telemetryContext,
+      { timeoutMs: REQUEST_TIMEOUT_MS },
     );
 
     const content = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({
