@@ -75,7 +75,17 @@ function isTransientStageError(error: unknown) {
   // full-manuscript rewrite can legitimately run for hours; treating this as
   // retryable lets runStageWithRetry go back to watching the SAME dispatched
   // job (see pendingStageJob below) instead of the whole run dying here.
-  return /(fetch failed|Failed to fetch|ECONNRESET|ECONNREFUSED|ETIMEDOUT|HeadersTimeout|UND_ERR_|socket hang up|network error|timeout|timed out)/i.test(message);
+  //
+  // "stalled" / "died mid-run" catches detectAndHealStaleAutoReviewJobs' and
+  // the revision_jobs heartbeat sweep's own error text (job-state.ts) -- a
+  // stage worker getting hard-killed by a platform duration limit before it
+  // reaches its own catch block, then reported minutes later by an unrelated
+  // watchdog. Found live: this exact failure never matched the original
+  // pattern (its message contains neither "timeout" nor "timed out"), so
+  // runStageWithRetry's 3-attempt/backoff retry never triggered at all --
+  // the very first hung critic-lens call permanently failed the whole
+  // review instead of being retried like any other transient failure.
+  return /(fetch failed|Failed to fetch|ECONNRESET|ECONNREFUSED|ETIMEDOUT|HeadersTimeout|UND_ERR_|socket hang up|network error|timeout|timed out|stalled|died mid-run)/i.test(message);
 }
 
 function wait(ms: number) {
