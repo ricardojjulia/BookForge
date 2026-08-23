@@ -248,6 +248,18 @@ const MANAGED_SAAS_TASK_MODEL_PRIORITY: Record<LmStudioTaskKind, string[]> = {
   planning: ["anthropic/claude-haiku-4.5", "deepseek/deepseek-v4-pro"],
 };
 
+export type ModelPrice = { inputUsdMicrosPerMillion: number; outputUsdMicrosPerMillion: number };
+
+// Equal-weight input+output as a single "blended cost" signal for ranking --
+// real per-task token ratios vary (critic's short JSON output vs. rewrite's
+// long prose), and this file has no per-task usage data to justify a fancier
+// weighting. This only ever breaks a tie between models this file already
+// considers equally suitable for a task (MANAGED_SAAS_TASK_MODEL_PRIORITY),
+// never chooses between models of different trust tiers.
+function blendedCostPerMillionTokens(price: ModelPrice): number {
+  return price.inputUsdMicrosPerMillion + price.outputUsdMicrosPerMillion;
+}
+
 /**
  * "Optimize per feature"'s managed-SaaS-safe defaults: resolves each task to
  * the best model actually in `allowedModels` (the caller's real tier
@@ -258,13 +270,45 @@ const MANAGED_SAAS_TASK_MODEL_PRIORITY: Record<LmStudioTaskKind, string[]> = {
  * deepseek-v4-pro when nothing else in a task's priority list is allowed --
  * that model is on every tier's allowlist, so this never returns something
  * ungated.
+ *
+ * When `pricing` is supplied (current model_pricing rows, kept fresh by a
+ * daily OpenRouter refresh -- see refreshModelPricingFromOpenRouter), picks
+ * whichever ALLOWED candidate in a task's priority list is currently
+ * cheapest instead of always taking the first entry. A promo or a real price
+ * move on one of two already-vetted options should actually get used, not
+ * just recorded for billing. Never expands which models are considered --
+ * only re-ranks within the existing, already-quality-vetted priority list.
  */
-export function resolveManagedSaasTaskModelDefaults(allowedModels: ReadonlySet<string>): Record<LmStudioTaskKind, string> {
+export function resolveManagedSaasTaskModelDefaults(
+  allowedModels: ReadonlySet<string>,
+  pricing?: ReadonlyMap<string, ModelPrice>,
+): Record<LmStudioTaskKind, string> {
   const result = {} as Record<LmStudioTaskKind, string>;
   for (const task of Object.keys(MANAGED_SAAS_TASK_MODEL_PRIORITY) as LmStudioTaskKind[]) {
-    result[task] = MANAGED_SAAS_TASK_MODEL_PRIORITY[task].find((m) => allowedModels.has(m)) ?? "deepseek/deepseek-v4-pro";
+    const candidates = MANAGED_SAAS_TASK_MODEL_PRIORITY[task].filter((m) => allowedModels.has(m));
+    result[task] = pickModel(candidates, pricing) ?? "deepseek/deepseek-v4-pro";
   }
   return result;
+}
+
+function pickModel(candidates: string[], pricing?: ReadonlyMap<string, ModelPrice>): string | undefined {
+  if (candidates.length === 0) return undefined;
+  if (candidates.length === 1 || !pricing) return candidates[0];
+
+  let cheapest: string | undefined;
+  let cheapestCost = Infinity;
+  for (const model of candidates) {
+    const price = pricing.get(model);
+    if (!price) continue;
+    const cost = blendedCostPerMillionTokens(price);
+    if (cost < cheapestCost) {
+      cheapestCost = cost;
+      cheapest = model;
+    }
+  }
+  // If nothing in the candidate list has a live price on record, fall back
+  // to the static quality-preference order rather than guessing.
+  return cheapest ?? candidates[0];
 }
 
 // ---------------------------------------------------------------------------

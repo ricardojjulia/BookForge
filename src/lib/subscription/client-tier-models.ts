@@ -1,3 +1,4 @@
+import type { ModelPrice } from "@/lib/ai/model-catalog";
 import { createClient } from "@/lib/supabase/client";
 
 /**
@@ -33,4 +34,32 @@ export async function fetchAllowedModelsForCurrentUser(): Promise<Set<string>> {
     .eq("task", "*");
 
   return new Set((models ?? []).map((m) => m.model as string));
+}
+
+/**
+ * Current (effective_to is null) live-refreshed price per tracked model --
+ * see refreshModelPricingFromOpenRouter, which keeps this table current via
+ * a daily cron. Readable by any authenticated user (same RLS pattern as
+ * fetchAllowedModelsForCurrentUser above). Lets "Optimize per feature"
+ * prefer whichever already-vetted, already-allowed model is cheapest right
+ * now instead of always taking the first entry in a static priority list --
+ * a promo/price move on one of two otherwise-equal options should actually
+ * get used, not just tracked for billing.
+ */
+export async function fetchCurrentModelPricing(): Promise<Map<string, ModelPrice>> {
+  const supabase = createClient();
+  const { data: rows } = await supabase
+    .from("model_pricing")
+    .select("model,input_usd_micros_per_million_tokens,output_usd_micros_per_million_tokens")
+    .is("effective_to", null);
+
+  return new Map(
+    (rows ?? []).map((row) => [
+      row.model as string,
+      {
+        inputUsdMicrosPerMillion: row.input_usd_micros_per_million_tokens as number,
+        outputUsdMicrosPerMillion: row.output_usd_micros_per_million_tokens as number,
+      },
+    ]),
+  );
 }

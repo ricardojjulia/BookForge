@@ -28,7 +28,7 @@ import { createClient } from "@/lib/supabase/client";
 import { PROVIDER_META } from "@/lib/ai/providers";
 import { isManagedSaasDeployment } from "@/lib/deployment/mode";
 import { OPENROUTER_TASK_MODEL_DEFAULTS, resolveManagedSaasTaskModelDefaults } from "@/lib/ai/model-catalog";
-import { fetchAllowedModelsForCurrentUser } from "@/lib/subscription/client-tier-models";
+import { fetchAllowedModelsForCurrentUser, fetchCurrentModelPricing } from "@/lib/subscription/client-tier-models";
 import { useWizardAutoOpen, WizardShell } from "@/components/onboarding/wizard-shell";
 import { markOnboardingStepDone, ONBOARDING_STEPS } from "@/lib/onboarding/steps";
 import type { LmStudioTaskKind } from "@/lib/types";
@@ -264,7 +264,8 @@ function CloudStep({
   async function getMyModels() {
     setFetchingModels(true);
     try {
-      setTaskModels(resolveManagedSaasTaskModelDefaults(await fetchAllowedModelsForCurrentUser()));
+      const [allowedModels, pricing] = await Promise.all([fetchAllowedModelsForCurrentUser(), fetchCurrentModelPricing()]);
+      setTaskModels(resolveManagedSaasTaskModelDefaults(allowedModels, pricing));
     } finally {
       setFetchingModels(false);
     }
