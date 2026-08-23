@@ -192,6 +192,35 @@ export async function providerChatCompletion(
  * Reads standard LLM provider settings from environment variables so the app
  * works without a DB row (useful for self-hosted / CLI usage).
  */
+/**
+ * OpenRouter-specific guard against a real incident: a Management/
+ * Provisioning API key (openrouter.ai/settings/management-keys)
+ * authenticates fine against /models and even /auth/key itself, but every
+ * real chat-completion call with one fails with "401 User not found" --
+ * there's no other reliable way to catch this before a user actually tries
+ * to generate something. Whoever created the key can easily land on the
+ * wrong OpenRouter page by mistake (that's exactly what happened to
+ * BookForge's own managed-SaaS master key), so this only ever needs a
+ * user-supplied key to check, never the server's own fallback key.
+ */
+export async function assertNotOpenRouterManagementKey(apiKey: string): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch("https://openrouter.ai/api/v1/auth/key", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+  } catch {
+    return; // network hiccup -- let the caller's own connection check surface it
+  }
+  if (!res.ok) return; // an invalid/expired key is the caller's own check's job to report
+  const body = (await res.json().catch(() => null)) as { data?: { is_management_key?: boolean; is_provisioning_key?: boolean } } | null;
+  if (body?.data?.is_management_key || body?.data?.is_provisioning_key) {
+    throw new Error(
+      "That's an OpenRouter Management/Provisioning key, not a regular API key — it can't run model requests. Create one at openrouter.ai/keys instead (not Settings → Management Keys).",
+    );
+  }
+}
+
 export function getStandardLlmSettingsFromEnv(): StandardLlmSettings | null {
   const provider = process.env.LLM_PROVIDER as LlmProvider | undefined;
   if (!provider || provider === "lmstudio") return null;
