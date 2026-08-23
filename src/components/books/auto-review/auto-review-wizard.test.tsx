@@ -42,6 +42,13 @@ describe("AutoReviewWizard", () => {
         });
       }
 
+      if (url.includes("/lmstudio/status")) {
+        return new Response(
+          JSON.stringify({ connected: true, cloudProvider: { model: "test-model", usedForPlanning: true, usedForRewrite: true } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
       return new Response(JSON.stringify({}), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -86,6 +93,13 @@ describe("AutoReviewWizard", () => {
           status: 500,
           headers: { "Content-Type": "application/json" },
         });
+      }
+
+      if (url.includes("/lmstudio/status")) {
+        return new Response(
+          JSON.stringify({ connected: true, cloudProvider: { model: "test-model", usedForPlanning: true, usedForRewrite: true } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
       }
 
       return new Response(JSON.stringify({}), {
@@ -151,6 +165,13 @@ describe("AutoReviewWizard", () => {
         });
       }
 
+      if (url.includes("/lmstudio/status")) {
+        return new Response(
+          JSON.stringify({ connected: true, cloudProvider: { model: "test-model", usedForPlanning: true, usedForRewrite: true } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
       return new Response(JSON.stringify({}), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -210,6 +231,13 @@ describe("AutoReviewWizard", () => {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
+      }
+
+      if (url.includes("/lmstudio/status")) {
+        return new Response(
+          JSON.stringify({ connected: true, cloudProvider: { model: "test-model", usedForPlanning: true, usedForRewrite: true } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
       }
 
       return new Response(JSON.stringify({}), {
@@ -290,6 +318,13 @@ describe("AutoReviewWizard", () => {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
+      }
+
+      if (url.includes("/lmstudio/status")) {
+        return new Response(
+          JSON.stringify({ connected: true, cloudProvider: { model: "test-model", usedForPlanning: true, usedForRewrite: true } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
       }
 
       return new Response(JSON.stringify({}), {
