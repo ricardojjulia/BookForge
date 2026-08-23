@@ -39,6 +39,14 @@ function getErrorMessage(
   return "Analysis failed.";
 }
 
+// A direct (non-serverManaged) call runs one createManagedChatCompletion
+// call per manuscript chunk, sequentially, all inside this one request --
+// chunk count is unbounded (the whole manuscript), so this needs the
+// biggest budget of this batch of fixes. Near Vercel Pro's 800s ceiling; a
+// long enough manuscript can still exceed even this -- same residual risk
+// already noted on critic/all, creation/architecture, and chapters/summarize.
+export const maxDuration = 780;
+
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
   let discoveryContext: {
     bookId: string;
@@ -237,6 +245,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           },
           undefined,
           telemetryContext,
+          { timeoutMs: 90_000 },
         );
 
         const content = completion.choices[0]?.message.content || "{}";

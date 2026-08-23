@@ -37,6 +37,12 @@ function getErrorMessage(error: unknown) {
   return "Unable to suggest scenes.";
 }
 
+// Synchronous, user-facing wait -- no maxDuration meant this ran under
+// Vercel's platform default rather than the 45s client-side SDK timeout,
+// which a real cloud-model call can exceed on a slower model/tier. See
+// src/lib/critic/run.ts for the incident this pattern traces back to.
+export const maxDuration = 150;
+
 export async function POST(_: Request, context: { params: Promise<{ chapterId: string }> }) {
   try {
     const { chapterId } = await context.params;
@@ -111,6 +117,7 @@ export async function POST(_: Request, context: { params: Promise<{ chapterId: s
       },
       undefined,
       telemetryContext,
+      { timeoutMs: 140_000 },
     );
 
     const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({

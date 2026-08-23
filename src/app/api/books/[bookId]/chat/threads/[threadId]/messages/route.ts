@@ -79,6 +79,12 @@ type DraftRow = {
   created_at: string;
 };
 
+// Synchronous, user-facing wait -- no maxDuration meant this ran under
+// Vercel's platform default rather than the 45s client-side SDK timeout,
+// which a real cloud-model call can exceed on a slower model/tier. See
+// src/lib/critic/run.ts for the incident this pattern traces back to.
+export const maxDuration = 150;
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ bookId: string; threadId: string }> },
@@ -256,7 +262,7 @@ export async function POST(
           content: body.userMessage,
         },
       ],
-    }, undefined, modelPlan.telemetryContext);
+    }, undefined, modelPlan.telemetryContext, { timeoutMs: 140_000 });
 
     const rawAssistantText = completion.choices[0]?.message?.content?.trim() || "I could not produce a response.";
     const editProposal =

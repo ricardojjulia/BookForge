@@ -41,6 +41,13 @@ Analyze and return a JSON object with these fields:
 
 Return ONLY the JSON object.`;
 
+// A direct (non-serverManaged) call runs its model call synchronously
+// in-request -- no maxDuration meant this ran under Vercel's platform
+// default rather than the 45s client-side SDK timeout, which a real
+// cloud-model call can exceed on a slower model/tier. See
+// src/lib/critic/run.ts for the incident this pattern traces back to.
+export const maxDuration = 150;
+
 export async function POST(request: Request, { params }: { params: Promise<{ bookId: string }> }) {
   try {
     const { bookId } = await params;
@@ -249,6 +256,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         },
         undefined,
         telemetryContext,
+        { timeoutMs: 140_000 },
       );
 
       const voiceProfile = parseModelJsonOrFallback(
