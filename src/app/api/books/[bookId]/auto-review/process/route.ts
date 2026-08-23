@@ -67,6 +67,11 @@ const SELF_CONTINUE_AFTER_MS = 700_000;
 
 const MAX_ITERATIONS = 3;
 const STAGE_MAX_ATTEMPTS = 3;
+// Safety cap against a runaway loop if rewrite-execute ever stops reporting
+// a decreasing remainingUnits -- matches the client-side runChunkedJob's
+// own MAX_CHUNK_CALLS (src/lib/ai/run-chunked-job.ts), not expected to ever
+// be hit in practice (CONCURRENCY=5 paragraphs/chunk).
+const MAX_REWRITE_CHUNK_CALLS = 2000;
 
 function isTransientStageError(error: unknown) {
   const message = getError(error);
@@ -91,6 +96,14 @@ function isTransientStageError(error: unknown) {
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+// Thrown by callStage's rewrite_execute dispatch loop when it's run long
+// enough that finishing the remaining chunks risks exceeding this request's
+// own maxDuration. Deliberately NOT matched by isTransientStageError, so
+// runStageWithRetry never retries it -- it's caught one level up, at the
+// stage-loop's own checkpoint handling, and treated as "stop here cleanly
+// and self-continue the SAME stage" rather than a stage failure.
+class StageCheckpointNeeded extends Error {}
 
 type AutoReviewJobRow = {
   id: string;
@@ -313,12 +326,139 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       throw new Error(`Timed out waiting for stage job ${targetJobId} to finish after ${Math.round(JOB_POLL_MAX_WAIT_MS / 60000)} minutes.`);
     };
 
+    // rewrite-execute's own chunk-dispatch loop below already knows it's
+    // safe to fire the next chunk immediately -- it just awaited the
+    // previous one synchronously, so nothing else could be racing it. The
+    // one genuinely ambiguous moment is resuming a chunkJobId INHERITED
+    // from pendingStageJob (a checkpoint/Resume from a previous
+    // invocation): a real prior incident left 13 full_book_rewrite jobs
+    // running in true parallel for ~2 hours after a naive resume
+    // re-dispatched a job that was still genuinely in flight. Give it a
+    // short grace window to settle on its own via the same /jobs polling
+    // pollJobUntilTerminal uses, but -- unlike that function -- don't wait
+    // 45 minutes or throw on timeout: rewrite-execute processes one bounded
+    // chunk per call (well under a minute in practice, bounded by its own
+    // maxDuration regardless), so anything still "running" after this
+    // window isn't a live duplicate, it's just idle and waiting for the
+    // next chunk -- safe to take over.
+    const HANDOFF_GRACE_MS = 30_000;
+    const waitBrieflyForHandoff = async (targetJobId: string): Promise<"completed" | "failed" | "still_running"> => {
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < HANDOFF_GRACE_MS) {
+        await wait(JOB_POLL_INTERVAL_MS);
+        const jobsRes = await fetch(new URL(`/api/books/${bookId}/jobs`, baseUrl).toString(), {
+          headers: { cookie },
+        });
+        const jobsData = await jobsRes.json().catch(() => ({}));
+        const jobs = (jobsData.content?.jobs || []) as Array<{ id: string; status: string }>;
+        const target = jobs.find((j) => j.id === targetJobId);
+        if (!target) continue;
+        if (target.status === "completed") return "completed";
+        if (target.status === "failed" || target.status === "cancelled") return "failed";
+      }
+      return "still_running";
+    };
+
     const callStage = async (path: string, payload?: unknown) => {
       const bodyPayload = payload as Record<string, unknown> | undefined;
       const isAutoRevisionPreview =
         path.includes("/auto-revision") &&
         !!bodyPayload &&
         bodyPayload.action === "preview";
+
+      // rewrite-execute processes exactly one chapter-bounded chunk
+      // (<=CONCURRENCY paragraphs) per request and expects the caller to
+      // re-invoke it with the same jobId while remainingUnits > 0 -- see
+      // that route's own comment. The generic single-fire-then-poll
+      // handling below (supportsServerManagedHandoff) assumes a stage
+      // completes within one call, which holds for every OTHER stage in
+      // this pipeline but never for this one. Found live: chunk 1 would
+      // succeed and save real revision_versions rows, then the job just
+      // sat "running" forever -- nothing ever dispatched chunk 2 -- until
+      // an unrelated stale-heartbeat sweep killed it minutes later and
+      // reported a generic, misleading "died mid-run" error.
+      if (path.includes("/rewrite-execute")) {
+        let chunkJobId = pendingStageJob?.stage === currentStage ? pendingStageJob.jobId : undefined;
+
+        if (chunkJobId) {
+          const { data: existingJob } = await supabase
+            .from("revision_jobs")
+            .select("id,status")
+            .eq("id", chunkJobId)
+            .eq("book_id", bookId)
+            .maybeSingle();
+          if (!existingJob || existingJob.status === "failed" || existingJob.status === "cancelled") {
+            chunkJobId = undefined;
+          } else if (existingJob.status === "completed") {
+            await setPendingStageJob(null);
+            return {};
+          } else {
+            // status === "running", inherited from a previous invocation --
+            // ambiguous (see waitBrieflyForHandoff's comment). Give it a
+            // short grace window rather than assuming either "safe to
+            // dispatch" or "must wait forever" outright.
+            const outcome = await waitBrieflyForHandoff(chunkJobId);
+            if (outcome === "completed") {
+              await setPendingStageJob(null);
+              return {};
+            }
+            if (outcome === "failed") {
+              chunkJobId = undefined;
+            }
+            // "still_running" after the grace window: fall through and
+            // take over dispatching -- see waitBrieflyForHandoff comment.
+          }
+        }
+
+        if (!chunkJobId) {
+          const queueRes = await fetch(new URL(path, baseUrl).toString(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json", cookie },
+            body: JSON.stringify({
+              ...bodyPayload,
+              serverManaged: true,
+              metadataSnapshotId: selection.metadataSnapshotId || undefined,
+              metadataBranchName: selection.metadataBranchName || undefined,
+              metadataSelectionSource: selection.metadataSelectionSource || undefined,
+            }),
+          });
+          const queueData = await queueRes.json().catch(() => ({}));
+          if (!queueRes.ok || queueData.error) {
+            throw new Error(String(queueData.error || `Stage queue failed: ${path}`));
+          }
+          const queuedContent = queueData.content as { jobId?: string; revisionJobId?: string } | undefined;
+          chunkJobId = queuedContent?.jobId || queuedContent?.revisionJobId || (queueData.jobId as string | undefined);
+          if (!chunkJobId) throw new Error(`Stage queue handoff missing job id: ${path}`);
+          await setPendingStageJob({ stage: currentStage, jobId: chunkJobId });
+        }
+
+        for (let chunkCall = 0; chunkCall < MAX_REWRITE_CHUNK_CALLS; chunkCall += 1) {
+          if (Date.now() - requestStartedAt > SELF_CONTINUE_AFTER_MS) {
+            throw new StageCheckpointNeeded(`rewrite_execute checkpoint after ${chunkCall} chunk call(s) this request`);
+          }
+          const runRes = await fetch(new URL(path, baseUrl).toString(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json", cookie },
+            body: JSON.stringify({
+              ...bodyPayload,
+              jobId: chunkJobId,
+              metadataSnapshotId: selection.metadataSnapshotId || undefined,
+              metadataBranchName: selection.metadataBranchName || undefined,
+              metadataSelectionSource: selection.metadataSelectionSource || undefined,
+            }),
+          });
+          const runData = await runRes.json().catch(() => ({}));
+          if (!runRes.ok || runData.error) {
+            throw new Error(String(runData.error || `Stage request failed: ${path}`));
+          }
+          const content = runData.content as { remainingUnits?: number; status?: string } | undefined;
+          if (!content || (content.remainingUnits ?? 0) <= 0 || content.status === "completed" || content.status === "cancelled") {
+            await setPendingStageJob(null);
+            return runData as Record<string, unknown>;
+          }
+        }
+        throw new Error(`rewrite_execute did not finish within ${MAX_REWRITE_CHUNK_CALLS} chunk calls.`);
+      }
 
       if (payload !== undefined && supportsServerManagedHandoff(path) && !isAutoRevisionPreview) {
         if (pendingStageJob && pendingStageJob.stage === currentStage) {
@@ -551,6 +691,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       // working underneath a UI that says it died.
       await supabase.from("auto_review_jobs").update({ current_stage: stage, status: "running" }).eq("id", body.jobId);
 
+      try {
       if (stage === "analyze") {
         await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/analyze`, {}));
         await addStage(stage, "Manuscript analysis completed.");
@@ -636,6 +777,23 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       } else if (stage === "mark_finished") {
         await runStageWithRetry(stage, () => callStage(`/api/books/${bookId}/mark-finished`, { exportId }));
         await addStage(stage, "Book marked finished.");
+      }
+      } catch (error) {
+        if (error instanceof StageCheckpointNeeded) {
+          // Same self-chaining pattern as the between-stage checkpoint
+          // below, but stageIndex is deliberately NOT advanced -- the next
+          // invocation re-enters this SAME stage, finds pendingStageJob
+          // already pointing at the in-progress rewrite-execute job, and
+          // resumes dispatching its remaining chunks from there instead of
+          // losing progress or restarting the stage.
+          void fetch(new URL(`/api/books/${bookId}/auto-review/process`, baseUrl).toString(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json", cookie },
+            body: JSON.stringify({ jobId: body.jobId, mode: body.mode }),
+          }).catch(() => {});
+          return NextResponse.json({ ok: true, jobId: body.jobId, checkpointed: true, nextStage: stage });
+        }
+        throw error;
       }
       stageIndex += 1;
 
