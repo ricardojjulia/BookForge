@@ -23,7 +23,7 @@ import { mergeMetadataSnapshotBody } from "@/lib/book-metadata/selection";
 type Mode = "full_review" | "make_shorter" | "make_longer";
 type Selection = Mode | "guided";
 
-type Props = { bookId: string; bookTitle: string };
+type Props = { bookId: string; bookTitle: string; plannedChapterCount?: number };
 
 const MODES: { value: Mode; icon: React.ReactNode; label: string; tagline: string; detail: string; color: string }[] = [
   {
@@ -71,7 +71,8 @@ type ResumableJob = {
   error: string | null;
 };
 
-export function AutoReviewWizard({ bookId, bookTitle }: Props) {
+export function AutoReviewWizard({ bookId, bookTitle, plannedChapterCount = 0 }: Props) {
+  const needsDraftingFirst = plannedChapterCount > 0;
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Selection | null>(null);
   const [running, setRunning] = useState(false);
@@ -167,15 +168,24 @@ export function AutoReviewWizard({ bookId, bookTitle }: Props) {
 
   return (
     <>
-      <Button
-        color="grape"
-        variant="gradient"
-        gradient={{ from: "grape", to: "indigo" }}
-        size="md"
-        onClick={openWizard}
-      >
-        Auto-Review Wizard
-      </Button>
+      <Box>
+        <Button
+          color="grape"
+          variant="gradient"
+          gradient={{ from: "grape", to: "indigo" }}
+          size="md"
+          disabled={needsDraftingFirst}
+          onClick={openWizard}
+        >
+          Auto-Review Wizard
+        </Button>
+        {needsDraftingFirst && (
+          <Text size="xs" c="dimmed" mt={4} maw={220}>
+            Write Your Chapters first -- this book still has {plannedChapterCount} undrafted chapter
+            {plannedChapterCount === 1 ? "" : "s"}.
+          </Text>
+        )}
+      </Box>
 
       <Modal
         opened={open}
