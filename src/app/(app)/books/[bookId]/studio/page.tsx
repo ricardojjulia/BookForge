@@ -4,6 +4,7 @@ import { AutoReviewWizard } from "@/components/books/auto-review/auto-review-wiz
 import { BookActions } from "@/components/books/book-actions";
 import { PersistentAiJobsPanel } from "@/components/books/jobs/persistent-ai-jobs-panel";
 import { detectAndHealStaleJobs } from "@/lib/ai/job-state";
+import { isManagedSaasDeployment } from "@/lib/deployment/mode";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -93,7 +94,7 @@ export default async function StudioPage({ params }: { params: Promise<{ bookId:
                   color: "oklch(0.45 0.13 275)",
                 }}
               >
-                LOCAL AI VIA LM STUDIO
+                {isManagedSaasDeployment() ? "CLOUD AI PROVIDER" : "LOCAL AI VIA LM STUDIO"}
               </span>
             </div>
             <AutoReviewWizard bookId={bookId} bookTitle={book.title} plannedChapterCount={plannedChapterCount} />

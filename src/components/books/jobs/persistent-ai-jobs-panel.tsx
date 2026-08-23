@@ -225,7 +225,7 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
           <div>
             <Title order={3}>Persistent AI Jobs</Title>
             <Text c="dimmed" size="sm">
-              Durable progress for long LM Studio work. Refreshing the page will keep the latest saved counts.
+              Durable progress for long AI jobs. Refreshing the page will keep the latest saved counts.
             </Text>
             <Button component="a" href={`/books/${bookId}/jobs`} size="xs" variant="subtle" color="grape" mt="xs">
               Open Jobs History
@@ -334,8 +334,9 @@ function JobCard({
         {progress?.message && <Alert color="blue" variant="light">{progress.message}</Alert>}
         {stale && (
           <Alert color="orange" variant="light">
-            This job has not saved a heartbeat recently. The server may have been refreshed, LM Studio may be stalled,
-            or the request may have been interrupted. Mark it failed or cancel it before starting a replacement run.
+            This job has not saved a heartbeat recently. The server may have been refreshed, the AI provider may be
+            stalled, or the request may have been interrupted. Mark it failed or cancel it before starting a
+            replacement run.
           </Alert>
         )}
         {failedUnits.length > 0 && (

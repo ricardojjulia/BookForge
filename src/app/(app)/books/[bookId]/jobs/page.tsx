@@ -89,7 +89,7 @@ export default async function JobsHistoryPage({
       <Group justify="space-between" mb="xl" align="flex-start">
         <div>
           <Title>AI Jobs History</Title>
-          <Text c="dimmed">{book?.title || "Book"} · persistent LM Studio workflow records</Text>
+          <Text c="dimmed">{book?.title || "Book"} · persistent AI workflow records</Text>
         </div>
         <Group>
           <Link href={`/books/${bookId}/revisions`} style={{ textDecoration: "none" }}>
@@ -111,8 +111,8 @@ export default async function JobsHistoryPage({
         <Alert color="orange" mb="md" title="Long-running job visibility">
           <Text size="sm">
             {staleRunningJob.progress?.taskName || humanizeMode(staleRunningJob.mode)} has not sent a heartbeat in a
-            while. Last unit: {staleRunningJob.progress?.currentUnit || "unknown"}. Check LM Studio, mark the job
-            failed, or start a replacement run if this one is stalled.
+            while. Last unit: {staleRunningJob.progress?.currentUnit || "unknown"}. Check the AI provider status, mark
+            the job failed, or start a replacement run if this one is stalled.
           </Text>
         </Alert>
       ) : activeJob ? (
