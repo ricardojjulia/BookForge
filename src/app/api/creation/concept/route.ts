@@ -15,9 +15,13 @@ import { createClient } from "@/lib/supabase/server";
 // than the tightly-budgeted 55s the chunked routes rely on (now that the
 // Vercel plan actually supports it). See CLOUD_PROVIDER_TIMEOUT_MS in
 // src/lib/ai/providers.ts for why the client-level default can't just be
-// raised globally instead.
-export const maxDuration = 60;
-const REQUEST_TIMEOUT_MS = 55_000;
+// raised globally instead. 55s/60s was live-tested and found undersized --
+// a real production call generating 2,595 of the 3,500-token budget took
+// 66s end to end (OpenRouter routed deepseek-v4-pro through "StreamLake" at
+// the time, ~39 tokens/sec); budgeted for the full 3,500-token worst case
+// plus margin, not just the observed sample.
+export const maxDuration = 100;
+const REQUEST_TIMEOUT_MS = 95_000;
 
 const schema = z.object({
   creationProjectId: z.string().uuid().optional(),
