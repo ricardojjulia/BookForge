@@ -460,6 +460,11 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         .filter((unit) => unit.type === "paragraph" && unit.id)
         .map((unit) => String(unit.id)),
     );
+    // Declared up here (not just before its Promise.allSettled use below) so
+    // it's also available to roundRobinUnits' block size just below -- both
+    // uses must agree on the same chunk size, see the comment on the
+    // eligibleUnits computation for why.
+    const CONCURRENCY = 5;
     const warnings: unknown[] = [];
     const eligibleByChapter: RewriteUnit[][] = [];
 
@@ -523,8 +528,23 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     // Subtracting what's already been attempted (seeded from priorProgress)
     // turns it into a remaining-budget cap instead.
     const maxUnitsRemaining = body.maxUnits ? Math.max(0, body.maxUnits - attempted) : undefined;
+    // Chunks below never span two chapters (each chunk takes a leading run of
+    // same-chapter units off the front of eligibleUnits, see CONCURRENCY) --
+    // so interleaving here has to hand out whole CONCURRENCY-sized blocks per
+    // chapter, not single paragraphs. A naive per-paragraph round robin
+    // (chapter1[0], chapter2[0], chapter3[0], ...) puts a different chapter
+    // at every array position, so the very first chunk-building step below
+    // would immediately hit a chapter boundary and cap every chunk at size
+    // 1 -- silently discarding the concurrency batch AND, because each
+    // chapter's remaining units keep landing back at the front of the very
+    // next chunk call's freshly-rederived pool, the job could spend its
+    // entire maxUnits budget circling the first couple of chapters instead
+    // of ever reaching the rest of the book. Found live: four separate
+    // full-book rewrite runs against a 6-chapter book, all with
+    // distributeAcrossChapters true, produced revision_versions rows in
+    // chapter 1 only.
     const eligibleUnits = limitEligibleUnits(
-      body.distributeAcrossChapters ? roundRobinUnits(eligibleByChapter) : eligibleByChapter.flat(),
+      body.distributeAcrossChapters ? roundRobinUnits(eligibleByChapter, CONCURRENCY) : eligibleByChapter.flat(),
       maxUnitsRemaining,
     );
     // Frozen on whichever chunk call first sees this job -- eligibleUnits
@@ -550,11 +570,11 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     });
 
     // Model calls (the network-bound, slow part) run CONCURRENCY-at-a-time within
-    // each chunk via Promise.allSettled. Everything that touches shared state —
+    // each chunk via Promise.allSettled (CONCURRENCY declared earlier, see the
+    // eligibleUnits computation above). Everything that touches shared state —
     // counters, the revision_versions insert, and the job's progress row — happens
     // afterward in a plain sequential loop over that chunk's settled results, so
     // there's never more than one writer touching jobSettings/failedUnitsLog at once.
-    const CONCURRENCY = 5;
     // Seeded from priorProgress (not []) so failures accumulate across the whole
     // job instead of each chunk overwriting the last one's failedUnits in the
     // persisted settings -- otherwise "Retry failed only" (see getRetryParagraphIds)
@@ -1066,13 +1086,30 @@ type RewriteUnit = {
   rows: ParagraphRow[];
 };
 
-function roundRobinUnits(groups: RewriteUnit[][]) {
+// Interleaves in blockSize-sized blocks per chapter, not single units --
+// the chunk-building step downstream takes a leading run of same-chapter
+// units off the front of this output and stops at the first chapter
+// boundary, so a naive one-unit-per-chapter interleave (chapter1[0],
+// chapter2[0], chapter3[0], ...) would put a different chapter at every
+// array position and cap every chunk at size 1 regardless of CONCURRENCY.
+// Pass CONCURRENCY as blockSize so each chapter contributes a full chunk's
+// worth before rotating to the next chapter -- book-wide coverage still
+// advances chapter by chapter across chunks, chunks still never span two
+// chapters, and CONCURRENCY-at-a-time actually happens.
+function roundRobinUnits(groups: RewriteUnit[][], blockSize: number) {
   const output: RewriteUnit[] = [];
-  const maxLength = Math.max(0, ...groups.map((group) => group.length));
-  for (let index = 0; index < maxLength; index += 1) {
-    for (const group of groups) {
-      const unit = group[index];
-      if (unit) output.push(unit);
+  const cursors = new Array(groups.length).fill(0);
+  let remaining = true;
+  while (remaining) {
+    remaining = false;
+    for (let index = 0; index < groups.length; index += 1) {
+      const group = groups[index];
+      const start = cursors[index];
+      if (start >= group.length) continue;
+      const end = Math.min(start + blockSize, group.length);
+      output.push(...group.slice(start, end));
+      cursors[index] = end;
+      if (end < group.length) remaining = true;
     }
   }
   return output;
