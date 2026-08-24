@@ -603,8 +603,25 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     // eligibleUnits is re-derived fresh from durable state (revision_versions
     // rows) on every such call, so a completed paragraph never gets
     // reprocessed and there's no separate cursor to keep in sync.
+    // TEMPORARY diagnostic instrumentation -- see the self_chain_scheduled
+    // comment further down. Brackets the whole chunk-processing region so
+    // wherever the process actually dies, the last logged checkpoint pins
+    // it down. Remove once the real cause is confirmed and fixed.
+    const logDiag = (eventType: string, note: string) =>
+      supabase.from("model_call_events").insert({
+        user_id: user.id,
+        job_id: jobId,
+        model: "n/a",
+        task: "rewrite_self_chain",
+        context_length: 0,
+        outcome: "info",
+        error_signature: note,
+        event_type: eventType,
+      });
+
     let chunkProcessedCount = 0;
     if (eligibleUnits.length > 0 && !hardError) {
+      await logDiag("diag_chunk_block_entered", `eligibleUnits=${eligibleUnits.length}`);
       const pauseStatus = await waitWhileRevisionJobPaused(supabase, jobId);
       const currentStatus = pauseStatus === "cancelled" ? "cancelled" : await getRevisionJobStatus(supabase, jobId);
 
@@ -622,6 +639,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           chunk.push(eligibleUnits[chunk.length]);
         }
         chunkProcessedCount = chunk.length;
+        await logDiag("diag_chunk_built", `chunkSize=${chunk.length}`);
         const heartbeat = createRevisionJobHeartbeat(supabase, jobId, jobSettings, {
           currentUnit: `Rewrite units ${attempted + 1}-${attempted + chunk.length} of ${totalUnits}`,
           totalUnits,
@@ -632,6 +650,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         });
         const settled = await Promise.allSettled(chunk.map((unit) => runUnit(unit)));
         heartbeat.stop();
+        await logDiag("diag_settled_resolved", `results=${settled.length}`);
 
         for (const [chunkIndex, result] of settled.entries()) {
           const unit = chunk[chunkIndex];
@@ -719,6 +738,8 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         }
       }
     }
+
+    await logDiag("diag_loop_completed", `hardError=${Boolean(hardError)} chunkProcessedCount=${chunkProcessedCount}`);
 
     if (hardError) throw hardError;
 
