@@ -14,7 +14,7 @@
 [![OpenRouter](https://img.shields.io/badge/Cloud%20Routing-OpenRouter-0F172A)](https://openrouter.ai/)
 [![Languages](https://img.shields.io/badge/Book%20language-Any-orange)](#language--script-support)
 
-[Quick Start](#quick-start) · [Self-Hosting Guide](docs/SELF_HOSTING.md) · [CreativeWriter](#bookforge-creativewriter) · [How-To Guide](docs/HOWTO.md) · [Changelog](CHANGELOG.md) · [Architecture](docs/ARCHITECTURE.md)
+[Quick Start](#quick-start) · [Self-Hosting Guide](docs/SELF_HOSTING.md) · [Managed SaaS](https://bookforgeai.io) · [CreativeWriter](#bookforge-creativewriter) · [How-To Guide](docs/HOWTO.md) · [Changelog](CHANGELOG.md) · [Architecture](docs/ARCHITECTURE.md)
 
 </div>
 
@@ -27,6 +27,8 @@ Most "AI writing tools" treat a manuscript as one long string: paste it in, get 
 BookForge starts from a different premise: **a book is a structure, not a blob of text.** Projects contain books. Books contain chapters, scenes, and paragraphs. Every paragraph-level AI rewrite is a versioned, reversible event, never an overwrite: proposed revisions are recorded alongside the original, and accepting or rejecting one never deletes the alternative — nothing ships to the manuscript without a human decision. (Larger structural changes, like regenerating a whole chapter from scratch, are a different, opt-in kind of operation — protected by manual Chapter Snapshots rather than automatic per-paragraph history.) Every AI call carries the *whole-book* context it needs: the Manuscript Blueprint (a generated book bible of characters, themes, voice, and rules), nearby chapter summaries, continuity ledgers, locked passages, and the author's own boundaries.
 
 And it runs on your own machine if you want it to. BookForge talks to [LM Studio](https://lmstudio.ai/) over a local OpenAI-compatible endpoint by default — your manuscript never has to leave your laptop — with the option to route specific tasks to a cloud provider (OpenAI, Anthropic, Google) when you want more horsepower for planning or critique.
+
+Don't want to run any of this yourself? **[bookforgeai.io](https://bookforgeai.io)** is the same product as a hosted subscription — no Docker, no local model, no server to maintain. See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md#1-what-self-hosting-means-here) for exactly what differs between the two.
 
 ---
 
