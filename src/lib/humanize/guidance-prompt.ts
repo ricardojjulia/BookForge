@@ -27,12 +27,7 @@ Return:
     }
   ],
   "humanizedActionPlan": [],
-  "phrasingSuggestions": [],
-  "modelFit": {
-    "score": 0,
-    "warning": "",
-    "recommendedUse": ""
-  }
+  "phrasingSuggestions": []
 }
 
 Rules:

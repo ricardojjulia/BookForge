@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Alert, Badge, Button, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { Alert, Button, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { useRouter } from "next/navigation";
 import { GenerationProgressAlert } from "@/components/ai/generation-progress-alert";
 import { fetchJson } from "@/lib/http/fetch-json";
@@ -19,8 +19,6 @@ export function HumanizedGuidancePanel({ bookId, reports }: { bookId: string; re
   const [error, setError] = useState("");
   const latest = reports.find((report) => report.report_type === "humanized_guidance");
   const content = latest?.content || null;
-  const fit = (content?.modelFit && typeof content.modelFit === "object" ? content.modelFit : {}) as Record<string, unknown>;
-  const fitScore = typeof fit.score === "number" ? fit.score : null;
 
   async function runHumanize() {
     setLoading(true);
@@ -50,11 +48,6 @@ export function HumanizedGuidancePanel({ bookId, reports }: { bookId: string; re
             </Text>
           </div>
           <Group>
-            {fitScore != null && (
-              <Badge color={fitScore >= 80 ? "green" : fitScore >= 60 ? "yellow" : "red"} variant="light">
-                model fit {fitScore}%
-              </Badge>
-            )}
             <Button color="grape" variant="light" loading={loading} onClick={runHumanize}>
               Humanize Guidance
             </Button>
@@ -82,7 +75,6 @@ export function HumanizedGuidancePanel({ bookId, reports }: { bookId: string; re
           <Stack>
             {stringValue(content.headline) && <Title order={3}>{stringValue(content.headline)}</Title>}
             <Text>{stringValue(content.authorFriendlySummary) || "No summary returned."}</Text>
-            {stringValue(fit.warning) && <Alert color="yellow">{stringValue(fit.warning)}</Alert>}
             <SimpleGrid cols={{ base: 1, md: 2 }}>
               <ListCard title="Top priorities" items={arrayItems(content.topPriorities)} />
               <ListCard title="Humanized action plan" items={arrayItems(content.humanizedActionPlan)} />

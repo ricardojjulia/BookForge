@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
 import { CRITIC_LENS_COUNT, isCriticBaselineReportType } from "@/lib/critic/progress";
 import { buildHumanizeGuidancePrompt } from "@/lib/humanize/guidance-prompt";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
@@ -79,13 +78,7 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
       latencyPreference: "quality",
       telemetry: { supabase, userId: user.id },
     });
-    const fit = selectBestRewriteModel(modelPlan.availableModels, {
-      qualityProfile: settings.qualityProfile,
-      contextWindowTokens: settings.contextWindowTokens,
-    });
-    const selectedModel = modelPlan.model;
-    const selectedFit = fit.candidates.find((candidate) => candidate.model === selectedModel) || fit.best;
-    const { client, preparedModel, modelSelection, telemetryContext } = modelPlan;
+    const { client, preparedModel, telemetryContext } = modelPlan;
 
     const criticReports = (reports || [])
       .filter((report) => isCriticBaselineReportType(String(report.report_type)))
@@ -118,22 +111,7 @@ export async function POST(_: Request, context: { params: Promise<{ bookId: stri
       phrasingSuggestions: [],
       parseWarning: parseError,
     }));
-    const content = {
-      ...(typeof parsed === "object" && parsed ? (parsed as Record<string, unknown>) : { authorFriendlySummary: String(parsed) }),
-      modelFit: {
-        score: selectedFit?.score || 0,
-        warning:
-          selectedFit && selectedFit.score >= 80
-            ? ""
-            : "The selected local model may be limited for nuanced human voice guidance. Use the result as editorial direction, not final prose.",
-        selectedModel,
-        fitLabel: selectedFit?.label || "unknown",
-        reasons: selectedFit?.reasons || [],
-        lmStudioRuntimeLimits: preparedModel.runtimeLimits,
-        lmStudioWarnings: preparedModel.warnings,
-        modelSelection,
-      },
-    };
+    const content = typeof parsed === "object" && parsed ? (parsed as Record<string, unknown>) : { authorFriendlySummary: String(parsed) };
 
     // coherence_reports has no UPDATE policy under RLS (INSERT/SELECT/DELETE
     // only) -- confirmed live: an .update() against the placeholder row
