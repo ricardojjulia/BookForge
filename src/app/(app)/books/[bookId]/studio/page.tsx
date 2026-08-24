@@ -1,10 +1,12 @@
 import { Alert, Container, Stack, Title } from "@mantine/core";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { AutoReviewWizard } from "@/components/books/auto-review/auto-review-wizard";
 import { BookActions } from "@/components/books/book-actions";
 import { PersistentAiJobsPanel } from "@/components/books/jobs/persistent-ai-jobs-panel";
 import { CriticScoreboard } from "@/components/books/reports/critic-scoreboard";
 import { detectAndHealStaleJobs, logJobCompletionSummaries } from "@/lib/ai/job-state";
+import { resumeStaleChunkedJobs } from "@/lib/ai/resume-stale-chunked-jobs";
 import { getBookCriticReports } from "@/lib/books/book-data";
 import { isManagedSaasDeployment } from "@/lib/deployment/mode";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
@@ -46,6 +48,18 @@ export default async function StudioPage({ params }: { params: Promise<{ bookId:
     data: { user },
   } = await supabase.auth.getUser();
   if (user) {
+    // Runs before detectAndHealStaleJobs below (90s threshold vs. that
+    // function's 600s) so a stuck full_book_rewrite/creation_draft_generation
+    // job gets a real resume attempt before anything gives up on it -- see
+    // that function's own doc comment for why this backstop exists at all.
+    const requestHeaders = await headers();
+    const cookie = requestHeaders.get("cookie") || "";
+    const host = requestHeaders.get("host");
+    const protocol = requestHeaders.get("x-forwarded-proto") || "https";
+    if (host) {
+      await resumeStaleChunkedJobs(supabase, bookId, cookie, new URL(`${protocol}://${host}`));
+    }
+
     const { data: activeJobs } = await supabase
       .from("revision_jobs")
       .select("id,mode,status,settings,created_at")
