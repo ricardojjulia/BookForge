@@ -33,7 +33,7 @@ export default async function CreateBookPage() {
   // state, with no way to notice or resume an in-progress project. Any
   // reload, tab close, or navigation away made that work look permanently
   // lost even though it was sitting safely in the database the whole time.
-  const { data: existingProjectRow } = await supabase
+  let { data: existingProjectRow } = await supabase
     .from("creation_projects")
     .select("*")
     .eq("owner_id", user.id)
@@ -42,6 +42,35 @@ export default async function CreateBookPage() {
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+
+  // A creation_projects row can end up permanently unlinked (created_book_id
+  // stays null) if an earlier attempt failed or was quietly abandoned when
+  // the user just retried with the same idea -- new attempts now cancel
+  // their predecessors going forward (see concept/route.ts), but this
+  // guards against whatever's already sitting stale in the database today,
+  // and against any other path that could leave one behind. Found live:
+  // resuming a stale row like this reopens the wizard at "generate a fresh
+  // draft," which risks the user mistaking it for -- and re-spending real
+  // AI credits re-generating -- a book they already finished under a
+  // different, successfully-linked creation_projects row. A title match
+  // against a real book the user already owns is treated as proof this
+  // attempt was superseded, and self-heals by cancelling it here so it
+  // stops surfacing on every future visit too, not just this one.
+  if (existingProjectRow?.working_title) {
+    const { data: matchingBook } = await supabase
+      .from("books")
+      .select("id")
+      .ilike("title", existingProjectRow.working_title)
+      .limit(1)
+      .maybeSingle();
+    if (matchingBook) {
+      await supabase
+        .from("creation_projects")
+        .update({ status: "cancelled", updated_at: new Date().toISOString() })
+        .eq("id", existingProjectRow.id);
+      existingProjectRow = null;
+    }
+  }
 
   let existingProject = null;
   if (existingProjectRow) {
