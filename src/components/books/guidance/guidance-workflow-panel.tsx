@@ -443,9 +443,6 @@ export function GuidanceWorkflowPanel({
   const content = latest?.content ?? null;
   const items = content ? buildItems(content) : [];
 
-  const fit = (content?.modelFit && typeof content.modelFit === "object" ? content.modelFit : {}) as Record<string, unknown>;
-  const fitScore = typeof fit.score === "number" ? fit.score : null;
-
   useEffect(() => {
     let active = true;
 
@@ -535,11 +532,6 @@ export function GuidanceWorkflowPanel({
             </Text>
           </div>
           <Group>
-            {fitScore != null && (
-              <Badge color={fitScore >= 80 ? "green" : fitScore >= 60 ? "yellow" : "red"} variant="light">
-                model fit {fitScore}%
-              </Badge>
-            )}
             <Button color="grape" variant="light" loading={runningHumanize} onClick={runHumanize} size="sm">
               {latest ? "Re-run analysis" : "Run analysis"}
             </Button>
