@@ -52,6 +52,7 @@ export function RewriteExecutionPanel({
     rewrittenParagraphs: number;
     realTotalParagraphs: number;
     realRewrittenParagraphs: number;
+    pendingParagraphs: number;
   }>;
   activeCampaign: RewriteCampaignRow | null;
   campaignStats: RewriteCampaignStats;
@@ -2011,6 +2012,7 @@ function RewriteCoverageSummary({
     rewrittenParagraphs: number;
     realTotalParagraphs: number;
     realRewrittenParagraphs: number;
+    pendingParagraphs: number;
   }>;
   disabled?: boolean;
   loadingChapterId?: string | null;
@@ -2046,14 +2048,31 @@ function RewriteCoverageSummary({
           const chapterPercent = chapter.realTotalParagraphs
             ? Math.round((chapter.realRewrittenParagraphs / chapter.realTotalParagraphs) * 100)
             : 0;
+          // Ordered by what the user should act on first: a pending review
+          // is actionable right now, regardless of how much of the chapter
+          // is otherwise done. "Fully rewritten" explains why the button
+          // below disappears (see onRewriteChapter's condition, same eligible-
+          // count comparison). "Not started"/"In progress" are purely
+          // informational -- there's nothing to fix, just status.
+          const caption =
+            chapter.pendingParagraphs > 0
+              ? { text: `${chapter.pendingParagraphs} awaiting your review`, color: "orange" }
+              : chapter.rewrittenParagraphs >= chapter.totalParagraphs
+                ? { text: "Fully rewritten", color: "teal" }
+                : chapter.realRewrittenParagraphs === 0
+                  ? { text: "Not started", color: "dimmed" }
+                  : { text: "In progress", color: "dimmed" };
           return (
             <Paper key={chapter.chapterId} withBorder radius="sm" p="sm" bg="white">
               <Text size="xs" fw={800} lineClamp={1}>
                 {chapter.chapterNumber}. {chapter.title || "Untitled"}
               </Text>
               <Progress value={chapterPercent} color={chapterPercent ? "teal" : "gray"} radius="xl" size="sm" my={6} />
-              <Text size="xs" c="dimmed" mb={6}>
+              <Text size="xs" c="dimmed">
                 {chapter.realRewrittenParagraphs}/{chapter.realTotalParagraphs} paragraphs
+              </Text>
+              <Text size="xs" c={caption.color} fw={caption.color === "orange" ? 700 : 400} mb={6}>
+                {caption.text}
               </Text>
               {onRewriteChapter && chapter.rewrittenParagraphs < chapter.totalParagraphs && (
                 <Button

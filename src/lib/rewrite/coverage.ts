@@ -5,6 +5,7 @@ export function getRewriteCoverage(
   paragraphs: Array<{ id: string; chapter_id: string; original_text?: string | null; is_locked?: boolean | null }>,
   revisions: Array<{ paragraph_id: string | null }>,
   acceptedParagraphIds: Set<string>,
+  pendingDraftParagraphIds: Set<string> = new Set(),
 ) {
   const paragraphIdsWithRevisions = new Set(revisions.map((revision) => revision.paragraph_id).filter(Boolean));
   const paragraphsByChapter = paragraphs.reduce<Record<string, typeof paragraphs>>((groups, paragraph) => {
@@ -34,6 +35,13 @@ export function getRewriteCoverage(
     // only ones actually accepted into the manuscript (not merely drafted
     // and then rejected/redone by auto-accept).
     const realRewrittenParagraphs = chapterParagraphs.filter((paragraph) => acceptedParagraphIds.has(paragraph.id)).length;
+    // Paragraphs with a drafted revision still awaiting an accept/reject
+    // decision -- distinct from realRewrittenParagraphs (accepted only) and
+    // from eligibleParagraphs (which counts a paragraph as "rewritten" the
+    // moment it has ANY revision, pending or accepted). Exists purely so the
+    // UI can tell a user "N paragraphs here need your review" rather than
+    // leaving that state indistinguishable from "still eligible, untouched."
+    const pendingParagraphs = chapterParagraphs.filter((paragraph) => pendingDraftParagraphIds.has(paragraph.id)).length;
     return {
       chapterId: chapter.id,
       chapterNumber: chapter.chapter_number,
@@ -42,6 +50,7 @@ export function getRewriteCoverage(
       rewrittenParagraphs: rewritten,
       realTotalParagraphs: chapterParagraphs.length,
       realRewrittenParagraphs,
+      pendingParagraphs,
     };
   });
 }
