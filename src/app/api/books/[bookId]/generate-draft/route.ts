@@ -1,5 +1,5 @@
 import { revalidatePath } from "next/cache";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { buildCreationDraftChapterPrompt } from "@/lib/creation/draft-prompt";
 import { createRevisionJobHeartbeat, extractJobProgress, mergeJobSettings, type AiJobProgress, updateRevisionJobProgress } from "@/lib/ai/job-state";
@@ -483,13 +483,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       // the server keeps making progress regardless of whether anyone's
       // still watching. A still-open tab's own next call becomes redundant
       // but harmless -- it just finds this chapter already drafted.
+      //
+      // A bare un-awaited `void fetch(...)` here is NOT safe: Vercel is free
+      // to freeze/tear down this function's execution the instant the
+      // response below is sent, before that fetch's request even leaves the
+      // machine. after() is the platform-supported way to guarantee this
+      // keeps running post-response.
       if (!isJobDone) {
         const cookie = request.headers.get("cookie") || "";
-        void fetch(new URL(request.url).toString(), {
-          method: "POST",
-          headers: { "Content-Type": "application/json", cookie },
-          body: JSON.stringify({ ...body, jobId }),
-        }).catch(() => {});
+        const selfUrl = new URL(request.url).toString();
+        after(() =>
+          fetch(selfUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", cookie },
+            body: JSON.stringify({ ...body, jobId }),
+          }).catch(() => {}),
+        );
       }
 
       return NextResponse.json({

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
@@ -788,11 +788,22 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           // already pointing at the in-progress rewrite-execute job, and
           // resumes dispatching its remaining chunks from there instead of
           // losing progress or restarting the stage.
-          void fetch(new URL(`/api/books/${bookId}/auto-review/process`, baseUrl).toString(), {
-            method: "POST",
-            headers: { "Content-Type": "application/json", cookie },
-            body: JSON.stringify({ jobId: body.jobId, mode: body.mode }),
-          }).catch(() => {});
+          //
+          // A bare un-awaited `void fetch(...)` is NOT safe here: Vercel is
+          // free to freeze/tear down this function the instant the response
+          // below is sent, before the request even leaves the machine.
+          // after() is the platform-supported way to guarantee this
+          // actually runs post-response -- found live: this exact gap is
+          // why a real full-book rewrite never progressed past its first
+          // chunk despite this self-chain already being in place.
+          const continuationBody = JSON.stringify({ jobId: body.jobId, mode: body.mode });
+          after(() =>
+            fetch(new URL(`/api/books/${bookId}/auto-review/process`, baseUrl).toString(), {
+              method: "POST",
+              headers: { "Content-Type": "application/json", cookie },
+              body: continuationBody,
+            }).catch(() => {}),
+          );
           return NextResponse.json({ ok: true, jobId: body.jobId, checkpointed: true, nextStage: stage });
         }
         throw error;
@@ -808,11 +819,14 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       // pattern the wizard's own initial launch already uses) instead of
       // requiring the user to notice a stall and click Resume by hand.
       if (stageIndex < stageOrder.length && Date.now() - requestStartedAt > SELF_CONTINUE_AFTER_MS) {
-        void fetch(new URL(`/api/books/${bookId}/auto-review/process`, baseUrl).toString(), {
-          method: "POST",
-          headers: { "Content-Type": "application/json", cookie },
-          body: JSON.stringify({ jobId: body.jobId, mode: body.mode }),
-        }).catch(() => {});
+        const continuationBody = JSON.stringify({ jobId: body.jobId, mode: body.mode });
+        after(() =>
+          fetch(new URL(`/api/books/${bookId}/auto-review/process`, baseUrl).toString(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json", cookie },
+            body: continuationBody,
+          }).catch(() => {}),
+        );
         return NextResponse.json({ ok: true, jobId: body.jobId, checkpointed: true, nextStage: stageOrder[stageIndex] });
       }
     }
