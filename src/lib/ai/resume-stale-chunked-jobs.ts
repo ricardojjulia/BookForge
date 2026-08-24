@@ -3,7 +3,13 @@ import type { createClient } from "@/lib/supabase/server";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
-const STALE_AFTER_MS = 90_000;
+// Found live: a real chunk's normal cadence is 20-40s between heartbeats, so
+// 90s should have been generous margin -- but a Studio page load landed at
+// exactly 85s stale, 5 seconds short of that threshold, and skipped the
+// resume. Lowered so a near-miss like that doesn't cost a full extra
+// page-load cycle (this session's periodic refresh is 60s) before the next
+// chance to catch it.
+const STALE_AFTER_MS = 45_000;
 
 type ChunkedJobRow = {
   id: string;
