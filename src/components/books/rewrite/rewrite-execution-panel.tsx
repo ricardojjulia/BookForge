@@ -67,8 +67,27 @@ export function RewriteExecutionPanel({
   const [rewriteExistingDrafts, setRewriteExistingDrafts] = useState(false);
   const [rewriteAccepted, setRewriteAccepted] = useState(false);
   const [distributeAcrossChapters, setDistributeAcrossChapters] = useState(true);
-  const [strategyId, setStrategyId] = useState<RewriteStrategyId>("humanized_literary");
-  const [strategySettings, setStrategySettings] = useState<RewriteStrategySettings>(rewriteStrategies.humanized_literary.settings);
+  // Seeded from whatever strategy is actually in force -- an active
+  // campaign's own strategy first (that's genuinely what's running), then
+  // the last one this workflow approved, only falling back to the
+  // hardcoded default when neither exists. Previously this always
+  // hardcoded "humanized_literary" regardless of what was approved or
+  // already running, silently reverting the user's real choice on every
+  // remount (page navigation, tab refresh, or this panel's own periodic
+  // router.refresh()) -- exactly the "the rewrite tries something you
+  // didn't intend" risk this was flagged for.
+  const initialStrategyId = activeCampaign?.strategy_id
+    ? normalizeCampaignStrategyId(activeCampaign.strategy_id)
+    : (() => {
+        const approved = workflow.metadata?.approvedStrategyId;
+        return typeof approved === "string" && approved in rewriteStrategies ? (approved as RewriteStrategyId) : "humanized_literary";
+      })();
+  const [strategyId, setStrategyId] = useState<RewriteStrategyId>(initialStrategyId);
+  const [strategySettings, setStrategySettings] = useState<RewriteStrategySettings>(
+    activeCampaign?.strategy_settings
+      ? normalizeCampaignStrategySettings(activeCampaign.strategy_settings)
+      : rewriteStrategies[initialStrategyId].settings,
+  );
   const [authorInstructions, setAuthorInstructions] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -1871,7 +1890,7 @@ function RewriteStrategySelector({
 }) {
   const strategy = rewriteStrategies[strategyId];
   return (
-    <Paper withBorder radius="md" p="lg" bg="#fffdf8">
+    <Paper id="rewrite-strategy" withBorder radius="md" p="lg" bg="#fffdf8" style={{ scrollMarginTop: 24 }}>
       <Stack>
         <div>
           <Title order={3}>Rewrite Strategy</Title>
