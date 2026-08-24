@@ -1584,7 +1584,7 @@ function GuidedRewriteRun({
     {
       label: "Run sample batch",
       done: touchedChapters > 0,
-      detail: "Use 10-25 spread units to test the selected strategy.",
+      detail: "Rewrites a small sample (10-25 paragraphs) scattered across your whole book, so you can preview the strategy before committing to a full pass.",
       readiness: readiness.stepStatus[2],
       action: (
         <Button size="xs" color="grape" loading={loading} disabled={step2Blocked || !hasPlan || loading} onClick={onRunSample}>
