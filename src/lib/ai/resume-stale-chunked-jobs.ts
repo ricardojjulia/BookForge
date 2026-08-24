@@ -94,6 +94,11 @@ export function buildResumeBody(job: Pick<ChunkedJobRow, "id" | "mode" | "settin
       jobId: job.id,
       maxUnits: settings.maxUnits,
       campaignId: settings.campaignId ?? undefined,
+      // Chapter-scoped rewrites (e.g. Guidance's "Run rewrite" on a
+      // chapter-specific suggestion) must stay scoped on resume too --
+      // omitting this silently widened a stalled chapter-only job back out
+      // to the whole book the moment a backstop resumed it.
+      chapterId: settings.chapterId ?? undefined,
       rewriteExistingDrafts: settings.rewriteExistingDrafts,
       rewriteAccepted: settings.rewriteAccepted,
       distributeAcrossChapters: settings.distributeAcrossChapters,

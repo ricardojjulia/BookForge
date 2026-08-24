@@ -17,10 +17,10 @@ export default async function GuidancePage({ params }: { params: Promise<{ bookI
 
   const { bookId } = await params;
   const supabase = await createClient();
-  const [{ reports }, { count: chapterCount }, { count: sceneCount }, { count: paragraphCount }, { data: latestAccepted }] =
+  const [{ reports }, { data: chapters }, { count: sceneCount }, { count: paragraphCount }, { data: latestAccepted }] =
     await Promise.all([
       getBookCriticReports(supabase, bookId),
-      supabase.from("chapters").select("id", { count: "exact", head: true }).eq("book_id", bookId),
+      supabase.from("chapters").select("id,chapter_number,title").eq("book_id", bookId).order("chapter_number"),
       supabase.from("scenes").select("id", { count: "exact", head: true }).eq("book_id", bookId),
       supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId),
       supabase
@@ -32,6 +32,7 @@ export default async function GuidancePage({ params }: { params: Promise<{ bookI
         .limit(1)
         .maybeSingle(),
     ]);
+  const chapterCount = chapters?.length || 0;
 
   // Guidance synthesizes from baseline Critic reports -- if paragraphs have
   // been accepted (rewritten) more recently than Critic last ran, that
@@ -51,6 +52,7 @@ export default async function GuidancePage({ params }: { params: Promise<{ bookI
         bookId={bookId}
         reports={reports}
         criticStale={criticStale}
+        chapters={(chapters || []).map((c) => ({ id: c.id, chapterNumber: c.chapter_number, title: c.title }))}
         chapterCount={chapterCount || 0}
         sceneCount={sceneCount || 0}
         paragraphCount={paragraphCount || 0}
