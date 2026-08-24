@@ -57,6 +57,15 @@ export function RewritePlanActions({
 
   return (
     <Stack>
+      <Alert color="grape" variant="light">
+        <Text size="sm">
+          This plan is based on Critic feedback only -- it does not use the Rewrite Strategy. Strategy controls how
+          paragraphs actually get rewritten and is applied separately, when you run the rewrite.{" "}
+          <Text component="a" href="#rewrite-strategy" c="grape" fw={700} td="underline">
+            Review the strategy first ↓
+          </Text>
+        </Text>
+      </Alert>
       <Group>
         <Button color="grape" loading={loading} onClick={generatePlan}>
           Generate Rewrite Plan
