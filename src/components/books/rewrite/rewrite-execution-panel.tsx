@@ -462,6 +462,22 @@ export function RewriteExecutionPanel({
     }
   }
 
+  // Accepting/rejecting drafts happens on a separate page (/revisions), so
+  // returning here via the browser back button previously showed the
+  // coverage cards, captions, and readiness state exactly as they were
+  // before that review -- stale until a manual full reload. Refreshing on
+  // visibility-regain (not just on mount, which browser back/forward
+  // navigation can restore from cache without re-running) catches that
+  // return trip, an alt-tab back, or any other way this tab comes back into
+  // view, without polling while the user is genuinely elsewhere.
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") router.refresh();
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [router]);
+
   useEffect(() => {
     if (queue.status !== "running" || !queue.startedAt || !queue.estimatedSecondsPerCall) return;
     const interval = window.setInterval(() => {
