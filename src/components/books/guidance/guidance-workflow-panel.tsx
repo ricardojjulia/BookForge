@@ -16,6 +16,7 @@ import {
   Textarea,
   Title,
 } from "@mantine/core";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AiTaskPreflight, type AiTaskPreflightData } from "@/components/ai/ai-task-preflight";
 import { fetchJson } from "@/lib/http/fetch-json";
@@ -50,7 +51,11 @@ type ActionItem = {
   title: string;
   detail: string;
   suggestedStrategy: string;
+  /** First chapter number the item's own text names ("In Chapter 4...", "For Chapter 2..."), or null for items with no chapter reference -- those are the genuinely book-wide ones. */
+  detectedChapterNumber: number | null;
 };
+
+type ChapterOption = { id: string; chapterNumber: number; title: string | null };
 
 type RewriteStrategyId =
   | "conservative_polish"
@@ -100,6 +105,16 @@ function suggestStrategy(text: string): RewriteStrategyId {
   return "humanized_literary";
 }
 
+// Most guidance items name a specific chapter in their own generated text
+// ("In Chapter 4, linger longer...", "For Chapter 2, try starting with...").
+// Take the first mention as the default scope suggestion -- still just a
+// pre-fill the user can change via the chapter picker, not a hard rule.
+// Items with no chapter reference are the genuinely book-wide ones.
+function detectChapterNumber(text: string): number | null {
+  const match = /chapter\s+(\d+)/i.exec(text);
+  return match ? Number(match[1]) : null;
+}
+
 function parseItem(raw: unknown): { title: string; detail: string } {
   if (typeof raw === "string") return { title: raw, detail: "" };
   if (!raw || typeof raw !== "object") return { title: String(raw), detail: "" };
@@ -117,11 +132,25 @@ function buildItems(content: Record<string, unknown>): ActionItem[] {
   return [
     ...priorities.map((raw, i) => {
       const { title, detail } = parseItem(raw);
-      return { key: `priority:${i}`, group: "priority" as const, title, detail, suggestedStrategy: suggestStrategy(title + " " + detail) };
+      return {
+        key: `priority:${i}`,
+        group: "priority" as const,
+        title,
+        detail,
+        suggestedStrategy: suggestStrategy(title + " " + detail),
+        detectedChapterNumber: detectChapterNumber(title + " " + detail),
+      };
     }),
     ...actions.map((raw, i) => {
       const { title, detail } = parseItem(raw);
-      return { key: `action:${i}`, group: "action" as const, title, detail, suggestedStrategy: suggestStrategy(title + " " + detail) };
+      return {
+        key: `action:${i}`,
+        group: "action" as const,
+        title,
+        detail,
+        suggestedStrategy: suggestStrategy(title + " " + detail),
+        detectedChapterNumber: detectChapterNumber(title + " " + detail),
+      };
     }),
   ];
 }
@@ -138,19 +167,24 @@ type RewriteResult = {
   };
 };
 
+const WHOLE_BOOK_SCOPE = "__whole_book__";
+
 function RewriteModal({
   bookId,
   item,
+  chapters,
   onClose,
   onSuccess,
 }: {
   bookId: string;
   item: ActionItem | null;
+  chapters: ChapterOption[];
   onClose: () => void;
   onSuccess: (itemKey: string) => void;
 }) {
   const [strategy, setStrategy] = useState<RewriteStrategyId>("humanized_literary");
   const [instructions, setInstructions] = useState("");
+  const [scopeChapterId, setScopeChapterId] = useState<string>(WHOLE_BOOK_SCOPE);
   const [rewriteAccepted, setRewriteAccepted] = useState(false);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{ type: "success" | "warning" | "error"; message: string } | null>(null);
@@ -161,11 +195,18 @@ function RewriteModal({
       queueMicrotask(() => {
         setStrategy(item.suggestedStrategy as RewriteStrategyId);
         setInstructions(item.detail || item.title);
+        // Pre-fill scope from the chapter the item's own text names, if any
+        // -- still just a default; the picker below lets the user widen it
+        // to the whole book or narrow it to a different chapter.
+        const detected = item.detectedChapterNumber
+          ? chapters.find((c) => c.chapterNumber === item.detectedChapterNumber)
+          : undefined;
+        setScopeChapterId(detected?.id || WHOLE_BOOK_SCOPE);
         setResult(null);
         setRewriteAccepted(false);
       });
     }
-  }, [item]);
+  }, [item, chapters]);
 
   async function startRewrite() {
     if (!item) return;
@@ -177,6 +218,7 @@ function RewriteModal({
       maxUnits: 500,
       coverageMode: "normal" as const,
       rewriteAccepted,
+      ...(scopeChapterId !== WHOLE_BOOK_SCOPE ? { chapterId: scopeChapterId } : {}),
     };
     try {
       const queued = await fetchJson<RewriteResult>(
@@ -259,6 +301,20 @@ function RewriteModal({
             {item.detail && <Text size="xs" c="dimmed" mt={2}>{item.detail}</Text>}
           </Paper>
           <Select
+            label="Scope"
+            description={
+              scopeChapterId === WHOLE_BOOK_SCOPE
+                ? "This will run against every eligible paragraph in the whole book."
+                : "This will run against only this chapter's eligible paragraphs."
+            }
+            data={[
+              { value: WHOLE_BOOK_SCOPE, label: "Whole book" },
+              ...chapters.map((c) => ({ value: c.id, label: `Chapter ${c.chapterNumber}${c.title ? `: ${c.title}` : ""}` })),
+            ]}
+            value={scopeChapterId}
+            onChange={(v) => setScopeChapterId(v || WHOLE_BOOK_SCOPE)}
+          />
+          <Select
             label="Rewrite strategy"
             description="Pre-selected based on the guidance item — adjust as needed."
             data={STRATEGY_OPTIONS}
@@ -304,11 +360,15 @@ function TaskCard({
   status,
   onStatusClick,
   onRewrite,
+  onSendToCreativeWriter,
+  sendingToCreativeWriter,
 }: {
   item: ActionItem;
   status: TaskStatus;
   onStatusClick: () => void;
   onRewrite: () => void;
+  onSendToCreativeWriter: () => void;
+  sendingToCreativeWriter: boolean;
 }) {
   const meta = STATUS_META[status];
   return (
@@ -321,12 +381,18 @@ function TaskCard({
           {item.detail && (
             <Text size="xs" c="dimmed" lineClamp={2}>{item.detail}</Text>
           )}
-          <Text size="xs" c="dimmed">
-            Suggested:{" "}
-            <Text span size="xs" fw={500}>
-              {STRATEGY_OPTIONS.find((s) => s.value === item.suggestedStrategy)?.label ?? item.suggestedStrategy}
+          <Group gap={6}>
+            <Text size="xs" c="dimmed">
+              Suggested:{" "}
+              <Text span size="xs" fw={500}>
+                {STRATEGY_OPTIONS.find((s) => s.value === item.suggestedStrategy)?.label ?? item.suggestedStrategy}
+              </Text>
             </Text>
-          </Text>
+            <Text size="xs" c="dimmed">·</Text>
+            <Text size="xs" c="dimmed">
+              {item.detectedChapterNumber ? `Chapter ${item.detectedChapterNumber}` : "Whole book"}
+            </Text>
+          </Group>
         </Stack>
         <Stack gap="xs" align="flex-end" style={{ flexShrink: 0 }}>
           <Badge
@@ -338,6 +404,9 @@ function TaskCard({
           >
             {meta.label}
           </Badge>
+          <Button size="xs" variant="subtle" color="dark" loading={sendingToCreativeWriter} onClick={onSendToCreativeWriter}>
+            Send to CreativeWriter
+          </Button>
           {status !== "done" && status !== "skipped" && (
             <Button size="xs" variant="light" onClick={onRewrite}>
               Run rewrite
@@ -432,6 +501,7 @@ export function GuidanceWorkflowPanel({
   bookId,
   reports,
   criticStale = false,
+  chapters = [],
   chapterCount = 0,
   sceneCount = 0,
   paragraphCount = 0,
@@ -440,6 +510,7 @@ export function GuidanceWorkflowPanel({
   reports: Report[];
   /** True when paragraphs have been accepted (rewritten) more recently than baseline Critic last ran, so Critic's findings no longer reflect the current manuscript. */
   criticStale?: boolean;
+  chapters?: ChapterOption[];
   chapterCount?: number;
   sceneCount?: number;
   paragraphCount?: number;
@@ -453,6 +524,8 @@ export function GuidanceWorkflowPanel({
   const [criticPreflightOpen, setCriticPreflightOpen] = useState(false);
   const [criticPreflightLoading, setCriticPreflightLoading] = useState(false);
   const [refreshingCritic, setRefreshingCritic] = useState(false);
+  const [sendingItemKey, setSendingItemKey] = useState<string | null>(null);
+  const [creativeWriterResult, setCreativeWriterResult] = useState<{ itemKey: string; message: string } | null>(null);
 
   const latest = reports.find((r) => r.report_type === "humanized_guidance");
   const content = latest?.content ?? null;
@@ -552,6 +625,45 @@ export function GuidanceWorkflowPanel({
     } catch (err) {
       setRefreshingCritic(false);
       setHumanizeError(err instanceof Error ? err.message : "Critic refresh failed.");
+    }
+  }
+
+  // Sends a guidance item to CreativeWriter as a real comment instead of an
+  // AI rewrite -- see the "Send to CreativeWriter" / "Run rewrite" pairing
+  // on every card. Attaches to the chapter's first paragraph when the item
+  // names one, so it shows up in-context rather than as a book-level note.
+  async function sendToCreativeWriter(item: ActionItem) {
+    setSendingItemKey(item.key);
+    setCreativeWriterResult(null);
+    const chapter = item.detectedChapterNumber
+      ? chapters.find((c) => c.chapterNumber === item.detectedChapterNumber)
+      : undefined;
+    try {
+      await fetchJson(
+        `/api/books/${bookId}/guidance-tasks/annotate`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            note: item.detail ? `${item.title} — ${item.detail}` : item.title,
+            ...(chapter ? { chapterId: chapter.id } : {}),
+          }),
+        },
+        "Send to CreativeWriter",
+      );
+      setCreativeWriterResult({
+        itemKey: item.key,
+        message: chapter
+          ? `Added as a comment on Chapter ${chapter.chapterNumber} in CreativeWriter.`
+          : "Added as a book-level comment in CreativeWriter.",
+      });
+    } catch (err) {
+      setCreativeWriterResult({
+        itemKey: item.key,
+        message: err instanceof Error ? err.message : "Unable to send to CreativeWriter.",
+      });
+    } finally {
+      setSendingItemKey(null);
     }
   }
 
@@ -670,13 +782,24 @@ export function GuidanceWorkflowPanel({
               <Stack gap="xs">
                 <Text fw={700} size="sm" tt="uppercase" c="dimmed">Top priorities</Text>
                 {priorities.map((item) => (
-                  <TaskCard
-                    key={item.key}
-                    item={item}
-                    status={statusFor(item.key)}
-                    onStatusClick={() => cycleStatus(item)}
-                    onRewrite={() => setRewriteTarget(item)}
-                  />
+                  <div key={item.key}>
+                    <TaskCard
+                      item={item}
+                      status={statusFor(item.key)}
+                      onStatusClick={() => cycleStatus(item)}
+                      onRewrite={() => setRewriteTarget(item)}
+                      onSendToCreativeWriter={() => void sendToCreativeWriter(item)}
+                      sendingToCreativeWriter={sendingItemKey === item.key}
+                    />
+                    {creativeWriterResult?.itemKey === item.key && (
+                      <Text size="xs" c="dimmed" mt={4} ml={4}>
+                        {creativeWriterResult.message}{" "}
+                        <Text component={Link} href={`/creativewriter?bookId=${bookId}`} span size="xs" fw={600} c="grape">
+                          Open CreativeWriter →
+                        </Text>
+                      </Text>
+                    )}
+                  </div>
                 ))}
               </Stack>
             )}
@@ -686,13 +809,24 @@ export function GuidanceWorkflowPanel({
               <Stack gap="xs">
                 <Text fw={700} size="sm" tt="uppercase" c="dimmed">Action plan</Text>
                 {actions.map((item) => (
-                  <TaskCard
-                    key={item.key}
-                    item={item}
-                    status={statusFor(item.key)}
-                    onStatusClick={() => cycleStatus(item)}
-                    onRewrite={() => setRewriteTarget(item)}
-                  />
+                  <div key={item.key}>
+                    <TaskCard
+                      item={item}
+                      status={statusFor(item.key)}
+                      onStatusClick={() => cycleStatus(item)}
+                      onRewrite={() => setRewriteTarget(item)}
+                      onSendToCreativeWriter={() => void sendToCreativeWriter(item)}
+                      sendingToCreativeWriter={sendingItemKey === item.key}
+                    />
+                    {creativeWriterResult?.itemKey === item.key && (
+                      <Text size="xs" c="dimmed" mt={4} ml={4}>
+                        {creativeWriterResult.message}{" "}
+                        <Text component={Link} href={`/creativewriter?bookId=${bookId}`} span size="xs" fw={600} c="grape">
+                          Open CreativeWriter →
+                        </Text>
+                      </Text>
+                    )}
+                  </div>
                 ))}
               </Stack>
             )}
@@ -703,6 +837,7 @@ export function GuidanceWorkflowPanel({
       <RewriteModal
         bookId={bookId}
         item={rewriteTarget}
+        chapters={chapters}
         onClose={() => setRewriteTarget(null)}
         onSuccess={(itemKey) => {
           const item = items.find((i) => i.key === itemKey);

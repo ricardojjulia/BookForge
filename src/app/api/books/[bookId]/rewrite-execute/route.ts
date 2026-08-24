@@ -341,6 +341,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             preparedModel,
             modelSelection,
             campaignId: body.campaignId || null,
+            chapterId: body.chapterId || null,
             rewriteModelSelection: rewriteSelection,
             maxUnits: body.maxUnits || null,
             rewriteExistingDrafts: body.rewriteExistingDrafts,
@@ -429,6 +430,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       rewriteModelSelection: rewriteSelection,
       maxUnits: body.maxUnits || null,
       campaignId: body.campaignId || null,
+      chapterId: body.chapterId || null,
       rewriteExistingDrafts: body.rewriteExistingDrafts,
       rewriteAccepted: body.rewriteAccepted,
       distributeAcrossChapters: body.distributeAcrossChapters,
@@ -950,6 +952,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         settings: {
           model,
           campaignId: body.campaignId || null,
+          chapterId: body.chapterId || null,
           rewriteModelSelection: rewriteSelection,
           maxUnits: body.maxUnits || null,
           rewriteExistingDrafts: body.rewriteExistingDrafts,
