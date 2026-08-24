@@ -423,6 +423,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     let skipped = 0;
     let skippedExistingDrafts = 0;
     let skippedAccepted = 0;
+    let skippedPreviouslyFailed = 0;
     let jobSettings: unknown = {
       model,
       rewriteModelSelection: rewriteSelection,
@@ -445,6 +446,20 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       ((existingRevisions || []) as ExistingRevisionRow[]).map((revision) => revision.paragraph_id).filter(Boolean),
     );
     const retryParagraphIds = body.retryJobId ? await getRetryParagraphIds(supabase, body.retryJobId) : null;
+    // Paragraphs that already exhausted their retry budget (see maxCompletionAttempts
+    // below) earlier in THIS SAME job. Without this exclusion, a paragraph that's
+    // deterministically failing (not just randomly flaky) gets re-selected by every
+    // subsequent chunk call forever -- eligibility is re-derived from durable state
+    // each time and a failed attempt leaves no revision row behind, so nothing else
+    // would ever move it out of the pool. Seen live: a job capped at 25 units spent
+    // most of its budget re-attempting the same stuck paragraph instead of covering
+    // 25 different ones. A dedicated retry (body.retryJobId, see getRetryParagraphIds)
+    // is the deliberate way to give an excluded paragraph another shot later.
+    const priorFailedParagraphIds = new Set(
+      (priorProgress?.failedUnits || [])
+        .filter((unit) => unit.type === "paragraph" && unit.id)
+        .map((unit) => String(unit.id)),
+    );
     const warnings: unknown[] = [];
     const eligibleByChapter: RewriteUnit[][] = [];
 
@@ -472,6 +487,11 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           continue;
         }
         if (retryParagraphIds && !retryParagraphIds.has(paragraph.id)) {
+          continue;
+        }
+        if (priorFailedParagraphIds.has(paragraph.id)) {
+          skipped += 1;
+          skippedPreviouslyFailed += 1;
           continue;
         }
         if (paragraph.is_locked || (!body.forceTinyParagraphs && shouldSkipParagraph(paragraph.original_text, chapter.title))) {
@@ -525,7 +545,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       estimatedSecondsPerUnit: estimateSecondsPerRewriteUnit(model),
       message:
         skipped > 0
-          ? `Skipped ${skipped} locked, title-only, existing-draft, or accepted paragraph(s) before the run.`
+          ? `Skipped ${skipped} locked, title-only, existing-draft, accepted, or already-failed-this-job paragraph(s) before the run.`
           : null,
     });
 
@@ -535,7 +555,18 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     // afterward in a plain sequential loop over that chunk's settled results, so
     // there's never more than one writer touching jobSettings/failedUnitsLog at once.
     const CONCURRENCY = 5;
-    const failedUnitsLog: Array<{ id: string; type: "paragraph"; label: string; error: string }> = [];
+    // Seeded from priorProgress (not []) so failures accumulate across the whole
+    // job instead of each chunk overwriting the last one's failedUnits in the
+    // persisted settings -- otherwise "Retry failed only" (see getRetryParagraphIds)
+    // could only ever see the most recent chunk's failures.
+    const failedUnitsLog: Array<{ id: string; type: "paragraph"; label: string; error: string }> = (
+      priorProgress?.failedUnits || []
+    ).filter((unit) => unit.type === "paragraph" && unit.id) as Array<{
+      id: string;
+      type: "paragraph";
+      label: string;
+      error: string;
+    }>;
     let hardError: unknown = null;
 
     async function runUnit(unit: RewriteUnit) {
@@ -880,6 +911,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           skipped,
           skippedExistingDrafts,
           skippedAccepted,
+          skippedPreviouslyFailed,
           totalUnits,
           remainingUnits,
           status: "running",
@@ -915,6 +947,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           skipped,
           skippedExistingDrafts,
           skippedAccepted,
+          skippedPreviouslyFailed,
           retryJobId: body.retryJobId || null,
           warningCount: warnings.length,
           progress: buildJobProgress({
@@ -993,6 +1026,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         skipped,
         skippedExistingDrafts,
         skippedAccepted,
+        skippedPreviouslyFailed,
         continuityWarnings: warnings.slice(0, 100),
         startedAt: priorProgress?.startedAt || startedAt,
         completedAt,
@@ -1011,6 +1045,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         skipped,
         skippedExistingDrafts,
         skippedAccepted,
+        skippedPreviouslyFailed,
         totalUnits,
         remainingUnits: 0,
         continuityWarningCount: warnings.length,
