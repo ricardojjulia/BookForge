@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { buildJobProgress, createRevisionJobHeartbeat, extractJobProgress, getRevisionJobStatus, type AiJobProgress, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
 import { buildCloudRewriteModelSelection, selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
@@ -745,14 +745,24 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       // fresh from revision_versions every call, so whichever caller (this
       // self-chain or the browser) gets there first just does the work;
       // the other finds it already done and skips it.
+      //
+      // A bare un-awaited `void fetch(...)` here is NOT safe: Vercel is free
+      // to freeze/tear down this function's execution the instant the
+      // response below is sent, before that fetch's request even leaves the
+      // machine. after() is the platform-supported way to guarantee this
+      // keeps running post-response -- see the same fix applied to
+      // generate-draft and the auto-review orchestrator's own
+      // checkpoint continuations, which had this identical latent bug.
       if (!body.externalDriver) {
         const cookie = request.headers.get("cookie") || "";
         const selfUrl = new URL(request.url);
-        void fetch(selfUrl.toString(), {
-          method: "POST",
-          headers: { "Content-Type": "application/json", cookie },
-          body: JSON.stringify({ ...body, jobId }),
-        }).catch(() => {});
+        after(() =>
+          fetch(selfUrl.toString(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json", cookie },
+            body: JSON.stringify({ ...body, jobId }),
+          }).catch(() => {}),
+        );
       }
 
       return NextResponse.json({
