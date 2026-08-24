@@ -756,13 +756,52 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       if (!body.externalDriver) {
         const cookie = request.headers.get("cookie") || "";
         const selfUrl = new URL(request.url);
-        after(() =>
-          fetch(selfUrl.toString(), {
-            method: "POST",
-            headers: { "Content-Type": "application/json", cookie },
-            body: JSON.stringify({ ...body, jobId }),
-          }).catch(() => {}),
-        );
+        // TEMPORARY diagnostic instrumentation: this self-chain has silently
+        // died twice now (bare void fetch, then after()) with zero trace in
+        // Vercel logs or anywhere else queryable. Writing directly to
+        // model_call_events (already has job_id/event_type/outcome) turns
+        // the DB itself into a log so the next failure is diagnosable
+        // without log access at all. Remove once the real cause is found.
+        await supabase.from("model_call_events").insert({
+          user_id: user.id,
+          job_id: jobId,
+          model: "n/a",
+          task: "rewrite_self_chain",
+          context_length: 0,
+          outcome: "info",
+          error_signature: `scheduled remainingUnits=${remainingUnits}`,
+          event_type: "self_chain_scheduled",
+        });
+        after(async () => {
+          try {
+            const res = await fetch(selfUrl.toString(), {
+              method: "POST",
+              headers: { "Content-Type": "application/json", cookie },
+              body: JSON.stringify({ ...body, jobId }),
+            });
+            await supabase.from("model_call_events").insert({
+              user_id: user.id,
+              job_id: jobId,
+              model: "n/a",
+              task: "rewrite_self_chain",
+              context_length: 0,
+              outcome: res.ok ? "success" : "error",
+              error_signature: `fetch resolved status=${res.status}`,
+              event_type: "self_chain_fetch_resolved",
+            });
+          } catch (chainError) {
+            await supabase.from("model_call_events").insert({
+              user_id: user.id,
+              job_id: jobId,
+              model: "n/a",
+              task: "rewrite_self_chain",
+              context_length: 0,
+              outcome: "error",
+              error_signature: `fetch threw: ${getErrorMessage(chainError)}`,
+              event_type: "self_chain_fetch_threw",
+            });
+          }
+        });
       }
 
       return NextResponse.json({
