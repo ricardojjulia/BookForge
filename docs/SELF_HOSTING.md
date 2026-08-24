@@ -2,11 +2,11 @@
 
 This guide is for running BookForge yourself — on your own laptop, your own
 server, or your own cloud account — rather than using a hosted BookForge
-subscription. It covers everything the README's [Quick
-Start](../README.md#quick-start) doesn't: a full environment variable
-reference, AI provider setup (local model or your own cloud API keys),
-production deployment options, keeping your instance up to date, and
-troubleshooting.
+subscription at **[bookforgeai.io](https://bookforgeai.io)**. It covers
+everything the README's [Quick Start](../README.md#quick-start) doesn't: a
+full environment variable reference, AI provider setup (local model or your
+own cloud API keys), production deployment options, keeping your instance up
+to date, and troubleshooting.
 
 If you just want to try BookForge locally for development, the README's Quick
 Start is enough — come back here when you're ready to run it for real, keep
