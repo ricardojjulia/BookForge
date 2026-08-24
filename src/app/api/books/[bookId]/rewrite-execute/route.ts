@@ -122,6 +122,24 @@ type RetryJobSettings = {
   };
 };
 
+// Timeouts, dropped connections, DNS blips -- the kind of failure that says
+// nothing about whether THIS paragraph is rewritable, just that the network
+// hiccuped. Previously these weren't caught inside the completion loop at
+// all: they threw straight past the empty-completion retry logic, got
+// treated as a rejected Promise.allSettled result, and killed the entire
+// chunk (hardError -> the whole request throws) instead of just costing
+// this one paragraph a retry. A content-shaped failure (empty completion,
+// clearly malformed output) is left alone here -- retrying an infrastructure
+// blip is usually worth it; retrying the same bad output from the model
+// usually isn't (that's what the fallback-model switch above already
+// handles).
+function isTechnologyFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /(connection error|connection.*(lost|closed|reset)|fetch failed|failed to fetch|econnreset|econnrefused|etimedout|headerstimeout|und_err_|socket hang up|network error|timeout|timed out|abort)/i.test(
+    message,
+  );
+}
+
 function getErrorMessage(error: unknown) {
   const lmStudioMessage = getLmStudioErrorMessage(error, "");
   if (lmStudioMessage) return lmStudioMessage;
@@ -560,8 +578,15 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       });
 
       const maxCompletionAttempts = 3;
+      // Separate, tighter budget than the general retry loop: a connection
+      // blip is cheap to retry, but if it happens twice in a row on the
+      // same paragraph, a third attempt is unlikely to behave differently
+      // and this paragraph should just be skipped like any other failure
+      // rather than eating the whole chunk's retry budget on network noise.
+      const maxTechnologyFailureAttempts = 2;
       let parsed: unknown = null;
       let revisedText = "";
+      let technologyFailureAttempts = 0;
       for (let completionAttempt = 1; completionAttempt <= maxCompletionAttempts; completionAttempt += 1) {
         // Retrying a failed cloud call against the SAME model wastes a full
         // generation attempt for very little chance of a different outcome
@@ -573,26 +598,42 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         // instead of just repeating the first one.
         const useFallbackModel =
           completionAttempt > 1 && preparedModel.isCloud && REWRITE_FALLBACK_MODEL !== model;
-        const completion = await createManagedChatCompletion(
-          client,
-          preparedModel,
-          {
-            temperature: Math.min(settings.temperature, 0.55),
-            top_p: settings.topP,
-            max_tokens: 1800,
-            messages: [{ role: "user", content: prompt }],
-            ...(useFallbackModel ? { model: REWRITE_FALLBACK_MODEL } : {}),
-          },
-          undefined,
-          telemetryContext,
-          { timeoutMs: REWRITE_UNIT_COMPLETION_TIMEOUT_MS },
-        );
+        let completion;
+        try {
+          completion = await createManagedChatCompletion(
+            client,
+            preparedModel,
+            {
+              temperature: Math.min(settings.temperature, 0.55),
+              top_p: settings.topP,
+              max_tokens: 1800,
+              messages: [{ role: "user", content: prompt }],
+              ...(useFallbackModel ? { model: REWRITE_FALLBACK_MODEL } : {}),
+            },
+            undefined,
+            telemetryContext,
+            { timeoutMs: REWRITE_UNIT_COMPLETION_TIMEOUT_MS },
+          );
+        } catch (completionError) {
+          if (!isTechnologyFailure(completionError)) throw completionError;
+          technologyFailureAttempts += 1;
+          if (technologyFailureAttempts >= maxTechnologyFailureAttempts || completionAttempt >= maxCompletionAttempts) {
+            break;
+          }
+          continue;
+        }
         parsed = parseRewriteResponse(completion.choices[0]?.message.content || "{}");
         revisedText = extractRevisedText(parsed);
         if (revisedText) break;
       }
 
-      return { unit, parsed, revisedText, emptyCompletionAttempts: maxCompletionAttempts };
+      return {
+        unit,
+        parsed,
+        revisedText,
+        emptyCompletionAttempts: maxCompletionAttempts,
+        technologyFailureAttempts,
+      };
     }
 
     // Exactly one chapter-bounded batch (<=CONCURRENCY paragraphs) per request --
@@ -676,10 +717,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             break;
           }
 
-          const { parsed, revisedText, emptyCompletionAttempts } = result.value;
+          const { parsed, revisedText, emptyCompletionAttempts, technologyFailureAttempts } = result.value;
           if (!revisedText) {
             failed += 1;
-            const message = `Model returned an empty completion after ${emptyCompletionAttempts} attempt(s); paragraph left untouched.`;
+            const message =
+              technologyFailureAttempts > 0
+                ? `Connection/timeout error after ${technologyFailureAttempts} attempt(s); paragraph left untouched.`
+                : `Model returned an empty completion after ${emptyCompletionAttempts} attempt(s); paragraph left untouched.`;
             failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
             jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
               currentUnit: `Empty completion at ${unitLabel}`,
