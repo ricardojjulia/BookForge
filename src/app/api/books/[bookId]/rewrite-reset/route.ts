@@ -21,6 +21,45 @@ function getErrorMessage(error: unknown) {
   return "Unable to reset rewrite work.";
 }
 
+// Read-only preview so the confirmation dialog can show real numbers
+// *before* the irreversible POST runs, instead of only learning what was
+// lost from the response after the fact. Found live: this book had 140 of
+// 145 paragraphs carrying accepted rewrite text -- the confirmation dialog
+// claimed "paragraphs... are kept," which is only true of original_text;
+// accepted_text/current_text get nulled and every revision_versions row
+// (the only place the accepted prose actually lived) gets hard-deleted.
+export async function GET(request: Request, context: { params: Promise<{ bookId: string }> }) {
+  try {
+    const { bookId } = await context.params;
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+
+    const [{ count: versionCount }, { count: jobCount }, { count: acceptedCount }] = await Promise.all([
+      supabase.from("revision_versions").select("id", { count: "exact", head: true }).eq("book_id", bookId),
+      supabase
+        .from("revision_jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("book_id", bookId)
+        .eq("mode", "full_book_rewrite"),
+      supabase.from("paragraphs").select("id", { count: "exact", head: true }).eq("book_id", bookId).not("accepted_text", "is", null),
+    ]);
+
+    return NextResponse.json({
+      content: {
+        revisionVersions: versionCount || 0,
+        rewriteJobs: jobCount || 0,
+        acceptedParagraphs: acceptedCount || 0,
+      },
+    });
+  } catch (error) {
+    console.error("Rewrite reset preview failed", error);
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+  }
+}
+
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
   try {
     const { bookId } = await context.params;
