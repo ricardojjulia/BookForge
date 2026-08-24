@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Badge, Button, Group, Paper, Progress, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { useRouter } from "next/navigation";
 import { getJobProgressDisplay } from "@/lib/ai/job-state";
@@ -9,6 +9,13 @@ import { useAdaptivePolling } from "@/lib/hooks/use-adaptive-polling";
 
 const ACTIVE_POLL_MS = 4000;
 const IDLE_POLL_MS = 30000;
+// Distinct from the data-poll interval above: that only re-fetches this
+// panel's own job list client-side, it never re-runs the Studio page's
+// server component -- which is where resumeStaleChunkedJobs (the stuck-job
+// backstop) actually lives. Without this, a user who leaves the tab open
+// and idle without ever navigating would never trigger a resume attempt at
+// all -- only reloads/navigations re-run server components.
+const SERVER_REFRESH_MS = 60000;
 
 type PersistedAiJob = {
   id: string;
@@ -58,6 +65,12 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
     () => jobs.find((job) => !["running", "paused", "queued"].includes(job.status || "")) || null,
     [jobs],
   );
+
+  useEffect(() => {
+    if (!activeJob) return;
+    const interval = window.setInterval(() => router.refresh(), SERVER_REFRESH_MS);
+    return () => window.clearInterval(interval);
+  }, [activeJob, router]);
 
   const loadJobs = useCallback(async () => {
     try {
