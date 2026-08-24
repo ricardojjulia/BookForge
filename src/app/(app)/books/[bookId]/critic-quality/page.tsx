@@ -172,7 +172,13 @@ export default async function RewritePlanPage({ params }: { params: Promise<{ bo
     0,
     (paragraphCount || 0) - pendingDraftParagraphCount - acceptedParagraphCount - permanentlyIneligibleUntouchedCount,
   );
-  const rewriteCoverage = getRewriteCoverage(chapters || [], paragraphCoverageRows || [], revisionCoverageRows || [], acceptedParagraphIds);
+  const rewriteCoverage = getRewriteCoverage(
+    chapters || [],
+    paragraphCoverageRows || [],
+    revisionCoverageRows || [],
+    acceptedParagraphIds,
+    pendingDraftParagraphIds,
+  );
   const campaignStats = getRewriteCampaignStats({
     paragraphCount: paragraphCount || 0,
     pendingDraftParagraphCount,
