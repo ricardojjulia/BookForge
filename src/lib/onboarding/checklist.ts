@@ -14,7 +14,14 @@ export function buildOnboardingChecklist(input: {
   hasCriticReport: boolean;
   hasAcceptedParagraph: boolean;
   hasExport: boolean;
+  // Most-recently-updated book, if any -- lets the remaining steps deep-link
+  // straight into that book's Studio instead of a same-page "#books" anchor.
+  // That anchor never actually scrolled: Next.js's router treats a link to
+  // the current pathname (already on /dashboard) as a no-op, so the CTA
+  // looked and felt broken even though the href itself was well-formed.
+  latestBookId?: string | null;
 }): OnboardingChecklistItem[] {
+  const openStudioHref = input.latestBookId ? `/books/${input.latestBookId}/studio` : "/dashboard#books";
   return [
     {
       key: "ai_configured",
@@ -34,22 +41,22 @@ export function buildOnboardingChecklist(input: {
       key: "critic_run",
       label: "Run BookForge Critic on a book",
       done: input.hasCriticReport,
-      ctaLabel: "Open a book",
-      ctaHref: "/dashboard#books",
+      ctaLabel: "Open Studio",
+      ctaHref: openStudioHref,
     },
     {
       key: "rewrite_accepted",
       label: "Accept a rewritten paragraph",
       done: input.hasAcceptedParagraph,
-      ctaLabel: "Open a book",
-      ctaHref: "/dashboard#books",
+      ctaLabel: "Open Studio",
+      ctaHref: openStudioHref,
     },
     {
       key: "export_made",
       label: "Export a finished manuscript",
       done: input.hasExport,
-      ctaLabel: "Open a book",
-      ctaHref: "/dashboard#books",
+      ctaLabel: "Open Studio",
+      ctaHref: openStudioHref,
     },
   ];
 }
