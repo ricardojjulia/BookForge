@@ -100,6 +100,7 @@ export default async function DashboardPage() {
     hasCriticReport: Boolean(reportCount),
     hasAcceptedParagraph: Boolean(acceptedParagraphCount),
     hasExport: Boolean(exportCount),
+    latestBookId: books?.[0]?.id ?? null,
   });
   const checklistDismissed = completedSteps.includes(CHECKLIST_DISMISSED_STEP);
   const cloudLabel = providerLabels[settings?.llm_provider ?? ""] ?? "Cloud provider";
