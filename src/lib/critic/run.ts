@@ -160,44 +160,79 @@ export async function runCriticLens(input: {
     targetDialogDensity: context.targetDialogDensity,
   });
 
-  const completion = await createManagedChatCompletion(
-    client,
-    preparedModel,
-    {
-      temperature: 0.3,
-      top_p: settings.topP,
-      messages: [{ role: "user", content: prompt }],
-    },
-    undefined,
-    telemetryContext,
-    // Default CLOUD_PROVIDER_TIMEOUT_MS (45s) undersold a single critic
-    // lens: a real production stall traced back to this call hitting a
-    // platform-level kill (no maxDuration on the calling route) before the
-    // SDK timeout, network error, or anything else ever got a chance to
-    // throw a catchable error -- the job just sat "running" with a stale
-    // heartbeat until the 10-minute stale-job sweep force-failed it. A
-    // Starter-tier account runs every task (including critic, originally
-    // budgeted around a faster model) on deepseek-v4-pro, live-measured at
-    // ~39 tokens/sec through OpenRouter's current routing -- the default
-    // 4,096-token cloud budget alone can need ~105s. See maxDuration on the
-    // calling route(s) for the matching platform-level budget.
-    { timeoutMs: 140_000 },
-  );
+  // Up to 2 attempts: deepseek-v4-pro (the default cloud critic model) has a
+  // documented ~17% empty-completion rate under this exact workload (see
+  // project_openrouter_stress_test memory). A single attempt with no retry
+  // meant an empty completion defaulted straight to the literal "{}" below,
+  // which parses as valid JSON -- so the report silently "succeeded" with
+  // every field empty and score: null, and the UI showed the misleading
+  // "ANALYZED, NO SCORE" state instead of a clear failure to retry. Mirrors
+  // the same fix already applied to rewrite-execute's per-paragraph loop.
+  const criticFallbackModel = "google/gemini-2.5-flash";
+  const maxCompletionAttempts = 2;
+  let rawContent = "";
+  for (let attempt = 1; attempt <= maxCompletionAttempts; attempt += 1) {
+    const useFallbackModel = attempt > 1 && preparedModel.isCloud && criticFallbackModel !== model;
+    const completion = await createManagedChatCompletion(
+      client,
+      preparedModel,
+      {
+        temperature: 0.3,
+        top_p: settings.topP,
+        messages: [{ role: "user", content: prompt }],
+        ...(useFallbackModel ? { model: criticFallbackModel } : {}),
+      },
+      undefined,
+      telemetryContext,
+      // Default CLOUD_PROVIDER_TIMEOUT_MS (45s) undersold a single critic
+      // lens: a real production stall traced back to this call hitting a
+      // platform-level kill (no maxDuration on the calling route) before the
+      // SDK timeout, network error, or anything else ever got a chance to
+      // throw a catchable error -- the job just sat "running" with a stale
+      // heartbeat until the 10-minute stale-job sweep force-failed it. A
+      // Starter-tier account runs every task (including critic, originally
+      // budgeted around a faster model) on deepseek-v4-pro, live-measured at
+      // ~39 tokens/sec through OpenRouter's current routing -- the default
+      // 4,096-token cloud budget alone can need ~105s. See maxDuration on the
+      // calling route(s) for the matching platform-level budget.
+      { timeoutMs: 140_000 },
+    );
+    rawContent = (completion.choices[0]?.message.content || "").trim();
+    if (rawContent) break;
+  }
 
-  const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({
-    score: null,
-    executiveSummary: raw,
-    strengths: [],
-    risks: [],
-    highestLeverageFixes: [],
-    chapterNotes: [],
-    continuityFlags: [],
-    voiceAndStyleNotes: [],
-    marketPositioning: [],
-    nextRevisionPlan: [],
-    parseWarning: parseError,
-    rawModelResponse: raw,
-  }));
+  // Still empty after every attempt -- say so honestly instead of parsing
+  // the placeholder "{}" into a report that looks like a real (if scoreless)
+  // analysis. Distinct from a genuine parse failure (raw text that isn't
+  // valid JSON), which still goes through parseModelJsonOrFallback below.
+  const parsed = rawContent
+    ? parseModelJsonOrFallback(rawContent, (raw, parseError) => ({
+        score: null,
+        executiveSummary: raw,
+        strengths: [],
+        risks: [],
+        highestLeverageFixes: [],
+        chapterNotes: [],
+        continuityFlags: [],
+        voiceAndStyleNotes: [],
+        marketPositioning: [],
+        nextRevisionPlan: [],
+        parseWarning: parseError,
+        rawModelResponse: raw,
+      }))
+    : {
+        score: null,
+        executiveSummary: `The AI model returned an empty response after ${maxCompletionAttempts} attempt(s). This is a known model-side issue, not a problem with your manuscript -- rerun this lens to try again.`,
+        strengths: [],
+        risks: [],
+        highestLeverageFixes: [],
+        chapterNotes: [],
+        continuityFlags: [],
+        voiceAndStyleNotes: [],
+        marketPositioning: [],
+        nextRevisionPlan: [],
+        emptyCompletionAttempts: maxCompletionAttempts,
+      };
   const parsedContent =
     typeof parsed === "object" && parsed ? (parsed as Record<string, unknown>) : { executiveSummary: String(parsed) };
   const numericScore = extractCriticScore(parsedContent);

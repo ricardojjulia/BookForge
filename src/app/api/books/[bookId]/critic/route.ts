@@ -48,8 +48,10 @@ function getErrorMessage(error: unknown) {
 // which a real critic-lens call on a slower cloud model can exceed well
 // before the SDK-level timeout in src/lib/critic/run.ts ever gets a chance
 // to throw a catchable error. See that file's comment for the incident this
-// traces back to.
-export const maxDuration = 150;
+// traces back to. Raised from 150 -> 320 to fit runCriticLens's up-to-2-
+// attempt empty-completion retry (140s timeout each) plus buffer, instead
+// of the route's own timeout cutting a legitimate retry short.
+export const maxDuration = 320;
 
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
   try {
