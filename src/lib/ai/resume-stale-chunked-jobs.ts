@@ -35,6 +35,50 @@ export function isStaleChunkedJob(job: Pick<ChunkedJobRow, "settings">, now = Da
   return heartbeatMs !== null && now - heartbeatMs >= STALE_AFTER_MS;
 }
 
+// Double the 4 real stalls this session's stress-testing actually produced,
+// plus buffer -- a resume just continues an already-started job rather than
+// restarting it, so raising this doesn't multiply cost, but a job that
+// still can't get past one more chunk after 10 real attempts has a
+// structural problem worth a human looking at, not another automatic retry.
+export const MAX_RESUME_ATTEMPTS = 10;
+
+/**
+ * Gate every resume through this before dispatching -- both backstops call
+ * it so a chronically-stalling job (the same failure on every attempt, not
+ * the ordinary "self-chain silently didn't fire this once" case) eventually
+ * gets marked genuinely failed with a clear reason instead of being retried
+ * forever. Never touches a job that isn't already status="running" -- see
+ * that filter in both callers -- so this can only ever cap RETRIES of a
+ * stuck-but-still-running job, never override or retry something that
+ * already concluded "failed" for a real reason.
+ */
+export async function checkAndRecordResumeAttempt(
+  supabase: SupabaseClient,
+  job: ChunkedJobRow,
+): Promise<"resume" | "ceiling_reached"> {
+  const settings = job.settings || {};
+  const attempts = typeof settings.resumeAttempts === "number" ? settings.resumeAttempts : 0;
+
+  if (attempts >= MAX_RESUME_ATTEMPTS) {
+    await supabase
+      .from("revision_jobs")
+      .update({
+        status: "failed",
+        completed_at: new Date().toISOString(),
+        error_message: `Auto-resume gave up after ${MAX_RESUME_ATTEMPTS} attempts -- the server-side process kept dying before completing another chunk. This needs investigation rather than another automatic retry.`,
+      })
+      .eq("id", job.id)
+      .eq("status", "running");
+    return "ceiling_reached";
+  }
+
+  await supabase
+    .from("revision_jobs")
+    .update({ settings: { ...settings, resumeAttempts: attempts + 1 } })
+    .eq("id", job.id);
+  return "resume";
+}
+
 /**
  * Reconstructs the original run-call body for a chunked job from its own
  * persisted settings -- both routes already store everything a resume needs
@@ -94,6 +138,7 @@ export async function resumeStaleChunkedJobs(
   const resumed: string[] = [];
   for (const job of (jobs || []) as ChunkedJobRow[]) {
     if (!isStaleChunkedJob(job)) continue;
+    if ((await checkAndRecordResumeAttempt(supabase, job)) === "ceiling_reached") continue;
 
     const target = new URL(chunkedJobPath(job.mode, bookId), baseUrl).toString();
     const requestBody = JSON.stringify(buildResumeBody(job));

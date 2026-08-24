@@ -1,6 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { buildResumeBody, chunkedJobPath, isStaleChunkedJob, type ChunkedJobRow } from "@/lib/ai/resume-stale-chunked-jobs";
+import {
+  buildResumeBody,
+  checkAndRecordResumeAttempt,
+  chunkedJobPath,
+  isStaleChunkedJob,
+  type ChunkedJobRow,
+} from "@/lib/ai/resume-stale-chunked-jobs";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { POST as generateDraftPOST } from "@/app/api/books/[bookId]/generate-draft/route";
 import { POST as rewriteExecutePOST } from "@/app/api/books/[bookId]/rewrite-execute/route";
@@ -48,6 +54,10 @@ export async function GET(request: Request) {
 
   for (const job of staleJobs) {
     try {
+      if ((await checkAndRecordResumeAttempt(supabase, job)) === "ceiling_reached") {
+        results.push({ jobId: job.id, bookId: job.book_id, mode: job.mode, resumed: false, error: "resume ceiling reached -- marked failed" });
+        continue;
+      }
       const body = { ...buildResumeBody(job), actingUserId: job.created_by };
       const syntheticRequest = new Request(new URL(chunkedJobPath(job.mode, job.book_id), request.url).toString(), {
         method: "POST",
