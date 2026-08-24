@@ -144,6 +144,19 @@ export default async function JobsHistoryPage({
                 const { completed, total, percent } = getJobProgressDisplay(job.progress || null, job.status);
                 const stale = isStaleRunningJob(job.status, job.progress || null);
                 const isSelected = Boolean(selectedJobId) && selectedJobId === job.id;
+                // A job marked "failed" by the resume-ceiling or stale-job
+                // sweep (see error_message) isn't the same claim as "this
+                // job's output is broken" -- every unit it DID attempt can
+                // still have succeeded cleanly; the job just couldn't keep
+                // itself going automatically afterward. Conflating the two
+                // under one red "failed" badge misrepresents completely
+                // clean work as broken. Requires attempted > 0 so a job that
+                // died before touching anything (0 ok, 0 failed, 0 skipped)
+                // still reads as a real failure, not a clean stop.
+                const cleanStop =
+                  job.status === "failed" &&
+                  (job.progress?.failed || 0) === 0 &&
+                  (job.progress?.attempted || 0) > 0;
                 return (
                   <tr
                     key={job.id}
@@ -168,8 +181,8 @@ export default async function JobsHistoryPage({
                       </Stack>
                     </td>
                     <td>
-                      <Badge color={stale ? "orange" : statusColor(job.status)}>
-                        {stale ? "possibly interrupted" : job.status || "unknown"}
+                      <Badge color={stale ? "orange" : cleanStop ? "orange" : statusColor(job.status)}>
+                        {stale ? "possibly interrupted" : cleanStop ? "stopped early" : job.status || "unknown"}
                       </Badge>
                     </td>
                     <td style={{ minWidth: 180 }}>
@@ -207,8 +220,14 @@ export default async function JobsHistoryPage({
                             Reports
                           </Link>
                         )}
+                        {cleanStop && (
+                          <Text size="xs" c="teal">
+                            All {job.progress?.successful || 0} attempted unit{job.progress?.successful === 1 ? "" : "s"} completed
+                            successfully -- nothing here was lost or broken.
+                          </Text>
+                        )}
                         {job.error_message && (
-                          <Text size="xs" c="red">
+                          <Text size="xs" c={cleanStop ? "dimmed" : "red"}>
                             {job.error_message}
                           </Text>
                         )}
