@@ -212,5 +212,30 @@ async function upsertCreationProject(
     .select("*")
     .single();
   if (error) throw error;
+
+  // A prior creation_projects row that never got created_book_id set (an
+  // earlier attempt that failed, or was quietly abandoned when the user
+  // just started over with the same idea) stays visible to /books/create's
+  // "continue where you left off" resume query forever otherwise -- even
+  // after the user has since gone on to finish an entire real book from a
+  // LATER, successful attempt. Found live: a failed attempt and an
+  // approved-but-never-finalized attempt both sat around, unlinked, after
+  // a third retry the same day actually became the user's real,
+  // nearly-finished book -- the wizard kept offering to "continue" the
+  // stale approved one, which would have silently created a brand-new
+  // duplicate book (accept-architecture always inserts fresh, never looks
+  // up an existing one) rather than touching the real book directly, but
+  // completing it would still waste real AI spend and risk the user
+  // mistaking the empty duplicate for their actual work. Starting a
+  // genuinely new attempt is the clearest signal available that any
+  // earlier, still-unlinked attempt has been superseded.
+  await supabase
+    .from("creation_projects")
+    .update({ status: "cancelled", updated_at: new Date().toISOString() })
+    .eq("owner_id", userId)
+    .is("created_book_id", null)
+    .not("status", "in", "(cancelled,failed)")
+    .neq("id", data.id);
+
   return data;
 }
