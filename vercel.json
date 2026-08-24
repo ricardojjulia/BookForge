@@ -11,6 +11,10 @@
     {
       "path": "/api/internal/subscription/margin-tuning",
       "schedule": "0 7 * * 1"
+    },
+    {
+      "path": "/api/internal/resume-stale-chunked-jobs",
+      "schedule": "*/2 * * * *"
     }
   ]
 }

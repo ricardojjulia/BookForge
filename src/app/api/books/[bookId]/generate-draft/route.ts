@@ -3,6 +3,7 @@ import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { buildCreationDraftChapterPrompt } from "@/lib/creation/draft-prompt";
 import { createRevisionJobHeartbeat, extractJobProgress, mergeJobSettings, type AiJobProgress, updateRevisionJobProgress } from "@/lib/ai/job-state";
+import { resolveRequestAuth } from "@/lib/ai/cron-auth";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
@@ -11,7 +12,6 @@ import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { validateLongFormOutput } from "@/lib/ai/model-performance";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { WORDS_PER_PAGE } from "@/lib/manuscript/page-estimate";
-import { createClient } from "@/lib/supabase/server";
 import { repairCommonMojibake } from "@/lib/text/repair-mojibake";
 
 type ArchitectureChapter = {
@@ -46,6 +46,8 @@ const schema = z.object({
   limit: z.number().int().min(1).max(200).optional(),
   chapterId: z.string().uuid().optional(),
   serverManaged: z.boolean().optional(),
+  // Set only by the resume-stale-chunked-jobs cron -- see resolveRequestAuth.
+  actingUserId: z.string().uuid().optional(),
 });
 
 function getErrorMessage(error: unknown, context: { model?: string; task?: string; modelSource?: string; configuredModels?: string[] } = {}) {
@@ -80,11 +82,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     // would generate more chapters than requested rather than stopping short.
     const limit = Math.max(1, Math.min(200, requestedLimit));
 
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    const { supabase, userId } = await resolveRequestAuth(request, body.actingUserId);
+    if (!userId) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    const user = { id: userId };
 
     const { data: book, error: bookError } = await supabase
       .from("books")

@@ -13,7 +13,7 @@ import { buildRewriteContextPacket } from "@/lib/rewrite/context-packet";
 import { applyRewritePlanDefaults } from "@/lib/rewrite/plan-defaults";
 import { clampStrategySettings, getRewriteStrategy, rewriteStrategies } from "@/lib/rewrite/strategies";
 import { getExistingRevisionState, shouldSkipParagraph, type ExistingRevisionRow } from "@/lib/rewrite/eligibility";
-import { createClient } from "@/lib/supabase/server";
+import { resolveRequestAuth } from "@/lib/ai/cron-auth";
 
 // Up to CONCURRENCY (5) paragraphs run in parallel per request, each with up
 // to 3 sequential completion attempts (see maxCompletionAttempts below) if
@@ -55,6 +55,8 @@ const schema = z.object({
   // class of bug a real prior incident already burned this codebase on
   // (13 duplicate full_book_rewrite jobs in parallel for ~2 hours).
   externalDriver: z.boolean().optional(),
+  // Set only by the resume-stale-chunked-jobs cron -- see resolveRequestAuth.
+  actingUserId: z.string().uuid().optional(),
   distributeAcrossChapters: z.boolean().default(false),
   coverageMode: z.enum(["normal", "uncovered_chapter_sample"]).default("normal"),
   strategyId: z.enum([
@@ -136,11 +138,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
   try {
     const { bookId } = await context.params;
     const body = schema.parse(await readJsonBody(request));
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    const { supabase, userId } = await resolveRequestAuth(request, body.actingUserId);
+    if (!userId) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    const user = { id: userId };
 
     const [
       { data: book },
