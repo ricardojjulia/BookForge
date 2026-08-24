@@ -17,7 +17,9 @@ import {
   Title,
 } from "@mantine/core";
 import { useRouter } from "next/navigation";
+import { AiTaskPreflight, type AiTaskPreflightData } from "@/components/ai/ai-task-preflight";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { buildCriticAllPreflight } from "@/lib/ai/critic-all-preflight";
 import { getJobProgressDisplay } from "@/lib/ai/job-state";
 import { useAdaptivePolling } from "@/lib/hooks/use-adaptive-polling";
 
@@ -429,15 +431,28 @@ function RunningJobsStrip({ bookId, onAllDone }: { bookId: string; onAllDone: ()
 export function GuidanceWorkflowPanel({
   bookId,
   reports,
+  criticStale = false,
+  chapterCount = 0,
+  sceneCount = 0,
+  paragraphCount = 0,
 }: {
   bookId: string;
   reports: Report[];
+  /** True when paragraphs have been accepted (rewritten) more recently than baseline Critic last ran, so Critic's findings no longer reflect the current manuscript. */
+  criticStale?: boolean;
+  chapterCount?: number;
+  sceneCount?: number;
+  paragraphCount?: number;
 }) {
   const router = useRouter();
   const [tasks, setTasks] = useState<GuidanceTask[]>([]);
   const [rewriteTarget, setRewriteTarget] = useState<ActionItem | null>(null);
   const [runningHumanize, setRunningHumanize] = useState(false);
   const [humanizeError, setHumanizeError] = useState("");
+  const [criticPreflight, setCriticPreflight] = useState<AiTaskPreflightData | null>(null);
+  const [criticPreflightOpen, setCriticPreflightOpen] = useState(false);
+  const [criticPreflightLoading, setCriticPreflightLoading] = useState(false);
+  const [refreshingCritic, setRefreshingCritic] = useState(false);
 
   const latest = reports.find((r) => r.report_type === "humanized_guidance");
   const content = latest?.content ?? null;
@@ -485,7 +500,7 @@ export function GuidanceWorkflowPanel({
     });
   }
 
-  async function runHumanize() {
+  async function runHumanizeOnly() {
     setRunningHumanize(true);
     setHumanizeError("");
     try {
@@ -495,6 +510,48 @@ export function GuidanceWorkflowPanel({
       setHumanizeError(err instanceof Error ? err.message : "Failed.");
     } finally {
       setRunningHumanize(false);
+    }
+  }
+
+  // Entry point for the "Run/Re-run analysis" button. Critic data feeds
+  // straight into humanize-guidance's synthesis, so if it's gone stale
+  // (paragraphs accepted more recently than Critic last ran), refreshing it
+  // first is the only way this analysis reflects the current manuscript --
+  // see criticStale's doc comment. Not stale: same one-call behavior as
+  // before, no detour through a Critic refresh nobody needs.
+  async function runHumanize() {
+    if (!criticStale) {
+      await runHumanizeOnly();
+      return;
+    }
+    setCriticPreflightLoading(true);
+    setHumanizeError("");
+    try {
+      const data = await buildCriticAllPreflight({ bookId, chapterCount, sceneCount, paragraphCount });
+      setCriticPreflight(data);
+      setCriticPreflightOpen(true);
+    } catch (err) {
+      setHumanizeError(err instanceof Error ? err.message : "Unable to prepare Critic refresh.");
+    } finally {
+      setCriticPreflightLoading(false);
+    }
+  }
+
+  async function proceedWithCriticRefresh() {
+    setCriticPreflightOpen(false);
+    setRefreshingCritic(true);
+    setHumanizeError("");
+    try {
+      await fetchJson(`/api/books/${bookId}/critic/all`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ stage: "baseline" }),
+      }, "Refresh BookForge Critic");
+      setRefreshingCritic(false);
+      await runHumanizeOnly();
+    } catch (err) {
+      setRefreshingCritic(false);
+      setHumanizeError(err instanceof Error ? err.message : "Critic refresh failed.");
     }
   }
 
@@ -532,16 +589,45 @@ export function GuidanceWorkflowPanel({
             </Text>
           </div>
           <Group>
-            <Button color="grape" variant="light" loading={runningHumanize} onClick={runHumanize} size="sm">
-              {latest ? "Re-run analysis" : "Run analysis"}
+            {criticStale && (
+              <Badge color="orange" variant="light">
+                Critic data outdated
+              </Badge>
+            )}
+            <Button
+              color="grape"
+              variant="light"
+              loading={runningHumanize || criticPreflightLoading || refreshingCritic}
+              onClick={runHumanize}
+              size="sm"
+            >
+              {refreshingCritic
+                ? "Refreshing Critic…"
+                : latest
+                  ? "Re-run analysis"
+                  : "Run analysis"}
             </Button>
           </Group>
         </Group>
+
+        {criticStale && (
+          <Alert color="orange" variant="light">
+            Manuscript paragraphs have been rewritten since BookForge Critic last ran, so its findings (and this
+            analysis) may be out of date. Running analysis will refresh Critic first.
+          </Alert>
+        )}
 
         {/* Live rewrite job progress — always visible when jobs are active */}
         <RunningJobsStrip bookId={bookId} onAllDone={() => router.refresh()} />
 
         {humanizeError && <Alert color="red">{humanizeError}</Alert>}
+
+        <AiTaskPreflight
+          opened={criticPreflightOpen}
+          data={criticPreflight}
+          onProceed={() => { void proceedWithCriticRefresh(); }}
+          onCancel={() => setCriticPreflightOpen(false)}
+        />
 
         {!content ? (
           <Alert color="blue" variant="light">
