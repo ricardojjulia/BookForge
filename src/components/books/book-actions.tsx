@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Modal, Paper, Select, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { Alert, Button, Group, Modal, Paper, Select, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AiJobQueue, AiJobQueueInlineStatus, type AiJobQueueState } from "@/components/ai/ai-job-queue";
@@ -1388,47 +1388,68 @@ export function BookActions({
       )}
 
       {plannedChapterCount > 0 && (
-        <Paper withBorder radius="md" p="lg" bg="#fff3e0">
-          <Stack>
-            <div>
-              <Title order={3}>Write Your Chapters</Title>
-              <Text size="sm" c="dimmed">
-                Turn the planned chapter shells from your architecture into actual manuscript prose. Do this first — the tools below (critic, rewrite, export) all need drafted chapters to work with.
-              </Text>
+        <Paper radius="lg" p="xl" bg="#fef3c7" style={{ border: "none" }}>
+          <Group align="flex-start" gap={28} wrap="nowrap">
+            <div
+              style={{
+                flex: "none",
+                width: 72,
+                height: 72,
+                borderRadius: 16,
+                background: "#f97316",
+                color: "#fff",
+                font: "800 44px/1 Inter, sans-serif",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                letterSpacing: "-0.03em",
+              }}
+            >
+              1
             </div>
-            {(() => {
-              const localActive = loading === "preflight:generate-draft" || loading === `/api/books/${bookId}/generate-draft`;
-              const remoteJob = findRemoteJob("creation_draft_generation");
-              const remoteOnly = Boolean(remoteJob) && !localActive;
-              return (
-                <>
-                  <Button
-                    fullWidth
-                    color="orange"
-                    loading={localActive}
-                    disabled={remoteOnly}
-                    onClick={() => openPreflight("generate-draft")}
-                  >
-                    {remoteOnly
-                      ? "Already running -- see progress below"
-                      : `Generate Planned Draft (${Math.min(plannedChapterCount, 3)} of ${plannedChapterCount})`}
-                  </Button>
-                  <Text size="xs" c="dimmed">
-                    This opens AI Task Preflight. Click Proceed in that dialog to start chapter generation.
-                  </Text>
-                  <AiJobQueueInlineStatus
-                    job={localActive ? queue : remoteJob ? remoteJobAsQueueState(remoteJob) : queue}
-                    visible={localActive || Boolean(remoteJob)}
-                  />
-                </>
-              );
-            })()}
-          </Stack>
+            <Stack gap={14} style={{ flex: 1, minWidth: 0 }}>
+              <div>
+                <Title order={3} style={{ fontSize: 30, letterSpacing: "-0.02em" }}>Write Your Chapters</Title>
+                <Text size="md" style={{ color: "#78350f", maxWidth: "92ch" }}>
+                  Turn the planned chapter shells from your architecture into actual manuscript prose. Do this first — the tools below (critic, rewrite, export) all need drafted chapters to work with.
+                </Text>
+              </div>
+              {(() => {
+                const localActive = loading === "preflight:generate-draft" || loading === `/api/books/${bookId}/generate-draft`;
+                const remoteJob = findRemoteJob("creation_draft_generation");
+                const remoteOnly = Boolean(remoteJob) && !localActive;
+                return (
+                  <>
+                    <Button
+                      fullWidth
+                      size="lg"
+                      color="orange"
+                      loading={localActive}
+                      disabled={remoteOnly}
+                      onClick={() => openPreflight("generate-draft")}
+                    >
+                      {remoteOnly
+                        ? "Already running -- see progress below"
+                        : `Generate Planned Draft (${Math.min(plannedChapterCount, 3)} of ${plannedChapterCount})`}
+                    </Button>
+                    <Text size="sm" style={{ color: "#92400e" }}>
+                      This opens AI Task Preflight. Click Proceed in that dialog to start chapter generation.
+                    </Text>
+                    <AiJobQueueInlineStatus
+                      job={localActive ? queue : remoteJob ? remoteJobAsQueueState(remoteJob) : queue}
+                      visible={localActive || Boolean(remoteJob)}
+                    />
+                  </>
+                );
+              })()}
+            </Stack>
+          </Group>
         </Paper>
       )}
 
       <SimpleGrid cols={{ base: 1, lg: 3 }}>
         <ActionPanel
+          step={2}
           title="Prepare Context"
           description="Build reusable manuscript context before revision."
         >
@@ -1495,6 +1516,7 @@ export function BookActions({
         </ActionPanel>
 
         <ActionPanel
+          step={3}
           title="BookForge Critic"
           description="Choose a lens, then run the matching evaluation."
         >
@@ -1552,6 +1574,8 @@ export function BookActions({
         </ActionPanel>
 
         <ActionPanel
+          step={4}
+          stepBadge="AFTER STEPS OPTIONAL"
           title="Rewrite & Export"
           description="Revise drafted chapters and build reviewable/final files."
         >
@@ -1724,20 +1748,61 @@ export function BookActions({
 }
 
 function ActionPanel({
+  step,
+  stepBadge,
   title,
   description,
   children,
 }: {
+  /** The numbered step this panel represents in the guided Studio workflow (2, 3, 4 -- step 1 is the "Write Your Chapters" callout above this grid). */
+  step: number;
+  /** Extra label shown inside the step badge, e.g. "AFTER STEPS OPTIONAL" for the optional final step. */
+  stepBadge?: string;
   title: string;
   description: string;
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ border: "1px solid oklch(0.92 0.003 90)", borderRadius: 10, padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
-      <div>
-        <div style={{ fontSize: 16, fontWeight: 700, color: "oklch(0.2 0.005 90)" }}>{title}</div>
-        <p style={{ margin: "6px 0 0", fontSize: 13, color: "oklch(0.5 0.005 90)", lineHeight: 1.5 }}>{description}</p>
-      </div>
+    <div
+      style={{
+        border: "1px solid oklch(0.92 0.003 90)",
+        borderRadius: 14,
+        padding: "24px 22px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+        background: "#fff",
+      }}
+    >
+      <Group align="flex-start" gap={14} wrap="nowrap" style={{ minHeight: 64 }}>
+        <div
+          style={{
+            flex: "none",
+            minWidth: 48,
+            height: 48,
+            borderRadius: 12,
+            background: "oklch(0.4 0.13 275)",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: stepBadge ? "flex-start" : "center",
+            gap: 8,
+            padding: stepBadge ? "6px 10px 6px 10px" : 0,
+            boxSizing: "border-box",
+          }}
+        >
+          <span style={{ font: "800 28px/1 Inter, sans-serif", letterSpacing: "-0.03em" }}>{step}</span>
+          {stepBadge && (
+            <span style={{ font: "700 9px/1.25 Inter, sans-serif", letterSpacing: "0.05em", opacity: 0.9, whiteSpace: "pre-line" }}>
+              {stepBadge.split(" ").join("\n")}
+            </span>
+          )}
+        </div>
+        <div style={{ paddingTop: 2 }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: "oklch(0.2 0.005 90)", letterSpacing: "-0.01em" }}>{title}</div>
+          <p style={{ margin: "4px 0 0", fontSize: 13, color: "oklch(0.5 0.005 90)", lineHeight: 1.45 }}>{description}</p>
+        </div>
+      </Group>
       {children}
     </div>
   );
