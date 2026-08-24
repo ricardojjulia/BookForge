@@ -1,140 +1,70 @@
 /**
- * /analytics — Auto-Review Run Analytics
+ * /analytics — the user-facing view: cost, which models actually worked,
+ * time spent per book, and quality results. Rebuilt from what used to be
+ * here (pure engineering telemetry -- snapshot provenance, estimation
+ * accuracy, raw model-call latency), which now lives at
+ * /settings/geek-analytics for anyone who wants that level of detail.
  *
- * Server component. Fetches all auto_review_jobs for the current user via
- * Supabase, derives summary metrics, and passes fully typed RunRecord[] to
- * the interactive RunsTable client component.
- *
- * Summary cards:
- *   Total Runs      – all jobs regardless of status
- *   Completed       – jobs that reached "completed" status
- *   Avg Duration    – mean wall-clock time across completed runs
- *   Avg Cycles      – mean rewrite loop count (1 = ran once, no loop needed)
- *   Green Rate      – % of completed runs where all critics scored ≥ 70
- *
- * The detailed per-run data (stage timings, score progression, model info)
- * lives in the expandable RunDetailPanel inside RunsTable.
+ * Every number here is derived from real data: model_call_events for cost
+ * and per-model performance (cost_usd_micros is computed and recorded on
+ * every cloud call regardless of deployment mode, so this works the same
+ * for managed-SaaS and self-hosted users), revision_jobs/auto_review_jobs
+ * for wall-clock AI processing time per book, and coherence_reports
+ * (BookForge Critic) for the baseline-vs-latest quality trend per book.
  */
 
-import { Badge, Container, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { Badge, Container, Group, Paper, Progress, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import Link from "next/link";
 import { DataFreshnessBanner } from "@/components/layout/data-freshness-banner";
-import { RunsTable } from "@/components/analytics/runs-table";
-import { FreshnessTelemetryPanel } from "@/components/analytics/freshness-telemetry-panel";
-import { WorkflowCoverageTable } from "@/components/analytics/workflow-coverage-table";
-import { ManualRunsTable } from "@/components/analytics/manual-runs-table";
-import { EstimationAccuracyTable, StaleIncidentsPanel, type StaleIncidentRow } from "@/components/analytics/job-health-panel";
-import { DailyCallStatsTable, ModelCallBreakdownTable, type DailyCallStatsRow, type ModelCallStatsRow } from "@/components/analytics/model-call-stats-panel";
+import { CostByModelChart, CostTrendChart, ModelSuccessChart, ResultsChart, TimeOnBookChart } from "@/components/analytics/overview-charts";
+import { extractCriticScore } from "@/lib/critic/score";
+import { isManagedSaasDeployment } from "@/lib/deployment/mode";
 import { createClient } from "@/lib/supabase/server";
-import { detectAndHealStaleAutoReviewJobs } from "@/lib/ai/job-state";
-import type { RunRecord, StageDuration, ScoreSnapshot } from "@/app/api/analytics/route";
 
-// ── Telemetry parsing (duplicated from the API route so the server component
-//    can work without an internal HTTP round-trip) ────────────────────────────
+export const dynamic = "force-dynamic";
 
-type TelemetryEntry = {
-  type: "stage_complete" | "stage_error" | "info";
-  stage?: string;
-  iteration: number;
-  message: string;
-  durationMs?: number;
-  scores?: Record<string, number | null>;
-  baselineScores?: Record<string, number | null>;
-  metadata?: Record<string, unknown>;
-};
+const DONUT_COLORS = ["grape.6", "indigo.6", "teal.6", "orange.6", "pink.6", "cyan.6", "yellow.6", "red.6"];
 
-type MetadataSelectionSource = "explicit_snapshot" | "branch_active" | "active_snapshot" | "unknown";
-
-type ProvenanceRunRecord = {
-  workflow: "auto_review" | "revision";
-  label: string;
-  source: MetadataSelectionSource;
-  hasSnapshot: boolean;
-  hasBranch: boolean;
-  createdAt: string;
-};
-
-function parseLog(raw: unknown[]): TelemetryEntry[] {
-  return raw.flatMap((entry) => {
-    if (!entry || typeof entry !== "object") return [];
-    const e = entry as Record<string, unknown>;
-    if (!e.type || !e.message) return [];
-    return [e as unknown as TelemetryEntry];
-  });
+function usd(micros: number): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(micros / 1_000_000);
 }
 
-function extractStageDurations(entries: TelemetryEntry[]): StageDuration[] {
-  return entries.flatMap((e) => {
-    if (e.type !== "stage_complete" || !e.stage || e.durationMs === undefined) return [];
-    return [{ stage: e.stage, durationMs: e.durationMs, iteration: e.iteration }];
-  });
+function friendlyModelName(model: string | null): string {
+  if (!model) return "Unknown model";
+  const afterSlash = model.includes("/") ? model.split("/")[1] : model;
+  return afterSlash
+    .split("-")
+    .map((part) => (part.length <= 3 && /^v?\d/i.test(part) ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(" ");
 }
 
-function extractScoreSnapshots(entries: TelemetryEntry[]): ScoreSnapshot[] {
-  return entries.flatMap((e) => {
-    if (!e.stage?.includes("critics_check") || !e.scores) return [];
-    const values = Object.values(e.scores).filter((v): v is number => v !== null);
-    const avgScore = values.length
-      ? Math.round(values.reduce((a, b) => a + b, 0) / values.length)
-      : null;
-    return [{ iteration: e.iteration, scores: e.scores, baselineScores: e.baselineScores, avgScore }];
-  });
+function dayKey(iso: string): string {
+  return new Date(iso).toISOString().slice(5, 10); // MM-DD
 }
 
-function extractModel(entries: TelemetryEntry[]): string | null {
-  const entry = entries.find((e) => e.type === "info" && (e.metadata?.model as string | undefined));
-  return (entry?.metadata?.model as string | undefined) ?? null;
+function humanizeMode(mode: string): string {
+  return mode
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
-// ── Summary metric helpers ────────────────────────────────────────────────────
-
-function fmtDuration(ms: number | null): string {
-  if (ms === null) return "—";
-  const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}s`;
-  return `${Math.floor(s / 60)}m ${s % 60}s`;
+function timeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
-
-function avg(nums: number[]): number | null {
-  if (!nums.length) return null;
-  return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
-}
-
-function normalizeSelectionSource(value: unknown): MetadataSelectionSource {
-  if (value === "explicit_snapshot" || value === "branch_active" || value === "active_snapshot") {
-    return value;
-  }
-  return "unknown";
-}
-
-function parseSelectionRecord(
-  record: Record<string, unknown> | null | undefined,
-  key: "config" | "settings",
-): { source: MetadataSelectionSource; hasSnapshot: boolean; hasBranch: boolean } {
-  const payload = record && typeof record === "object" ? (record[key] as Record<string, unknown> | null | undefined) : null;
-  return {
-    source: normalizeSelectionSource(payload?.metadataSelectionSource),
-    hasSnapshot: Boolean(payload?.metadataSnapshotId),
-    hasBranch: Boolean(payload?.metadataBranchName),
-  };
-}
-
-// ── Metric card ───────────────────────────────────────────────────────────────
-
-function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <Paper withBorder radius="md" p="md">
-      <Text size="xs" c="dimmed" tt="uppercase" fw={600}>{label}</Text>
-      <Text size="xl" fw={700} mt={4}>{value}</Text>
-      {sub && <Text size="xs" c="dimmed">{sub}</Text>}
-    </Paper>
-  );
-}
-
-// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function AnalyticsPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   if (!user) {
     return (
@@ -144,386 +74,315 @@ export default async function AnalyticsPage() {
     );
   }
 
-  const { data: jobs } = await supabase
-    .from("auto_review_jobs")
-    .select("id, book_id, mode, status, current_stage, iteration, created_at, completed_at, error, book_stats, log, config, metadata_snapshot_id, books(title)")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(200);
+  const managedSaas = isManagedSaasDeployment();
 
-  const healedAutoReviewJobIds = jobs
-    ? await detectAndHealStaleAutoReviewJobs(supabase, user.id, jobs)
-    : [];
-  for (const job of jobs ?? []) {
-    if (healedAutoReviewJobIds.includes(job.id)) job.status = "failed";
+  const [{ data: books }, { data: callEvents }, { data: revisionJobs }, { data: autoReviewJobs }, { data: reports }, subscriptionResult] =
+    await Promise.all([
+      supabase.from("books").select("id,title,created_at").order("created_at", { ascending: false }),
+      supabase
+        .from("model_call_events")
+        .select("model,task,outcome,cost_usd_micros,duration_ms,job_id,created_at")
+        .eq("user_id", user.id)
+        .eq("event_type", "model_call")
+        .order("created_at", { ascending: false })
+        .limit(5000),
+      supabase
+        .from("revision_jobs")
+        .select("id,book_id,mode,status,created_at,completed_at")
+        .eq("created_by", user.id)
+        .order("created_at", { ascending: false })
+        .limit(300),
+      supabase
+        .from("auto_review_jobs")
+        .select("id,book_id,mode,status,created_at,completed_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(300),
+      supabase
+        .from("coherence_reports")
+        .select("book_id,report_type,content,created_at")
+        .like("report_type", "critic%")
+        .order("created_at", { ascending: true })
+        .limit(2000),
+      managedSaas
+        ? supabase
+            .from("user_subscriptions")
+            .select("tier_id,status,trial_ends_at,subscription_tiers(monthly_credit_cap_usd_micros)")
+            .eq("user_id", user.id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+
+  const bookById = new Map((books || []).map((book) => [book.id, book]));
+  const bookTitle = (bookId: string | null) => (bookId ? bookById.get(bookId)?.title || "Unknown book" : "Unattributed");
+
+  // job_id on a model_call_events row can point at either revision_jobs or
+  // auto_review_jobs -- build one combined lookup so cost/time can be
+  // attributed to a book regardless of which workflow made the call.
+  const jobToBook = new Map<string, string>();
+  for (const job of revisionJobs || []) if (job.book_id) jobToBook.set(job.id, job.book_id);
+  for (const job of autoReviewJobs || []) if (job.book_id) jobToBook.set(job.id, job.book_id);
+
+  // ── Cost ─────────────────────────────────────────────────────────────────
+  // "local-model" is a known mislabel, not a real model choice: a separate,
+  // generic telemetry path (lib/lmstudio/client.ts's classifyLmStudioError
+  // catch-all) defaults to that literal string when it can't thread the
+  // real cloud model name through. Verified live: this account is managed
+  // SaaS, where LM Studio is unreachable entirely (see docs/SELF_HOSTING.md),
+  // so every one of these rows is really a mislabeled cloud call, not local
+  // usage -- showing it as "Local Model, 0% success" would be actively
+  // misleading on a page whose whole point is trustworthy numbers.
+  const events = (callEvents || []).filter((e) => e.model !== "local-model");
+  const totalCostMicros = events.reduce((sum, e) => sum + (e.cost_usd_micros || 0), 0);
+  const totalCalls = events.length;
+
+  const costByDayMap = new Map<string, number>();
+  for (const e of events) {
+    const key = dayKey(e.created_at);
+    costByDayMap.set(key, (costByDayMap.get(key) || 0) + (e.cost_usd_micros || 0) / 1_000_000);
+  }
+  const costTrend = Array.from(costByDayMap.entries())
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .slice(-30)
+    .map(([date, cost]) => ({ date, cost: Math.round(cost * 10000) / 10000 }));
+
+  const costByModelMap = new Map<string, number>();
+  for (const e of events) {
+    const label = friendlyModelName(e.model);
+    costByModelMap.set(label, (costByModelMap.get(label) || 0) + (e.cost_usd_micros || 0) / 1_000_000);
+  }
+  const costByModel = Array.from(costByModelMap.entries())
+    .filter(([, cost]) => cost > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([model, cost], index) => ({ model, cost: Math.round(cost * 10000) / 10000, color: DONUT_COLORS[index % DONUT_COLORS.length] }));
+
+  const costByBookMap = new Map<string, number>();
+  for (const e of events) {
+    const bId = e.job_id ? jobToBook.get(e.job_id) : undefined;
+    const label = bId ? bookTitle(bId) : "Other / not tied to a book";
+    costByBookMap.set(label, (costByBookMap.get(label) || 0) + (e.cost_usd_micros || 0));
   }
 
-  const { data: revisionJobs } = await supabase
-    .from("revision_jobs")
-    .select("id, book_id, mode, status, created_at, completed_at, settings, metadata_snapshot_id, books(title)")
-    .eq("created_by", user.id)
-    .order("created_at", { ascending: false })
-    .limit(200);
-
-  const { data: staleIncidents } = await supabase
-    .from("model_call_events")
-    .select("id, task, duration_ms, error_signature, created_at")
-    .eq("user_id", user.id)
-    .eq("event_type", "job_stale_detected")
-    .order("created_at", { ascending: false })
-    .limit(20);
-
-  const { data: completionSummaries } = await supabase
-    .from("model_call_events")
-    .select("task, outcome, duration_ms, estimated_duration_ms")
-    .eq("user_id", user.id)
-    .eq("event_type", "job_completed_summary");
-
-  // Raw model_call volume/latency/success trend -- computed in SQL (see
-  // model_call_daily_stats/model_call_stats_by_model) rather than pulling
-  // thousands of raw rows per day into the page, since a single busy day can
-  // already exceed 3,000 calls.
-  const { data: dailyCallStatsRaw } = await supabase.rpc("model_call_daily_stats", {
-    p_user_id: user.id,
-    p_days: 14,
-  });
-  const { data: callStatsByModelRaw } = await supabase.rpc("model_call_stats_by_model", {
-    p_user_id: user.id,
-    p_days: 14,
-  });
-  const dailyCallStats = (dailyCallStatsRaw ?? []) as DailyCallStatsRow[];
-  const callStatsByModel = (callStatsByModelRaw ?? []) as ModelCallStatsRow[];
-
-  // Build typed RunRecord[] with derived telemetry metrics
-  const runs: RunRecord[] = (jobs ?? []).map((job) => {
-    const rawLog = Array.isArray(job.log) ? job.log : [];
-    const entries = parseLog(rawLog as unknown[]);
-    const durationMs =
-      job.completed_at
-        ? new Date(job.completed_at).getTime() - new Date(job.created_at).getTime()
-        : null;
-    const snapshots = extractScoreSnapshots(entries);
-    const lastSnapshot = snapshots[snapshots.length - 1];
-    return {
-      id: job.id,
-      book_id: job.book_id,
-      book_title: (job.books as { title?: string } | null)?.title ?? "Unknown Book",
-      mode: job.mode,
-      status: job.status,
-      iteration: job.iteration,
-      created_at: job.created_at,
-      completed_at: job.completed_at ?? null,
-      error: job.error ?? null,
-      book_stats: {
-        chapters: (job.book_stats as { chapters?: number } | null)?.chapters ?? 0,
-        paragraphs: (job.book_stats as { paragraphs?: number } | null)?.paragraphs ?? 0,
-      },
-      durationMs,
-      model: extractModel(entries),
-      avgScore: lastSnapshot?.avgScore ?? null,
-      stageDurations: extractStageDurations(entries),
-      scoreSnapshots: snapshots,
-    };
-  });
-
-  const provenanceRuns: ProvenanceRunRecord[] = [
-    ...(jobs ?? []).map((job): ProvenanceRunRecord => {
-      const selection = parseSelectionRecord(job as Record<string, unknown>, "config");
-      return {
-        workflow: "auto_review",
-        label: `${job.mode} · ${(job.books as { title?: string } | null)?.title ?? "Unknown Book"}`,
-        source: selection.source,
-        hasSnapshot: selection.hasSnapshot || Boolean((job as { metadata_snapshot_id?: string | null }).metadata_snapshot_id),
-        hasBranch: selection.hasBranch,
-        createdAt: job.created_at,
-      };
-    }),
-    ...(revisionJobs ?? []).map((job): ProvenanceRunRecord => {
-      const selection = parseSelectionRecord(job as Record<string, unknown>, "settings");
-      return {
-        workflow: "revision",
-        label: `${job.mode} · ${job.status}`,
-        source: selection.source,
-        hasSnapshot: selection.hasSnapshot || Boolean((job as { metadata_snapshot_id?: string | null }).metadata_snapshot_id),
-        hasBranch: selection.hasBranch,
-        createdAt: job.created_at,
-      };
-    }),
-  ];
-
-  // ── Summary metrics ─────────────────────────────────────────────────────────
-
-  const completed = runs.filter((r) => r.status === "completed");
-  const failed = runs.filter((r) => r.status === "failed");
-
-  const avgDurationMs = avg(completed.map((r) => r.durationMs).filter((d): d is number => d !== null));
-  // "Cycles" = iteration + 1 (0 iterations = 1 cycle, 1 iteration = 2 cycles, etc.)
-  const avgCycles = avg(completed.map((r) => r.iteration + 1));
-  // A run "went green" if its last score snapshot had avgScore ≥ 70
-  const greenRuns = completed.filter((r) => (r.avgScore ?? 0) >= 70).length;
-  const greenRate = completed.length ? Math.round((greenRuns / completed.length) * 100) : null;
-
-  // Most used mode across all runs
-  const modeCounts = runs.reduce<Record<string, number>>((acc, r) => {
-    acc[r.mode] = (acc[r.mode] ?? 0) + 1;
-    return acc;
-  }, {});
-  const topMode = Object.entries(modeCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
-  const topModeLabel: Record<string, string> = {
-    full_review: "Full Review",
-    make_shorter: "Make Shorter",
-    make_longer: "Make Longer",
-  };
-
-  // ── Manual workflow runs (Critic/Blueprint/Execute Rewrite/Drift Check,
-  //    clicked individually rather than through the Auto-Review Wizard) ───────
-  type ManualRunRecord = {
-    id: string;
-    book_title: string;
-    mode: string;
-    status: string;
-    durationMs: number | null;
-    progress: { attempted?: number; successful?: number; failed?: number; totalUnits?: number } | null;
-    createdAt: string;
-  };
-  const manualRuns: ManualRunRecord[] = (revisionJobs ?? []).map((job) => {
-    const settings = job.settings as { progress?: ManualRunRecord["progress"] } | null;
-    return {
-      id: job.id,
-      book_title: (job.books as { title?: string } | null)?.title ?? "Unknown Book",
-      mode: job.mode,
-      status: job.status ?? "unknown",
-      durationMs: job.completed_at ? new Date(job.completed_at).getTime() - new Date(job.created_at).getTime() : null,
-      progress: settings?.progress ?? null,
-      createdAt: job.created_at,
-    };
-  });
-  const manualCompleted = manualRuns.filter((r) => r.status === "completed");
-  const manualFailed = manualRuns.filter((r) => r.status === "failed");
-  const manualAvgDurationMs = avg(manualCompleted.map((r) => r.durationMs).filter((d): d is number => d !== null));
-  const manualSuccessRate = manualRuns.length
-    ? Math.round((manualCompleted.length / manualRuns.length) * 100)
-    : null;
-
-  // ── Job health & estimation trust ───────────────────────────────────────────
-  type EstimationAccuracyRow = {
-    task: string;
-    jobCount: number;
-    avgActualMs: number;
-    avgEstimatedMs: number | null;
-  };
-  const accuracyByTask = new Map<string, { durations: number[]; estimates: number[] }>();
-  for (const row of completionSummaries ?? []) {
-    if (row.outcome !== "success" || typeof row.duration_ms !== "number") continue;
-    const bucket = accuracyByTask.get(row.task) ?? { durations: [], estimates: [] };
-    bucket.durations.push(row.duration_ms);
-    if (typeof row.estimated_duration_ms === "number") bucket.estimates.push(row.estimated_duration_ms);
-    accuracyByTask.set(row.task, bucket);
+  // ── Model performance ────────────────────────────────────────────────────
+  const perfByModel = new Map<string, { total: number; success: number }>();
+  for (const e of events) {
+    const label = friendlyModelName(e.model);
+    const bucket = perfByModel.get(label) || { total: 0, success: 0 };
+    bucket.total += 1;
+    if (e.outcome === "success") bucket.success += 1;
+    perfByModel.set(label, bucket);
   }
-  const estimationAccuracy: EstimationAccuracyRow[] = Array.from(accuracyByTask.entries())
-    .map(([task, bucket]) => ({
-      task,
-      jobCount: bucket.durations.length,
-      avgActualMs: avg(bucket.durations) ?? 0,
-      avgEstimatedMs: bucket.estimates.length ? avg(bucket.estimates) : null,
+  const modelSuccess = Array.from(perfByModel.entries())
+    .filter(([, b]) => b.total >= 2)
+    .map(([model, b]) => ({ model, "success rate": Math.round((b.success / b.total) * 100), calls: b.total }))
+    .sort((a, b) => b["success rate"] - a["success rate"] || b.calls - a.calls)
+    .slice(0, 8);
+
+  // ── Time on book ─────────────────────────────────────────────────────────
+  const allJobs = [...(revisionJobs || []), ...(autoReviewJobs || [])];
+  const hoursByBookMap = new Map<string, number>();
+  for (const job of allJobs) {
+    if (!job.book_id || !job.completed_at) continue;
+    const hours = (new Date(job.completed_at).getTime() - new Date(job.created_at).getTime()) / 3_600_000;
+    if (hours <= 0) continue;
+    hoursByBookMap.set(job.book_id, (hoursByBookMap.get(job.book_id) || 0) + hours);
+  }
+  const timeOnBook = Array.from(hoursByBookMap.entries())
+    .map(([bookId, hours]) => ({ book: bookTitle(bookId), hours: Math.round(hours * 10) / 10 }))
+    .sort((a, b) => b.hours - a.hours)
+    .slice(0, 10);
+
+  // ── Results (quality) ────────────────────────────────────────────────────
+  // Per book, per stage (baseline/post-rewrite), per lens: keep only the
+  // latest score. Reports are fetched oldest-first, so a later write for
+  // the same (book, stage, lens) simply overwrites the earlier one --
+  // a book Critic'd twice shows its current state, not a double-counted
+  // average.
+  const baselineLensScores = new Map<string, Map<string, number>>(); // bookId -> lens -> score
+  const latestLensScores = new Map<string, Map<string, number>>();
+  for (const report of reports || []) {
+    if (!report.book_id) continue;
+    const score = extractCriticScore(report.content as Record<string, unknown> | null);
+    if (score === null) continue;
+    const isPost = report.report_type.startsWith("critic_post:");
+    const lens = report.report_type.replace("critic_post:", "").replace("critic:", "");
+    const target = isPost ? latestLensScores : baselineLensScores;
+    const lensTracker = target.get(report.book_id) || new Map<string, number>();
+    lensTracker.set(lens, score);
+    target.set(report.book_id, lensTracker);
+  }
+  function averageLensScore(target: Map<string, Map<string, number>>, bookId: string): number | null {
+    const lensTracker = target.get(bookId);
+    if (!lensTracker || !lensTracker.size) return null;
+    const values = Array.from(lensTracker.values());
+    return Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+  }
+  const bookIdsWithReports = new Set((reports || []).map((r) => r.book_id).filter(Boolean) as string[]);
+  const results = Array.from(bookIdsWithReports)
+    .map((bookId) => ({
+      book: bookTitle(bookId),
+      baseline: averageLensScore(baselineLensScores, bookId),
+      latest: averageLensScore(latestLensScores, bookId),
     }))
-    .sort((a, b) => b.jobCount - a.jobCount);
+    .filter((row) => row.baseline !== null || row.latest !== null);
 
-  // ── Model call volume & performance summary ─────────────────────────────────
-  const todayCallStats = dailyCallStats[0] ?? null;
-  const priorDayStats = dailyCallStats.slice(1, 8);
-  const priorAvgCalls = priorDayStats.length
-    ? Math.round(priorDayStats.reduce((sum, row) => sum + row.call_count, 0) / priorDayStats.length)
-    : null;
-  const todayVsAvgPct =
-    todayCallStats && priorAvgCalls
-      ? Math.round(((todayCallStats.call_count - priorAvgCalls) / priorAvgCalls) * 100)
-      : null;
-  const todaySuccessRate =
-    todayCallStats && todayCallStats.call_count
-      ? Math.round((todayCallStats.success_count / todayCallStats.call_count) * 100)
-      : null;
+  // ── Recent activity ──────────────────────────────────────────────────────
+  const recentActivity = allJobs
+    .filter((job) => job.completed_at)
+    .sort((a, b) => new Date(b.completed_at as string).getTime() - new Date(a.completed_at as string).getTime())
+    .slice(0, 8)
+    .map((job) => ({
+      id: job.id,
+      label: `${humanizeMode(job.mode)} · ${bookTitle(job.book_id)}`,
+      status: job.status,
+      when: timeAgo(job.completed_at as string),
+    }));
 
-  const explicitRuns = provenanceRuns.filter((run) => run.source === "explicit_snapshot").length;
-  const branchRuns = provenanceRuns.filter((run) => run.source === "branch_active").length;
-  const fallbackRuns = provenanceRuns.filter((run) => run.source === "active_snapshot").length;
-  const unknownRuns = provenanceRuns.filter((run) => run.source === "unknown").length;
-  const provenanceCoverage = provenanceRuns.length ? Math.round((explicitRuns / provenanceRuns.length) * 100) : null;
-  const provenanceQualityLabel =
-    provenanceCoverage === null
-      ? "n/a"
-      : provenanceCoverage >= 80
-        ? "healthy"
-        : provenanceCoverage >= 50
-          ? "watch"
-          : "at risk";
+  // ── Trial context (managed SaaS only) ────────────────────────────────────
+  const subscription = subscriptionResult.data as {
+    tier_id: string;
+    status: string;
+    trial_ends_at: string | null;
+    subscription_tiers: { monthly_credit_cap_usd_micros: number } | { monthly_credit_cap_usd_micros: number }[] | null;
+  } | null;
+  const tierCapMicros = Array.isArray(subscription?.subscription_tiers)
+    ? subscription?.subscription_tiers[0]?.monthly_credit_cap_usd_micros
+    : subscription?.subscription_tiers?.monthly_credit_cap_usd_micros;
+  // Server component, route is force-dynamic -- computed fresh per request, not during a render pass.
+  // eslint-disable-next-line react-hooks/purity
+  const nowMs = Date.now();
+  const trialDaysLeft =
+    subscription?.status === "trialing" && subscription.trial_ends_at
+      ? Math.max(0, Math.ceil((new Date(subscription.trial_ends_at).getTime() - nowMs) / 86_400_000))
+      : null;
 
   return (
     <Container size="xl">
       <Stack gap="xl">
-        <DataFreshnessBanner routeKey="analytics:runs" fetchedAt={new Date().toISOString()} label="Analytics data" variant="subtle" />
+        <DataFreshnessBanner routeKey="analytics:overview" fetchedAt={new Date().toISOString()} label="Analytics data" variant="subtle" />
         <div>
-          <Title>Run Analytics</Title>
+          <Title>Analytics</Title>
           <Text c="dimmed">
-            Performance and quality telemetry across every workflow — Auto-Review Wizard runs below, manual
-            Critic/Blueprint/Rewrite runs and job-health stats further down. Click any Auto-Review row to see
-            per-stage timing and score progression.
+            Where your AI spend went, which models actually delivered, how much time each book has taken, and what it
+            got you.{" "}
+            <Link href="/settings/geek-analytics" style={{ textDecoration: "underline" }}>
+              Prefer raw telemetry? See Geek Analytics.
+            </Link>
           </Text>
         </div>
 
-        {/* Summary metric cards */}
-        <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }}>
+        {/* Hero stats */}
+        <SimpleGrid cols={{ base: 2, sm: managedSaas ? 4 : 3 }}>
+          <MetricCard label="Total spent" value={usd(totalCostMicros)} sub="all-time" tone="grape" />
+          <MetricCard label="AI calls made" value={String(totalCalls)} sub="across every workflow" tone="indigo" />
           <MetricCard
-            label="Total Runs"
-            value={String(runs.length)}
-            sub={`${completed.length} completed · ${failed.length} failed`}
+            label="Books in progress"
+            value={String(books?.length || 0)}
+            sub={timeOnBook.length ? `${timeOnBook.length} with AI work logged` : "no AI work yet"}
+            tone="teal"
           />
-          <MetricCard
-            label="Avg Duration"
-            value={fmtDuration(avgDurationMs)}
-            sub="completed runs only"
-          />
-          <MetricCard
-            label="Avg Cycles"
-            value={avgCycles !== null ? `${avgCycles}` : "—"}
-            sub="rewrite loops per run"
-          />
-          <MetricCard
-            label="Green Rate"
-            value={greenRate !== null ? `${greenRate}%` : "—"}
-            sub="runs with avg score ≥ 70"
-          />
-          <MetricCard
-            label="Top Mode"
-            value={topMode ? (topModeLabel[topMode] ?? topMode) : "—"}
-            sub={topMode ? `${modeCounts[topMode]} run(s)` : "no runs yet"}
-          />
+          {managedSaas && tierCapMicros ? (
+            <MetricCard
+              label="Trial used"
+              value={`${Math.min(100, Math.round((totalCostMicros / tierCapMicros) * 100))}%`}
+              sub={trialDaysLeft !== null ? `${trialDaysLeft} day(s) left` : "of your plan's cap"}
+              tone="orange"
+            />
+          ) : null}
         </SimpleGrid>
 
-        <FreshnessTelemetryPanel />
-
-        <Paper withBorder radius="md" p="md" bg="#fbfaf8">
-          <Stack gap="md">
-            <Group justify="space-between" align="flex-start">
-              <div>
-                <Text fw={700}>Snapshot Provenance</Text>
-                <Text size="sm" c="dimmed">
-                  Coverage for snapshot-driven runs across auto-review and revision workflows.
-                </Text>
-              </div>
-              <Badge color={provenanceCoverage === null ? "gray" : provenanceCoverage >= 80 ? "green" : provenanceCoverage >= 50 ? "yellow" : "red"} variant="light">
-                {provenanceQualityLabel}
-              </Badge>
+        {managedSaas && tierCapMicros ? (
+          <Paper withBorder radius="md" p="md">
+            <Group justify="space-between" mb={6}>
+              <Text size="sm" fw={600}>Trial allowance</Text>
+              <Text size="sm" c="dimmed">
+                {usd(totalCostMicros)} of {usd(tierCapMicros)}
+              </Text>
             </Group>
+            <Progress value={Math.min(100, (totalCostMicros / tierCapMicros) * 100)} color="grape" radius="xl" size="lg" />
+          </Paper>
+        ) : null}
 
-            <SimpleGrid cols={{ base: 2, sm: 4 }}>
-              <MetricCard label="Tracked Runs" value={String(provenanceRuns.length)} sub="auto-review + revision jobs" />
-              <MetricCard label="Explicit Snapshot" value={String(explicitRuns)} sub={provenanceCoverage === null ? "no data" : `${provenanceCoverage}% coverage`} />
-              <MetricCard label="Branch Resolved" value={String(branchRuns)} sub="resolved from branch-active snapshot" />
-              <MetricCard label="Active Fallback" value={String(fallbackRuns)} sub={unknownRuns > 0 ? `${unknownRuns} unknown` : "directly recoverable"} />
-            </SimpleGrid>
-
-            <Paper withBorder radius="md" p="sm" bg="white">
-              <Group justify="space-between" align="flex-start" mb="xs">
-                <div>
-                  <Text fw={600}>Coverage by workflow</Text>
-                  <Text size="xs" c="dimmed">
-                    Explicit snapshot selection is the strongest provenance signal. Branch resolution is still reproducible but less direct.
-                  </Text>
-                </div>
-                <Text size="xs" c="dimmed">
-                  {provenanceRuns.length} total
-                </Text>
-              </Group>
-              <WorkflowCoverageTable provenanceRuns={provenanceRuns} />
-            </Paper>
-          </Stack>
+        {/* Cost */}
+        <Paper withBorder radius="md" p="md">
+          <Text fw={700} mb={4}>Cost over time</Text>
+          <Text size="sm" c="dimmed" mb="sm">Daily AI spend, last 30 days.</Text>
+          <CostTrendChart data={costTrend} />
         </Paper>
 
-        {/* Per-run breakdown */}
-        <div>
-          <Group justify="space-between" mb="sm">
-            <Text fw={600}>All Runs</Text>
-            <Text size="xs" c="dimmed" pr="md">
-              Status · Duration · Cycles · Avg Score · Paragraphs
+        <SimpleGrid cols={{ base: 1, md: 2 }}>
+          <Paper withBorder radius="md" p="md">
+            <Text fw={700} mb={4}>Where the money went</Text>
+            <Text size="sm" c="dimmed" mb="sm">Spend by model.</Text>
+            <CostByModelChart data={costByModel} />
+          </Paper>
+          <Paper withBorder radius="md" p="md">
+            <Text fw={700} mb={4}>Models that worked</Text>
+            <Text size="sm" c="dimmed" mb="sm">Success rate by model (2+ calls).</Text>
+            <ModelSuccessChart data={modelSuccess} />
+          </Paper>
+        </SimpleGrid>
+
+        {/* Time on book */}
+        <Paper withBorder radius="md" p="md">
+          <Text fw={700} mb={4}>Time on book</Text>
+          <Text size="sm" c="dimmed" mb="sm">AI processing hours per book (wall-clock, completed jobs only).</Text>
+          <TimeOnBookChart data={timeOnBook} />
+        </Paper>
+
+        {/* Results */}
+        <Paper withBorder radius="md" p="md">
+          <Text fw={700} mb={4}>Results</Text>
+          <Text size="sm" c="dimmed" mb="sm">
+            Average BookForge Critic score per book -- baseline vs. latest post-rewrite evaluation.
+          </Text>
+          <ResultsChart data={results} />
+        </Paper>
+
+        {/* Recent activity */}
+        <Paper withBorder radius="md" p="md">
+          <Text fw={700} mb="sm">Recent activity</Text>
+          {recentActivity.length ? (
+            <Stack gap="xs">
+              {recentActivity.map((item) => (
+                <Group key={item.id} justify="space-between" wrap="nowrap">
+                  <Text size="sm" lineClamp={1}>{item.label}</Text>
+                  <Group gap="xs" wrap="nowrap">
+                    <Badge size="sm" color={item.status === "completed" ? "green" : item.status === "failed" ? "red" : "gray"} variant="light">
+                      {item.status}
+                    </Badge>
+                    <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>{item.when}</Text>
+                  </Group>
+                </Group>
+              ))}
+            </Stack>
+          ) : (
+            <Text size="sm" c="dimmed">No completed AI jobs yet.</Text>
+          )}
+        </Paper>
+
+        <Paper withBorder p="sm" bg="#fbfaf8">
+          <Group justify="space-between">
+            <Text size="xs" c="dimmed">
+              {costByBookMap.size} cost source(s) tracked
             </Text>
+            <Link href="/settings/geek-analytics" style={{ textDecoration: "underline", fontSize: 12 }}>
+              Full engineering telemetry: run tables, job health, snapshot provenance →
+            </Link>
           </Group>
-          <RunsTable runs={runs} />
-        </div>
-
-        {/* Manual workflow runs -- Critic/Blueprint/Execute Rewrite/Drift
-            Check clicked individually rather than through the Auto-Review
-            Wizard. This is the far more common path in practice; the
-            summary cards/table above only ever reflect Auto-Review runs. */}
-        <div>
-          <Title order={2}>Manual Workflow Runs</Title>
-          <Text c="dimmed" mb="sm">
-            Critic, Blueprint, Execute Rewrite, and Drift Check runs triggered individually rather than through the
-            Auto-Review Wizard.
-          </Text>
-          <SimpleGrid cols={{ base: 2, sm: 4 }} mb="sm">
-            <MetricCard label="Total Runs" value={String(manualRuns.length)} sub={`${manualCompleted.length} completed · ${manualFailed.length} failed`} />
-            <MetricCard label="Avg Duration" value={fmtDuration(manualAvgDurationMs)} sub="completed runs only" />
-            <MetricCard label="Success Rate" value={manualSuccessRate !== null ? `${manualSuccessRate}%` : "—"} sub="of all manual runs" />
-            <MetricCard label="Stale Incidents" value={String(staleIncidents?.length ?? 0)} sub="auto-detected & healed" />
-          </SimpleGrid>
-          <ManualRunsTable runs={manualRuns} />
-        </div>
-
-        {/* Job health & estimation trust -- surfaces the auto-heal sweep's
-            findings and how accurate the AI Task Preflight modal's time
-            estimates actually are, compared against real outcomes. */}
-        <div>
-          <Title order={2}>Job Health &amp; Estimation Trust</Title>
-          <Text c="dimmed" mb="sm">
-            Stalled-job detection and estimated-vs-actual duration, computed from real job outcomes rather than the static
-            formula shown before a run starts.
-          </Text>
-          <Stack gap="md">
-            <StaleIncidentsPanel incidents={(staleIncidents ?? []) as StaleIncidentRow[]} />
-            <EstimationAccuracyTable rows={estimationAccuracy} />
-          </Stack>
-        </div>
-
-        {/* Model call volume & performance -- every actual LLM call
-            (any provider), not just Auto-Review or manual workflow runs.
-            Answers "are we just testing hard today, or is something
-            actually degrading?" directly from real telemetry instead of
-            guesswork. */}
-        <div>
-          <Title order={2}>Model Call Volume &amp; Performance</Title>
-          <Text c="dimmed" mb="sm">
-            Every model call across every provider and workflow, last 14 days. Use this to tell heavy usage apart
-            from real latency or reliability regressions.
-          </Text>
-          <SimpleGrid cols={{ base: 2, sm: 4 }} mb="sm">
-            <MetricCard label="Calls Today" value={todayCallStats ? String(todayCallStats.call_count) : "—"} sub="model_call events" />
-            <MetricCard
-              label="vs 7-Day Avg"
-              value={todayVsAvgPct !== null ? `${todayVsAvgPct > 0 ? "+" : ""}${todayVsAvgPct}%` : "—"}
-              sub={priorAvgCalls !== null ? `avg ${priorAvgCalls}/day` : "not enough history"}
-            />
-            <MetricCard
-              label="Success Rate Today"
-              value={todaySuccessRate !== null ? `${todaySuccessRate}%` : "—"}
-              sub="of today's calls"
-            />
-            <MetricCard
-              label="p95 Latency Today"
-              value={todayCallStats?.p95_duration_ms ? `${(todayCallStats.p95_duration_ms / 1000).toFixed(1)}s` : "—"}
-              sub="slowest 5% of calls"
-            />
-          </SimpleGrid>
-          <Paper withBorder radius="md" p="sm" bg="white" mb="sm">
-            <Text fw={600} size="sm" mb="xs">Daily trend</Text>
-            <DailyCallStatsTable rows={dailyCallStats} />
-          </Paper>
-          <Paper withBorder radius="md" p="sm" bg="white">
-            <Text fw={600} size="sm" mb="xs">By model</Text>
-            <ModelCallBreakdownTable rows={callStatsByModel} />
-          </Paper>
-        </div>
+        </Paper>
       </Stack>
     </Container>
+  );
+}
+
+function MetricCard({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone: string }) {
+  return (
+    <Paper withBorder radius="md" p="md">
+      <Text size="xs" c="dimmed" tt="uppercase" fw={600}>{label}</Text>
+      <Text size="xl" fw={800} mt={4} c={`${tone}.7`}>{value}</Text>
+      {sub && <Text size="xs" c="dimmed">{sub}</Text>}
+    </Paper>
   );
 }
