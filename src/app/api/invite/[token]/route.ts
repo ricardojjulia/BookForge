@@ -27,14 +27,6 @@ export async function POST(_req: Request, { params }: { params: Promise<{ token:
     if (invite.accepted_at) return NextResponse.json({ error: "This invite has already been accepted." }, { status: 400 });
     if (new Date(invite.expires_at) < new Date()) return NextResponse.json({ error: "This invite has expired." }, { status: 400 });
 
-    // TEMPORARY debug instrumentation -- calls the exact RLS helper function
-    // through the same REST/JWT pathway the failing insert uses, to compare
-    // against manual SQL-editor simulation (which passes) and pin down
-    // whether the real session's JWT resolves differently. Remove once the
-    // invite-acceptance RLS failure is root-caused.
-    const { data: liveCheck, error: liveCheckError } = await supabase.rpc("has_live_invite", { target_book_id: invite.book_id });
-    console.error("DEBUG has_live_invite via RPC", { userId: user.id, userEmail: user.email, liveCheck, liveCheckError });
-
     const { error: collabError } = await supabase
       .from("book_collaborators")
       .upsert({ book_id: invite.book_id, user_id: user.id, role: invite.role }, { onConflict: "book_id,user_id" });
