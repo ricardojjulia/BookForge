@@ -8,6 +8,16 @@ const schema = z.object({
   role: z.enum(["viewer", "editor", "admin"]),
 });
 
+// Supabase's PostgrestError isn't an Error instance (thrown as-is by the
+// `if (error) throw error` below), so `error instanceof Error` misses it --
+// found live via a masked "Failed." response on the sibling accept-invite
+// route that hid a real RLS permission-denied error underneath.
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") return error.message;
+  return "Failed.";
+}
+
 export async function POST(request: Request, { params }: { params: Promise<{ bookId: string }> }) {
   try {
     const { bookId } = await params;
@@ -51,7 +61,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     return NextResponse.json({ invite, inviteUrl, emailSent });
   } catch (error) {
     console.error("Collaborator invite failed", error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed." }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }
 
