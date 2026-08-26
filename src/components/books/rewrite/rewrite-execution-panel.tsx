@@ -6,7 +6,9 @@ import { Alert, Badge, Box, Button, Checkbox, Group, NumberInput, Paper, Progres
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AiJobQueue, AiJobQueueInlineStatus, type AiJobQueueState } from "@/components/ai/ai-job-queue";
+import { InsufficientCreditsAlert } from "@/components/ai/insufficient-credits-alert";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { isInsufficientCreditsMessage } from "@/lib/subscription/enforcement";
 import type { RewriteCampaignRow, RewriteCampaignStats } from "@/lib/rewrite/campaigns";
 import type { RewriteReadiness, RewriteReadinessStatus } from "@/lib/rewrite/readiness";
 import { rewriteStrategies, type RewriteStrategyId, type RewriteStrategySettings } from "@/lib/rewrite/strategies";
@@ -612,7 +614,7 @@ export function RewriteExecutionPanel({
           onRewriteChapter={(chapterId) => executeRewriteWith({ chapterId })}
         />
         {message && <Alert color="green">{message}</Alert>}
-        {error && <Alert color="red">{error}</Alert>}
+        {error && (isInsufficientCreditsMessage(error) ? <InsufficientCreditsAlert message={error} /> : <Alert color="red">{error}</Alert>)}
 
         <NumberInput
           label="Draft rewrite batch size"
