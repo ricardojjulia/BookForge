@@ -392,6 +392,7 @@ export async function selectAndPrepareActiveModel(
       warnings: [],
       nativeModelManagementAvailable: false,
       isCloud: true,
+      isManagedOpenRouterKey: std.isBookForgeManagedKey === true,
     };
     const cloudModelSelection: ActiveModelPlan["modelSelection"] = {
       model,

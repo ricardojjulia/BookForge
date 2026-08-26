@@ -2,11 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 import type Stripe from "stripe";
 import { handleStripeEvent, UnprocessableStripeEventError } from "@/lib/billing/webhook-handlers";
 
+vi.mock("@/lib/openrouter/management", () => ({
+  computeOpenRouterKeyLimitUsd: (usdMicros: number) => Math.round((usdMicros / 1_000_000) * 1.2 * 100) / 100,
+  updateManagedOpenRouterKeyLimit: vi.fn().mockResolvedValue(undefined),
+  disableManagedOpenRouterKey: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { disableManagedOpenRouterKey, updateManagedOpenRouterKeyLimit } from "@/lib/openrouter/management";
+
 type AdminSupabase = Parameters<typeof handleStripeEvent>[0];
 
 function fakeAdmin(config: {
   tierByPrice?: Record<string, { id: string } | undefined>;
-  subscriptionByStripeId?: Record<string, { user_id: string } | undefined>;
+  tierById?: Record<string, { monthly_credit_cap_usd_micros: number } | undefined>;
+  subscriptionByStripeId?: Record<string, { user_id: string; tier_id?: string } | undefined>;
+  userSettingsByUserId?: Record<string, { openrouter_scoped_key_hash: string | null; llm_provider?: string } | undefined>;
+  managementKeyByUserId?: Record<string, string | undefined>;
+  updateResultUserId?: string;
   upsertError?: unknown;
   updateError?: unknown;
   rpcError?: unknown;
@@ -19,8 +31,21 @@ function fakeAdmin(config: {
     if (table === "subscription_tiers") {
       return {
         select: vi.fn().mockReturnValue({
-          eq: vi.fn((_col: string, val: string) => ({
+          eq: vi.fn((col: string, val: string) => ({
             maybeSingle: vi.fn().mockResolvedValue({ data: config.tierByPrice?.[val] ?? null, error: null }),
+            single: vi.fn().mockResolvedValue({
+              data: col === "id" ? config.tierById?.[val] ?? null : null,
+              error: null,
+            }),
+          })),
+        }),
+      };
+    }
+    if (table === "user_settings") {
+      return {
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn((_col: string, val: string) => ({
+            maybeSingle: vi.fn().mockResolvedValue({ data: config.userSettingsByUserId?.[val] ?? null, error: null }),
           })),
         }),
       };
@@ -39,7 +64,17 @@ function fakeAdmin(config: {
         update: vi.fn((payload: Record<string, unknown>) => ({
           eq: vi.fn((col: string, val: string) => {
             updateCalls.push({ payload, eqCol: col, eqVal: val });
-            return Promise.resolve({ error: config.updateError ?? null });
+            const simpleResult = Promise.resolve({ error: config.updateError ?? null });
+            return {
+              then: simpleResult.then.bind(simpleResult),
+              catch: simpleResult.catch.bind(simpleResult),
+              select: vi.fn(() => ({
+                single: vi.fn().mockResolvedValue({
+                  data: { user_id: config.updateResultUserId ?? "user-1" },
+                  error: config.updateError ?? null,
+                }),
+              })),
+            };
           }),
         })),
       };
@@ -49,6 +84,9 @@ function fakeAdmin(config: {
 
   const rpc = vi.fn((fn: string, args: Record<string, unknown>) => {
     rpcCalls.push({ fn, args });
+    if (fn === "get_openrouter_management_key") {
+      return Promise.resolve({ data: config.managementKeyByUserId?.[args.p_user_id as string] ?? null, error: null });
+    }
     return Promise.resolve({ error: config.rpcError ?? null });
   });
 
@@ -171,6 +209,59 @@ describe("handleStripeEvent: customer.subscription.deleted", () => {
     expect(updateCalls).toHaveLength(1);
     expect(updateCalls[0].payload).toEqual({ status: "canceled", updated_at: expect.any(String) });
     expect(updateCalls[0].eqCol).toBe("stripe_subscription_id");
+  });
+});
+
+describe("handleStripeEvent: OpenRouter-managed key sync", () => {
+  it("updates the scoped key's limit on a new subscription when one is on file", async () => {
+    vi.clearAllMocks();
+    const { admin, rpcCalls } = fakeAdmin({
+      tierByPrice: { price_pro: { id: "pro" } },
+      tierById: { pro: { monthly_credit_cap_usd_micros: 18_000_000 } },
+      userSettingsByUserId: { "user-1": { openrouter_scoped_key_hash: "hash-1", llm_provider: "openrouter" } },
+      managementKeyByUserId: { "user-1": "mgmt-key-1" },
+    });
+
+    await handleStripeEvent(admin, eventOf("customer.subscription.created", fakeSubscription()));
+
+    expect(rpcCalls).toContainEqual({ fn: "get_openrouter_management_key", args: { p_user_id: "user-1" } });
+    expect(updateManagedOpenRouterKeyLimit).toHaveBeenCalledWith("mgmt-key-1", "hash-1", 21.6);
+  });
+
+  it("does nothing for a user with no OpenRouter-managed key", async () => {
+    vi.clearAllMocks();
+    const { admin } = fakeAdmin({ tierByPrice: { price_pro: { id: "pro" } } });
+
+    await handleStripeEvent(admin, eventOf("customer.subscription.created", fakeSubscription()));
+
+    expect(updateManagedOpenRouterKeyLimit).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the user has since switched away from OpenRouter in settings", async () => {
+    vi.clearAllMocks();
+    const { admin } = fakeAdmin({
+      tierByPrice: { price_pro: { id: "pro" } },
+      tierById: { pro: { monthly_credit_cap_usd_micros: 18_000_000 } },
+      userSettingsByUserId: { "user-1": { openrouter_scoped_key_hash: "hash-1", llm_provider: "anthropic" } },
+      managementKeyByUserId: { "user-1": "mgmt-key-1" },
+    });
+
+    await handleStripeEvent(admin, eventOf("customer.subscription.created", fakeSubscription()));
+
+    expect(updateManagedOpenRouterKeyLimit).not.toHaveBeenCalled();
+  });
+
+  it("disables the scoped key on cancellation when one is on file", async () => {
+    vi.clearAllMocks();
+    const { admin } = fakeAdmin({
+      updateResultUserId: "user-1",
+      userSettingsByUserId: { "user-1": { openrouter_scoped_key_hash: "hash-1", llm_provider: "openrouter" } },
+      managementKeyByUserId: { "user-1": "mgmt-key-1" },
+    });
+
+    await handleStripeEvent(admin, eventOf("customer.subscription.deleted", fakeSubscription()));
+
+    expect(disableManagedOpenRouterKey).toHaveBeenCalledWith("mgmt-key-1", "hash-1");
   });
 });
 

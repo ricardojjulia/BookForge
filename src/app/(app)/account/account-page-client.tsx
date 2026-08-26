@@ -21,11 +21,13 @@ import { createClient } from "@/lib/supabase/client";
 
 type BillingTier = { id: string; display_name: string; monthly_price_usd_cents: number };
 type TrialInfo = { active: boolean; endsAt: string | null; tierId: string | null };
+type OpenRouterUsage = { limitUsd: number | null; usageUsd: number; limitRemainingUsd: number | null; disabled: boolean };
 type BillingInfo = {
   tiers: BillingTier[];
   currentTierId: string | null;
   balanceUsdMicros: number | null;
   trial: TrialInfo | null;
+  openRouterUsage: OpenRouterUsage | null;
 } | null;
 type Props = { email: string; displayName: string; billing: BillingInfo };
 
@@ -76,8 +78,24 @@ function BillingSection({ billing }: { billing: NonNullable<BillingInfo> }) {
             </Text>
             <Badge color="green" variant="light">Active</Badge>
           </Group>
+          {billing.openRouterUsage ? (
+            <>
+              <Text size="sm">
+                OpenRouter key balance: $
+                {(billing.openRouterUsage.limitRemainingUsd ?? (billing.openRouterUsage.limitUsd ?? 0) - billing.openRouterUsage.usageUsd).toFixed(2)}
+                {billing.openRouterUsage.limitUsd !== null ? ` of $${billing.openRouterUsage.limitUsd.toFixed(2)}` : ""}
+                {billing.openRouterUsage.disabled && " (disabled)"}
+              </Text>
+              <Text size="xs" c="dimmed">
+                This is the real, authoritative number for your account — your own OpenRouter key enforces it directly. The internal credit balance below is not used for your calls.
+              </Text>
+            </>
+          ) : null}
           {billing.balanceUsdMicros !== null && (
-            <Text size="sm" c="dimmed">Credit balance: ${(billing.balanceUsdMicros / 1_000_000).toFixed(2)}</Text>
+            <Text size="sm" c="dimmed">
+              Credit balance: ${(billing.balanceUsdMicros / 1_000_000).toFixed(2)}
+              {billing.openRouterUsage ? " (unused while on the OpenRouter-managed key)" : ""}
+            </Text>
           )}
           <Group>
             <Button

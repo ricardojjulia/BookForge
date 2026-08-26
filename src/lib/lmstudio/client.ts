@@ -15,8 +15,9 @@ import {
   type ModelCallTelemetry,
   type ModelTaskHealth,
 } from "@/lib/ai/model-performance";
-import { getUserSubscriptionTier, reconcileCreditReservation, reserveCreditsForCall } from "@/lib/subscription/enforcement";
+import { getUserSubscriptionTier, InsufficientCreditsError, reconcileCreditReservation, reserveCreditsForCall } from "@/lib/subscription/enforcement";
 import { computeCostUsdMicros, getCurrentModelPricing } from "@/lib/subscription/pricing";
+import { isOpenRouterKeyLimitExceededError } from "@/lib/openrouter/management";
 
 /** ~3.2 chars/token, the same conservative ratio src/lib/lmstudio/runtime-limits.ts already uses for prompt budgeting -- reused here for a pessimistic pre-call token estimate. */
 const CHARS_PER_TOKEN_ESTIMATE = 3.2;
@@ -44,6 +45,14 @@ export type PreparedLmStudioModel = {
   nativeModelManagementAvailable: boolean;
   /** True when this shim represents a cloud provider (Anthropic, OpenAI, Google). */
   isCloud?: boolean;
+  /**
+   * True when this call is against a BookForge-managed OpenRouter scoped key
+   * (see src/lib/openrouter/management.ts) rather than a user-pasted personal
+   * key. OpenRouter's own key limit is the real spend enforcer for these
+   * users, so createManagedChatCompletion skips the internal credit
+   * reservation for them -- see StandardLlmSettings.isBookForgeManagedKey.
+   */
+  isManagedOpenRouterKey?: boolean;
 };
 
 /**
@@ -273,8 +282,13 @@ export async function createManagedChatCompletion(
   // local LM Studio calls have no real $ cost to reserve against. A single
   // reservation covers the deprecated-temperature retry below too (that
   // retry is the same logical request, not additional real generation).
+  // Skipped for a BookForge-managed OpenRouter scoped key: OpenRouter's own
+  // key limit is the real spend enforcer for those users (see
+  // isManagedOpenRouterKey's doc comment) -- reserving against the internal
+  // ledger too would reintroduce the exact "two disagreeing caps" confusion
+  // this whole mechanism exists to eliminate.
   let reservation: { reservationId: string } | null = null;
-  if (telemetryContext && prepared.isCloud) {
+  if (telemetryContext && prepared.isCloud && !prepared.isManagedOpenRouterKey) {
     reservation = await reserveCreditsForCall(telemetryContext.supabase, {
       userId: telemetryContext.userId,
       model: resolvedModel,
@@ -310,6 +324,15 @@ export async function createManagedChatCompletion(
     void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
     return completion;
   } catch (error) {
+    // A BookForge-managed OpenRouter scoped key hit its own spend limit --
+    // map into the same InsufficientCreditsError the internal ledger throws,
+    // so it flows through the already-shipped isInsufficientCreditsMessage /
+    // InsufficientCreditsAlert UI with no separate UI work needed. Checked
+    // first: retrying (below) can't help an exhausted key.
+    if (prepared.isManagedOpenRouterKey && isOpenRouterKeyLimitExceededError(error)) {
+      throw new InsufficientCreditsError(resolvedModel, "Your OpenRouter key's spending limit for this billing period is used up.");
+    }
+
     if (isDeprecatedTemperatureError(error) && "temperature" in params) {
       const paramsWithoutTemperature = Object.fromEntries(
         Object.entries(params).filter(([key]) => key !== "temperature"),

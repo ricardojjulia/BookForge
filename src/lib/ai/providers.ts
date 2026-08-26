@@ -203,20 +203,43 @@ export async function providerChatCompletion(
  * BookForge's own managed-SaaS master key), so this only ever needs a
  * user-supplied key to check, never the server's own fallback key.
  */
-export async function assertNotOpenRouterManagementKey(apiKey: string): Promise<void> {
+async function fetchOpenRouterKeyKind(apiKey: string): Promise<{ isManagementKey: boolean } | null> {
   let res: Response;
   try {
     res = await fetch("https://openrouter.ai/api/v1/auth/key", {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
   } catch {
-    return; // network hiccup -- let the caller's own connection check surface it
+    return null; // network hiccup -- let the caller's own connection check surface it
   }
-  if (!res.ok) return; // an invalid/expired key is the caller's own check's job to report
+  if (!res.ok) return null; // an invalid/expired key is the caller's own check's job to report
   const body = (await res.json().catch(() => null)) as { data?: { is_management_key?: boolean; is_provisioning_key?: boolean } } | null;
-  if (body?.data?.is_management_key || body?.data?.is_provisioning_key) {
+  return { isManagementKey: Boolean(body?.data?.is_management_key || body?.data?.is_provisioning_key) };
+}
+
+export async function assertNotOpenRouterManagementKey(apiKey: string): Promise<void> {
+  const kind = await fetchOpenRouterKeyKind(apiKey);
+  if (kind?.isManagementKey) {
     throw new Error(
       "That's an OpenRouter Management/Provisioning key, not a regular API key — it can't run model requests. Create one at openrouter.ai/keys instead (not Settings → Management Keys).",
+    );
+  }
+}
+
+/**
+ * The inverse check, for managed-SaaS OpenRouter onboarding (see
+ * src/app/api/onboarding/openrouter-managed-key/route.ts): that path
+ * deliberately wants a Management/Provisioning key, not a regular one, so it
+ * can mint a scoped, spend-capped key on the user's own account. Self-hosted
+ * OpenRouter onboarding is untouched and keeps requiring a regular key via
+ * assertNotOpenRouterManagementKey above.
+ */
+export async function assertIsOpenRouterManagementKey(apiKey: string): Promise<void> {
+  const kind = await fetchOpenRouterKeyKind(apiKey);
+  if (kind === null) return; // network hiccup / invalid key -- caller's own check reports it
+  if (!kind.isManagementKey) {
+    throw new Error(
+      "That doesn't look like an OpenRouter Management/Provisioning key. Create one at openrouter.ai/settings/provisioning-keys (not the regular API Keys page) — BookForge needs it to create your spending-capped key.",
     );
   }
 }

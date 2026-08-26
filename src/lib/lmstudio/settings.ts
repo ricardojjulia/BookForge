@@ -29,7 +29,7 @@ export async function getUserLmStudioSettings(userId: string): Promise<LmStudioS
   const { data } = await supabase
     .from("user_settings")
     .select(
-      "lmstudio_base_url,primary_rewrite_model,reasoning_model,extraction_model,embedding_model,reranker_model,quality_profile,context_window_tokens,temperature,top_p,repeat_penalty,max_output_tokens,llm_provider,llm_api_key_secret_id,llm_model,llm_base_url,llm_temperature,llm_max_output_tokens,llm_critic_model,llm_rewrite_model,llm_planning_model,llm_extraction_model,execution_mode",
+      "lmstudio_base_url,primary_rewrite_model,reasoning_model,extraction_model,embedding_model,reranker_model,quality_profile,context_window_tokens,temperature,top_p,repeat_penalty,max_output_tokens,llm_provider,llm_api_key_secret_id,llm_model,llm_base_url,llm_temperature,llm_max_output_tokens,llm_critic_model,llm_rewrite_model,llm_planning_model,llm_extraction_model,execution_mode,openrouter_scoped_key_hash",
     )
     .eq("user_id", userId)
     .maybeSingle();
@@ -51,6 +51,7 @@ export async function getUserLmStudioSettings(userId: string): Promise<LmStudioS
           baseUrl: data?.llm_base_url || undefined,
           temperature: data?.llm_temperature != null ? Number(data.llm_temperature) : undefined,
           maxOutputTokens: data?.llm_max_output_tokens != null ? Number(data.llm_max_output_tokens) : undefined,
+          isBookForgeManagedKey: provider === "openrouter" && Boolean(data?.openrouter_scoped_key_hash),
         }
       : null;
 
