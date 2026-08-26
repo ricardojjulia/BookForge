@@ -272,7 +272,10 @@ function PartSection({
 }) {
   const [selected, setSelected] = useState<number | null>(null);
   const archChapters: ArchChapter[] = Array.isArray(part.chapters) ? part.chapters : [];
-  const drafted = archChapters.filter((c) => chapterStatus(dbChapters, c.chapterNumber ?? 0) === "draft").length;
+  const drafted = archChapters.filter((c) => {
+    const status = chapterStatus(dbChapters, c.chapterNumber ?? 0);
+    return status !== "planned" && status !== "missing";
+  }).length;
   const selectedChapter = selected != null ? archChapters[selected] : null;
   const progress = archChapters.length ? drafted / archChapters.length : 0;
 

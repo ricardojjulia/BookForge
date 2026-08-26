@@ -298,7 +298,14 @@ export default async function BookDashboardPage({ params }: { params: Promise<{ 
 
       <CriticScoreboard reports={reports || []} />
 
-      <FocusedRewritePanel bookId={bookId} />
+      <FocusedRewritePanel
+        bookId={bookId}
+        activeGuidedRewrite={
+          rewriteWorkflow && rewriteWorkflow.mode !== "chooser"
+            ? { mode: rewriteWorkflow.mode, currentStep: rewriteWorkflow.current_step }
+            : null
+        }
+      />
 
       {rewriteWorkflow && rewriteWorkflow.mode !== "chooser" && (
         <Paper withBorder radius="md" p="lg" bg="#f8f0ff" mb="xl">
