@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { getJobProgressDisplay } from "@/lib/ai/job-state";
 import { fetchJson } from "@/lib/http/fetch-json";
 import { useAdaptivePolling } from "@/lib/hooks/use-adaptive-polling";
+import { isInsufficientCreditsMessage } from "@/lib/subscription/enforcement";
+import { InsufficientCreditsAlert } from "@/components/ai/insufficient-credits-alert";
 
 const ACTIVE_POLL_MS = 4000;
 const IDLE_POLL_MS = 30000;
@@ -364,7 +366,11 @@ function JobCard({
             ))}
           </Alert>
         )}
-        {job.error_message && <Alert color="red">{job.error_message}</Alert>}
+        {job.error_message && isInsufficientCreditsMessage(job.error_message) ? (
+          <InsufficientCreditsAlert message={job.error_message} />
+        ) : (
+          job.error_message && <Alert color="red">{job.error_message}</Alert>
+        )}
 
         <Group>
           <Button

@@ -9,6 +9,8 @@ import { getJobProgressDisplay } from "@/lib/ai/job-state";
 import { runChunkedJob } from "@/lib/ai/run-chunked-job";
 import { criticLenses } from "@/lib/critic/prompts";
 import { fetchJson } from "@/lib/http/fetch-json";
+import { isInsufficientCreditsMessage } from "@/lib/subscription/enforcement";
+import { InsufficientCreditsAlert } from "@/components/ai/insufficient-credits-alert";
 import type { CriticLens } from "@/lib/types";
 
 const ALL_LENSES = Object.keys(criticLenses) as CriticLens[];
@@ -552,7 +554,7 @@ export function FocusedRewritePanel({
             )}
           </Alert>
         )}
-        {error && <Alert color="red">{error}</Alert>}
+        {error && (isInsufficientCreditsMessage(error) ? <InsufficientCreditsAlert message={error} /> : <Alert color="red">{error}</Alert>)}
       </Stack>
     </div>
   );

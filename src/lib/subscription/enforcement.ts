@@ -27,6 +27,22 @@ export class InsufficientCreditsError extends Error {
   }
 }
 
+// InsufficientCreditsError's message is the only thing that survives the trip
+// from server (thrown here) through a route's generic 500 catch-all, into a
+// revision_jobs.error_message column or a fetchJson-thrown Error's .message --
+// neither preserves error.name or a status code today. Matching on these two
+// fixed phrases (both only ever produced by this class's constructor above)
+// is what lets the UI show an "out of credits" CTA instead of a plain failure.
+const INSUFFICIENT_CREDITS_MARKERS = [
+  "credit balance for this billing period is used up",
+  "can't be run on a metered plan",
+];
+
+export function isInsufficientCreditsMessage(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return INSUFFICIENT_CREDITS_MARKERS.some((marker) => message.includes(marker));
+}
+
 /**
  * Fail-closed pre-flight check: does this user's subscription tier permit
  * calling this model for this task? Self-hosted deployments are a true
