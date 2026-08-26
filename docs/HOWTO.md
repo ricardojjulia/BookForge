@@ -17,6 +17,7 @@ LM Studio (or a cloud provider) configured.
 8. [Export and mark a version finished](#8-export-and-mark-a-version-finished)
 9. [Set up OpenRouter and per-task model routing](#9-set-up-openrouter-and-per-task-model-routing)
 10. [Run a full-book rewrite, watch progress, and handle failures](#10-run-a-full-book-rewrite-watch-progress-and-handle-failures)
+11. [Invite a collaborator](#11-invite-a-collaborator)
 
 ---
 
@@ -217,7 +218,7 @@ those three don't offer directly.
    minimal real chat completion, not just a health check, so a bad key or
    unsupported model shows up immediately instead of mid-job.
 
-See `docs/openrouter-integration-plan.md` for the full model shortlist and the
+See `docs/internal/openrouter-integration-plan.md` for the full model shortlist and the
 cost reasoning behind each default.
 
 ## 10. Run a full-book rewrite, watch progress, and handle failures
@@ -249,3 +250,21 @@ if part of it fails.
    let the connection drop — the job keeps running on the server and its
    progress is exactly what you'll see reflected in the Jobs panel when you
    come back, not something you need to keep a tab open to guarantee.
+
+## 11. Invite a collaborator
+
+1. Open a book, go to the **Reviewers** section (book page → Collaboration),
+   and use the invite form: an email address and a role — **Viewer**
+   (Beta Reader Mode: can read and comment, but the edit pencil and the
+   revert/resolve actions are hidden entirely), **Editor**, or **Admin**.
+2. Submitting creates the invite immediately and shows a shareable link right
+   away — this happens even if the notification email doesn't go out, so a
+   misconfigured mail setup never loses the invite itself. If email delivery
+   worked, the alert says "Invite sent"; if not, it says "Invite link
+   created" with the same link to copy and share manually.
+3. The invite expires after **7 days** if unused, and is single-use — once
+   accepted, the same link can't be reused.
+4. The recipient needs a BookForge account of their own (any deployment —
+   self-hosted or managed SaaS) to accept. If they're not signed in yet, they
+   sign in or create an account first, then open the invite link, which adds
+   them to the book with the role you set.
