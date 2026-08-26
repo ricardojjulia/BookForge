@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Group, Progress, Stack, Text, ThemeIcon, Loader } from "@mantine/core";
 import { IconCheck } from "@tabler/icons-react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { getJobProgressDisplay } from "@/lib/ai/job-state";
 import { runChunkedJob } from "@/lib/ai/run-chunked-job";
 import { criticLenses } from "@/lib/critic/prompts";
@@ -115,7 +116,15 @@ function detectResumePlan(jobs: JobRow[]): ResumePlan | null {
   return { stage: 3, focusLenses, includeAccepted, doneLenses };
 }
 
-export function FocusedRewritePanel({ bookId }: { bookId: string }) {
+type ActiveGuidedRewrite = { mode: string; currentStep: number } | null;
+
+export function FocusedRewritePanel({
+  bookId,
+  activeGuidedRewrite = null,
+}: {
+  bookId: string;
+  activeGuidedRewrite?: ActiveGuidedRewrite;
+}) {
   const router = useRouter();
   const [selectedLenses, setSelectedLenses] = useState<CriticLens[]>([]);
   const [includeAccepted, setIncludeAccepted] = useState(true);
@@ -345,6 +354,24 @@ export function FocusedRewritePanel({ bookId }: { bookId: string }) {
             rewrite focused on those lenses, accepts the rewritten paragraphs, then refreshes their scores above.
           </p>
         </div>
+
+        {activeGuidedRewrite && !running && (
+          <Alert color="orange" title="A Guided Rewrite is already in progress">
+            {activeGuidedRewrite.mode === "wizard"
+              ? `The Guided Rewrite wizard is paused at checkpoint ${activeGuidedRewrite.currentStep} of 7 for this book.`
+              : "A manual rewrite workflow is in progress for this book."}{" "}
+            Running a focused rewrite here starts a separate pass over the same manuscript and can conflict with
+            that work. Resume the guided workflow instead, or continue here only if you mean to run this
+            independently.
+            <Group mt="xs">
+              <Link href={`/books/${bookId}/critic-quality`} style={{ textDecoration: "none" }}>
+                <Button size="xs" color="orange" variant="filled">
+                  Continue Guided Rewrite Workflow
+                </Button>
+              </Link>
+            </Group>
+          </Alert>
+        )}
 
         {resumePlan && !running && (
           <Alert color="yellow" title="An interrupted rewrite was found">
