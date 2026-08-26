@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.1.0 - 2026-08-26
+
+### Managed SaaS: live at bookforgeai.io
+
+The hosted offering went from "code merged" to a real, paying product this cycle:
+
+- **Subscription tiers, fully shipped**: four flat-priced tiers (Starter / Pro / Studio / Publisher), each bound to a hard, explicit AI model allowlist rather than a soft preference — enforced at the orchestrator chokepoint, not just the UI. Real per-call cost/token telemetry and an atomic credit ledger back every call.
+- **Stripe billing**: checkout, customer portal, and webhook-driven credit grants on payment, live-verified end to end.
+- **Autonomous margin tuning**: a daily job resyncs model pricing from OpenRouter and a weekly job auto-tunes credit caps within a bounded ±15%/run circuit breaker, with every adjustment logged for a human to review.
+- **Real trial, not an unbounded free ride**: every signup gets a genuine 14-day trial with a small, hard $ spend cap — generous enough to survive a rough day of real use, not a stripped-down demo.
+- **Signup-abuse hardening**: hCaptcha on sign-in/sign-up, a keyed-hash ledger that denies a fresh trial to an email that's already had one (even after the account was deleted), and a disposable/temp-mail domain block at signup.
+- **Reliability**: long-running AI jobs (full-book rewrite, draft generation) now run in bounded chunks with self-chaining continuation and two independent stale-job resume backstops, instead of one request trying to finish an entire book within Vercel's serverless timeout.
+- **6-digit code as a signup-confirmation fallback**: Outlook/Hotmail's Safe Links feature silently burns one-time confirmation links before a user ever clicks them — a typed code has nothing for a link-scanner to consume.
+- Canonical domain moved to **bookforgeai.io**.
+- [Self-hosting guide](docs/SELF_HOSTING.md) published, covering both AI-engine setup paths and production deployment.
+
+### Collaboration — fixed end to end
+
+The invite-a-collaborator flow (create invite → email → confirm → accept) had three independent, silent bugs since the feature first shipped — every layer is now fixed and live-verified:
+
+- Invite creation was failing 100% of the time: the token's default value used a Postgres encoding format that doesn't exist.
+- A failed notification email was taking down the whole invite request, discarding an otherwise-successfully-created invite link.
+- Accepting an invite was blocked outright by database permissions — a brand-new invitee, by definition, never had the access their own acceptance was supposed to grant them.
+
+### Also this cycle
+
+- Analytics rebuilt around what a human actually wants to see, with the previous raw telemetry view moved to Settings.
+- Fixed a bug where a rewrite job could collapse every chapter into a single oversized chunk instead of distributing work evenly across the book.
+
 ## 2.0.0 - 2026-08-19
 
 ### Language & script support
@@ -101,7 +130,7 @@ Shipped alongside the revamp:
 
 - New cloud provider option: **OpenRouter** — one API key routes to hundreds of backend models (DeepSeek, Gemini, Claude, GPT, and more) via a single OpenAI-compatible endpoint. Added alongside the existing OpenAI/Anthropic/Google options in Settings and the onboarding wizard's Cloud step.
 - New **per-task model overrides**: an "Optimize per feature" switch lets a user assign a different model to critic lenses, full-book rewrite passes, planning/architecture calls, and extraction/summaries — instead of one model for everything. Falls back to the single configured model for any task left blank. `selectAndPrepareActiveModel` resolves the right one per call.
-- Curated default OpenRouter model catalog with cost-tier guidance (`docs/openrouter-integration-plan.md`): `google/gemini-2.5-flash-lite` for high-volume critic/extraction calls, `deepseek/deepseek-v4-pro` for full-manuscript rewrite passes (the actual cost driver), `anthropic/claude-haiku-4.5` for planning, plus opt-in premium options (`gpt-5-mini`, `gemini-2.5-pro`).
+- Curated default OpenRouter model catalog with cost-tier guidance (`docs/internal/openrouter-integration-plan.md`): `google/gemini-2.5-flash-lite` for high-volume critic/extraction calls, `deepseek/deepseek-v4-pro` for full-manuscript rewrite passes (the actual cost driver), `anthropic/claude-haiku-4.5` for planning, plus opt-in premium options (`gpt-5-mini`, `gemini-2.5-pro`).
 - New `llm_critic_model` / `llm_rewrite_model` / `llm_planning_model` / `llm_extraction_model` columns on `user_settings`, each falling back to `llm_model` when unset.
 - Cloud provider connection test now sends a real minimal chat completion for OpenAI/Anthropic/Google/OpenRouter, rather than only supporting the LM Studio `/models` check.
 
@@ -143,8 +172,8 @@ Shipped alongside the revamp:
 
 ### Software Factory Governance
 
-- Added detailed phased execution log at `docs/SOFTWARE_FACTORY.md`.
-- Added live engineering backlog at `docs/TODO.md`.
+- Added detailed phased execution log at `docs/internal/SOFTWARE_FACTORY.md`.
+- Added live engineering backlog at `docs/internal/TODO.md`.
 
 ## 0.3.0 - 2026-07-30
 

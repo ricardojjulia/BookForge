@@ -85,7 +85,7 @@ Then apply the database schema:
 supabase migration up
 ```
 
-This runs every file in `supabase/migrations/` (60+ as of this writing) against your fresh local database, in order. On a brand-new `supabase start` this always applies cleanly — see [Troubleshooting](#10-troubleshooting) if you ever see a `relation already exists` error instead (it means the local database wasn't actually fresh, not that a migration is broken).
+This runs every file in `supabase/migrations/` (70+ as of this writing) against your fresh local database, in order. On a brand-new `supabase start` this always applies cleanly — see [Troubleshooting](#10-troubleshooting) if you ever see a `relation already exists` error instead (it means the local database wasn't actually fresh, not that a migration is broken).
 
 ## 5. Environment variables
 
@@ -109,6 +109,7 @@ cp .env.example .env.local
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY` / `OPENROUTER_API_KEY` | Optional | Only needed if you want a cloud provider available (see [§6](#6-choose-your-ai-engine)). Each user can also enter their own key directly in **Settings** instead of setting one here server-wide. |
 | `RESEND_API_KEY` | Optional | [Resend](https://resend.com) — powers outbound email (collaborator invites, notifications). Leave blank and the app still works; invite links are shown directly in the UI instead of emailed. |
 | `RESEND_FROM` | Optional | Defaults to a shared BookForge sender address that works without domain verification. |
+| `NEXT_PUBLIC_HCAPTCHA_SITE_KEY` | Optional | A [hCaptcha](https://hcaptcha.com) site key for the sign-in/sign-up form. Leave blank for self-hosting — the form renders with no CAPTCHA widget, which is correct for a single self-hosted instance. Only set this alongside enabling CAPTCHA in your own Supabase project's Auth settings, and only once this key is live everywhere that talks to that project (Supabase enforces the token project-wide the moment it's turned on). |
 | `CRON_SECRET` | Optional for most self-hosters | Bearer token gating `/api/internal/*` routes (account-purge flagging, email retry sweeps, assignment reminders). Only matters if you wire up your own scheduler (cron, systemd timer) to hit those routes periodically — see [§8](#8-deploying-for-real-ongoing-use). |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | **Not used in self-hosted mode** | Only relevant if you deliberately run in `managed_saas` mode with real billing. Leave unset for self-hosting — the billing code path never runs without `NEXT_PUBLIC_DEPLOYMENT_MODE=managed_saas`. |
 | `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` / `LLM_BASE_URL` / `LLM_TEMPERATURE` / `LLM_MAX_OUTPUT_TOKENS` | Optional, advanced | Forces every user onto one specific provider/model server-wide, bypassing per-user Settings. Most self-hosters should leave these unset and let each account configure its own AI engine in **Settings** instead. |
@@ -216,6 +217,8 @@ npm run build && npm run start   # or restart your process manager
 **Port conflicts.** Local Supabase uses ports 58321 (API), 58322 (Postgres), 58323 (Studio), 58324 (Inbucket/email testing), 58327 (analytics), and 58329 (connection pooler) — see `supabase/config.toml`. BookForge itself runs on 4747 (`npm run dev`/`start`, both configurable via the `-p` flag in `package.json`'s scripts if you need different ports).
 
 **Email invites aren't arriving.** If `RESEND_API_KEY` is unset, this is expected — invite links are shown directly in the UI instead. Set a real Resend key to send actual emails.
+
+**Confirmation/invite emails land in spam, or a confirmation link says "invalid or expired" on the very first click.** This is usually Outlook/Hotmail's Safe Links feature, which auto-visits (and burns) one-time links in an email server-side before the recipient ever opens it — not a BookForge bug. Signup confirmation has a 6-digit code as a fallback for exactly this case (enter it on the "Confirm your email" screen instead of clicking the link). For real deliverability to strict providers, configure SPF and DMARC records for whatever domain you send from, in addition to the DKIM record your email provider sets up automatically.
 
 ## 11. Data, privacy, and license
 

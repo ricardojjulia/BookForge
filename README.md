@@ -7,7 +7,7 @@
 **A local-first revision studio for authors who want an editor, not an autocomplete.**
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/BookForge%20AI-2.0.0-6C3CE1)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/BookForge%20AI-2.1.0-6C3CE1)](CHANGELOG.md)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Auth%20%2B%20Storage-3ECF8E)](https://supabase.com/)
 [![LM Studio](https://img.shields.io/badge/AI%20Engine-LM%20Studio%20%7C%20Cloud-8A2BE2)](https://lmstudio.ai/)
@@ -28,7 +28,7 @@ BookForge starts from a different premise: **a book is a structure, not a blob o
 
 And it runs on your own machine if you want it to. BookForge talks to [LM Studio](https://lmstudio.ai/) over a local OpenAI-compatible endpoint by default — your manuscript never has to leave your laptop — with the option to route specific tasks to a cloud provider (OpenAI, Anthropic, Google) when you want more horsepower for planning or critique.
 
-Don't want to run any of this yourself? **[bookforgeai.io](https://bookforgeai.io)** is the same product as a hosted subscription — no Docker, no local model, no server to maintain. See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md#1-what-self-hosting-means-here) for exactly what differs between the two.
+Don't want to run any of this yourself? **[bookforgeai.io](https://bookforgeai.io)** is the same product as a hosted subscription — no Docker, no local model, no server to maintain. Every account starts with a real 14-day trial (a hard, small spend cap, not a stripped-down demo), then four flat-priced tiers, each bound to a specific model allowlist rather than a soft preference — see [docs/pricing.md](docs/pricing.md). See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md#1-what-self-hosting-means-here) for exactly what differs between the two.
 
 ---
 
@@ -87,6 +87,10 @@ A book's language is a free-text field, not a fixed dropdown — write in anythi
 - **Export** (PDF/EPUB) picks the right embedded font automatically per manuscript: Latin Extended, Cyrillic, Greek, Vietnamese, and Hebrew by default, switching to a dedicated Arabic or CJK font the moment it detects that script in the text — so accented and non-Latin text never renders as missing-glyph boxes. EPUB output also sets the correct `lang` attribute on every chapter, not just the package metadata.
 - Known open item: right-to-left *reading order* (Arabic/Hebrew) and CJK-aware word counting aren't solved yet — glyphs render correctly, but full bidi layout is still ahead.
 
+### Collaboration
+
+Invite a co-author, editor, or beta reader to a book by email, with a role (**viewer**, **editor**, or **admin**) that gates what they can touch — Beta Reader Mode hides the edit pencil and revert/resolve actions entirely for viewers. Invites are single-use, expire after 7 days, and the recipient gets a real, shareable link the moment it's created even if the notification email itself doesn't arrive.
+
 ### Platform administration
 
 A **Steward** role (Settings → account, not a generic admin flag) gives trusted staff exactly what's needed to run support without an "admin god-mode" account:
@@ -119,7 +123,7 @@ What's in 0.1.0:
 - Support-context search and per-book pinned context cards
 - Structural create/delete/reorder guardrails: those operations are rejected until structure versioning, tombstones, and order-conflict review are implemented
 
-The factory plan is documented in [docs/creativewriter-implementation-plan.md](docs/creativewriter-implementation-plan.md), with release readiness tracked in [docs/creativewriter-release-readiness-checklist.md](docs/creativewriter-release-readiness-checklist.md).
+The factory plan is documented in [docs/internal/creativewriter-implementation-plan.md](docs/internal/creativewriter-implementation-plan.md), with release readiness tracked in [docs/internal/creativewriter-release-readiness-checklist.md](docs/internal/creativewriter-release-readiness-checklist.md).
 
 ---
 
@@ -181,7 +185,7 @@ This is opt-in per user (**Settings → AI Settings → Optimize per feature**) 
 | AI engine | LM Studio (local, OpenAI-compatible) or OpenAI / Anthropic / Google |
 | Document handling | DOCX, EPUB, PDF, Markdown, and archive parsing/export |
 | Testing | Vitest |
-| Current release | BookForge AI 2.0.0, CreativeWriter 0.1.0 |
+| Current release | BookForge AI 2.1.0, CreativeWriter 0.1.0 |
 
 ---
 
