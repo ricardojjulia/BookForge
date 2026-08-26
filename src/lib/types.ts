@@ -60,6 +60,14 @@ export type StandardLlmSettings = {
   baseUrl?: string;
   temperature?: number;
   maxOutputTokens?: number;
+  /**
+   * True when apiKey is a BookForge-minted OpenRouter scoped key (see
+   * src/lib/openrouter/management.ts), not a user-pasted personal key.
+   * OpenRouter's own key limit is the real spend enforcer for these users --
+   * src/lib/lmstudio/client.ts uses this to skip the internal credit
+   * reservation, which would otherwise duplicate/conflict with it.
+   */
+  isBookForgeManagedKey?: boolean;
 };
 
 export type LmStudioSettings = {

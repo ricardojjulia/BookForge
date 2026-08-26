@@ -36,6 +36,7 @@ export class InsufficientCreditsError extends Error {
 const INSUFFICIENT_CREDITS_MARKERS = [
   "credit balance for this billing period is used up",
   "can't be run on a metered plan",
+  "spending limit for this billing period is used up",
 ];
 
 export function isInsufficientCreditsMessage(message: string | null | undefined): boolean {

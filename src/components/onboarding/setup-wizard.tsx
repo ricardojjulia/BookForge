@@ -100,6 +100,30 @@ async function testCloudProvider(provider: CloudProvider, apiKey: string, model:
   }
 }
 
+// Managed-SaaS OpenRouter path ("BYOT"): the pasted value is a Management/
+// Provisioning key, not a regular key -- it can't ping /api/lmstudio/test
+// (that's a real completion call). This provisions a scoped, spend-capped
+// key on the user's own account instead; success at this call *is* the
+// connectivity proof for this path, and persistence happens server-side, in
+// one step -- see src/app/api/onboarding/openrouter-managed-key/route.ts.
+async function createOpenRouterManagedKey(
+  managementApiKey: string,
+  model: string,
+  taskModels?: TaskModels,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/onboarding/openrouter-managed-key", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ managementApiKey, model, taskModels }),
+    });
+    const data = await res.json();
+    return { ok: res.ok && data.ok, error: data.error };
+  } catch {
+    return { ok: false, error: "Could not reach BookForge to set up your OpenRouter key." };
+  }
+}
+
 async function saveSettings(userId: string, patch: Record<string, unknown>) {
   const supabase = createClient();
   const { error } = await supabase
@@ -245,6 +269,7 @@ function CloudStep({
   const [result, setResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
   const managedSaas = isManagedSaasDeployment();
+  const isManagedOpenRouter = managedSaas && provider === "openrouter";
 
   function handleProviderChange(p: CloudProvider) {
     setProvider(p);
@@ -274,7 +299,9 @@ function CloudStep({
   async function test() {
     setTesting(true);
     setResult(null);
-    const r = await testCloudProvider(provider, apiKey, model);
+    const r = isManagedOpenRouter
+      ? await createOpenRouterManagedKey(apiKey, model, perFeature ? taskModels : undefined)
+      : await testCloudProvider(provider, apiKey, model);
     setResult(r);
     setTesting(false);
     if (r.ok) onConnected(provider, apiKey, model, perFeature ? taskModels : undefined);
@@ -288,15 +315,22 @@ function CloudStep({
         value={provider}
         onChange={(v) => v && handleProviderChange(v as CloudProvider)}
       />
+      {isManagedOpenRouter && (
+        <Alert color="grape" variant="light">
+          BookForge will use this once, on our server, to create a spending-capped key on your own
+          OpenRouter account sized to your plan — that new key (not this one) is what actually runs
+          your generations. BookForge never gets any broader access to your account than that.
+        </Alert>
+      )}
       <PasswordInput
-        label="API key"
-        placeholder="sk-..."
+        label={isManagedOpenRouter ? "OpenRouter Management/Provisioning key" : "API key"}
+        placeholder={isManagedOpenRouter ? "sk-or-v1-..." : "sk-..."}
         value={apiKey}
         onChange={(e) => { setApiKey(e.currentTarget.value); setResult(null); }}
         rightSection={
           <Button
             component="a"
-            href={CLOUD_API_LINKS[provider]}
+            href={isManagedOpenRouter ? "https://openrouter.ai/settings/provisioning-keys" : CLOUD_API_LINKS[provider]}
             target="_blank"
             rel="noreferrer"
             variant="subtle"
@@ -360,21 +394,24 @@ function CloudStep({
       )}
 
       {result && !result.ok && (
-        <Alert color="yellow" title="Could not verify">
-          {result.error ?? "Could not confirm the key works. You can still proceed — the key will be saved and used for AI tasks."}
+        <Alert color="red" title={isManagedOpenRouter ? "Could not set up your key" : "Could not verify"}>
+          {result.error ??
+            (isManagedOpenRouter
+              ? "Could not confirm that key or create your scoped key. Double-check it's a Management/Provisioning key, not a regular API key."
+              : "Could not confirm the key works. You can still proceed — the key will be saved and used for AI tasks.")}
         </Alert>
       )}
       {result?.ok && (
         <Alert color="green" title="Ready" icon={<IconCheck size={16} />}>
-          Provider connected and ready.
+          {isManagedOpenRouter ? "Your BookForge-managed OpenRouter key is set up and ready." : "Provider connected and ready."}
         </Alert>
       )}
 
       <Group>
         <Button loading={testing} onClick={test} color="grape" disabled={!apiKey.trim()}>
-          Test connection
+          {isManagedOpenRouter ? "Create scoped key and connect" : "Test connection"}
         </Button>
-        {result && !result.ok && (
+        {result && !result.ok && !isManagedOpenRouter && (
           <Button variant="subtle" color="gray" onClick={() => onConnected(provider, apiKey, model, perFeature ? taskModels : undefined)}>
             Skip test and save
           </Button>
@@ -418,6 +455,11 @@ export function SetupWizard({
           lmstudio_base_url: lmBaseUrl,
           execution_mode: "local",
         });
+      } else if (cloudProvider === "openrouter" && isManagedSaasDeployment()) {
+        // Already persisted server-side by createOpenRouterManagedKey() ->
+        // /api/onboarding/openrouter-managed-key -- calling saveSettings here
+        // would incorrectly vault cloudApiKey (the *management* key) into
+        // llm_api_key, clobbering the scoped key that route already stored.
       } else {
         await saveSettings(userId, {
           llm_provider: cloudProvider,
