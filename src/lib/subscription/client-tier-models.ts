@@ -46,6 +46,70 @@ export async function fetchAllowedModelsForCurrentUser(): Promise<Set<string>> {
  * a promo/price move on one of two otherwise-equal options should actually
  * get used, not just tracked for billing.
  */
+/**
+ * Which account funds the current user's tier -- "self_funded" (default,
+ * including no active subscription at all, coalescing the same way
+ * is_model_allowed_for_user() coalesces to 'starter') or "bookforge_managed".
+ * Used only to decide what the onboarding wizard renders; the actual gate
+ * is always re-checked server-side (see
+ * src/app/api/onboarding/openrouter-bookforge-managed/route.ts), never
+ * trusted from this client-side read alone.
+ */
+export async function fetchCurrentUserTierFundingModel(): Promise<"self_funded" | "bookforge_managed"> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return "self_funded";
+
+  const { data: subscription } = await supabase
+    .from("user_subscriptions")
+    .select("tier_id,status,trial_ends_at")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const hasActiveTier =
+    subscription?.status === "active" ||
+    (subscription?.status === "trialing" && !!subscription.trial_ends_at && new Date(subscription.trial_ends_at).getTime() > Date.now());
+  const tierId = hasActiveTier && subscription?.tier_id ? subscription.tier_id : "starter";
+
+  const { data: tier } = await supabase.from("subscription_tiers").select("funding_model").eq("id", tierId).maybeSingle();
+  return tier?.funding_model === "bookforge_managed" ? "bookforge_managed" : "self_funded";
+}
+
+/**
+ * Distinct vendor prefixes (e.g. "openai", "anthropic", "google") available
+ * in the current user's tier's model allowlist -- computed from real
+ * subscription_tier_models rows, never hardcoded, since which vendors a
+ * tier actually offers is data the product owner curates per tier.
+ */
+export async function fetchVendorsForCurrentUserTier(): Promise<string[]> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data: subscription } = await supabase
+    .from("user_subscriptions")
+    .select("tier_id,status,trial_ends_at")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const hasActiveTier =
+    subscription?.status === "active" ||
+    (subscription?.status === "trialing" && !!subscription.trial_ends_at && new Date(subscription.trial_ends_at).getTime() > Date.now());
+  if (!hasActiveTier || !subscription?.tier_id) return [];
+
+  const { data: models } = await supabase
+    .from("subscription_tier_models")
+    .select("model")
+    .eq("tier_id", subscription.tier_id)
+    .eq("task", "*");
+
+  return [...new Set((models ?? []).map((m) => (m.model as string).split("/")[0]))].sort();
+}
+
 export async function fetchCurrentModelPricing(): Promise<Map<string, ModelPrice>> {
   const supabase = createClient();
   const { data: rows } = await supabase

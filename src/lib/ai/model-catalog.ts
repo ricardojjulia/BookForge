@@ -282,11 +282,34 @@ function blendedCostPerMillionTokens(price: ModelPrice): number {
 export function resolveManagedSaasTaskModelDefaults(
   allowedModels: ReadonlySet<string>,
   pricing?: ReadonlyMap<string, ModelPrice>,
+  vendorLock?: string | null,
 ): Record<LmStudioTaskKind, string> {
+  const lockedAllowedModels = vendorLock
+    ? new Set([...allowedModels].filter((m) => m.startsWith(`${vendorLock}/`)))
+    : allowedModels;
+
   const result = {} as Record<LmStudioTaskKind, string>;
   for (const task of Object.keys(MANAGED_SAAS_TASK_MODEL_PRIORITY) as LmStudioTaskKind[]) {
-    const candidates = MANAGED_SAAS_TASK_MODEL_PRIORITY[task].filter((m) => allowedModels.has(m));
-    result[task] = pickModel(candidates, pricing) ?? "deepseek/deepseek-v4-pro";
+    const candidates = MANAGED_SAAS_TASK_MODEL_PRIORITY[task].filter((m) => lockedAllowedModels.has(m));
+    const picked = pickModel(candidates, pricing);
+    if (picked) {
+      result[task] = picked;
+      continue;
+    }
+
+    // Nothing in the curated priority list survives the lock -- fall back
+    // to ANY allowed model under the locked vendor, never to the fixed
+    // deepseek default, which could be a different vendor entirely and
+    // would silently violate the lock.
+    const fallback = pickModel([...lockedAllowedModels], pricing);
+    if (!fallback) {
+      throw new Error(
+        vendorLock
+          ? `No models available for vendor "${vendorLock}" on your current plan.`
+          : `No models available on your current plan for task "${task}".`,
+      );
+    }
+    result[task] = fallback;
   }
   return result;
 }

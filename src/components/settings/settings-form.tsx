@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Button,
@@ -27,7 +27,12 @@ import { OPENROUTER_TASK_MODEL_DEFAULTS, resolveManagedSaasTaskModelDefaults } f
 import type { LlmProvider, LmStudioTaskKind } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
 import { isManagedSaasDeployment } from "@/lib/deployment/mode";
-import { fetchAllowedModelsForCurrentUser, fetchCurrentModelPricing } from "@/lib/subscription/client-tier-models";
+import {
+  fetchAllowedModelsForCurrentUser,
+  fetchCurrentModelPricing,
+  fetchCurrentUserTierFundingModel,
+  fetchVendorsForCurrentUserTier,
+} from "@/lib/subscription/client-tier-models";
 
 type ExecutionMode = "auto" | "local" | "cloud";
 
@@ -66,6 +71,10 @@ export type Settings = {
   llm_extraction_model: string;
   // Execution routing
   execution_mode: ExecutionMode;
+  // Vendor restriction for a BookForge-managed OpenRouter tier -- "" means
+  // no restriction (balance across every vendor the tier allows). Ignored
+  // for self_funded users.
+  openrouter_vendor_lock: string;
 };
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -125,6 +134,7 @@ export function SettingsForm({
     llm_planning_model: initial?.llm_planning_model || "",
     llm_extraction_model: initial?.llm_extraction_model || "",
     execution_mode: (initial?.execution_mode as ExecutionMode) || (isManagedSaasDeployment() ? "cloud" : "auto"),
+    openrouter_vendor_lock: initial?.openrouter_vendor_lock || "",
   });
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -140,6 +150,21 @@ export function SettingsForm({
   const [perFeature, setPerFeature] = useState(
     Boolean(initial?.llm_critic_model || initial?.llm_rewrite_model || initial?.llm_planning_model || initial?.llm_extraction_model),
   );
+  // Whether this user's tier is BookForge-managed (no key of their own --
+  // see src/lib/openrouter/management.ts) -- controls whether the cloud
+  // panel shows the normal provider/key/model fields or just a vendor-lock
+  // choice. null while loading.
+  const [fundingModel, setFundingModel] = useState<"self_funded" | "bookforge_managed" | null>(
+    () => (isManagedSaasDeployment() ? null : "self_funded"),
+  );
+  const [vendors, setVendors] = useState<string[]>([]);
+  useEffect(() => {
+    if (!isManagedSaasDeployment()) return;
+    void fetchCurrentUserTierFundingModel().then((fm) => {
+      setFundingModel(fm);
+      if (fm === "bookforge_managed") void fetchVendorsForCurrentUserTier().then(setVendors);
+    });
+  }, []);
   const [fetchingModels, setFetchingModels] = useState(false);
 
   function update<K extends keyof Settings>(key: K, value: Settings[K]) {
@@ -517,6 +542,46 @@ export function SettingsForm({
           {/* ------------------------------------------------------------------ */}
           <Tabs.Panel value="cloud" pt="md">
             <Stack>
+              {fundingModel === "bookforge_managed" ? (
+                <>
+                  <Text c="dimmed" size="sm">
+                    Your plan includes BookForge-managed AI — no key or model to configure. BookForge picks the
+                    most cost-effective model for each task, unless you lock yourself to one vendor below.
+                  </Text>
+                  <Select
+                    label="Model vendor"
+                    data={[{ value: "", label: "Balance across all vendors (recommended)" }, ...vendors.map((v) => ({ value: v, label: v }))]}
+                    value={settings.openrouter_vendor_lock}
+                    onChange={async (value) => {
+                      const vendorLock = value || "";
+                      update("openrouter_vendor_lock", vendorLock);
+                      setFetchingModels(true);
+                      try {
+                        const [allowedModels, pricing] = await Promise.all([
+                          fetchAllowedModelsForCurrentUser(),
+                          fetchCurrentModelPricing(),
+                        ]);
+                        const defaults = resolveManagedSaasTaskModelDefaults(allowedModels, pricing, vendorLock || null);
+                        setSettings((current) => ({
+                          ...current,
+                          llm_model: defaults.rewrite,
+                          llm_critic_model: defaults.critic,
+                          llm_rewrite_model: defaults.rewrite,
+                          llm_planning_model: defaults.planning,
+                          llm_extraction_model: defaults.extraction,
+                        }));
+                        setError(null);
+                      } catch (err) {
+                        setError(getErrorMessage(err, "Could not update models for that vendor."));
+                      } finally {
+                        setFetchingModels(false);
+                      }
+                    }}
+                    disabled={fetchingModels}
+                  />
+                </>
+              ) : (
+                <>
               <Text c="dimmed" size="sm">
                 {managedSaas
                   ? "Choose your AI provider. All AI tasks are sent to your configured cloud provider."
@@ -700,6 +765,8 @@ export function SettingsForm({
                   Test Connection
                 </Button>
               </Group>
+                </>
+              )}
             </Stack>
           </Tabs.Panel>
         </Tabs>

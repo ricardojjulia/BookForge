@@ -1,41 +1,50 @@
 import type Stripe from "stripe";
-import { computeOpenRouterKeyLimitUsd, disableManagedOpenRouterKey, updateManagedOpenRouterKeyLimit } from "@/lib/openrouter/management";
+import { computeOpenRouterKeyLimitUsd, disableManagedOpenRouterKey, resolveOpenRouterManagementKey, updateManagedOpenRouterKeyLimit } from "@/lib/openrouter/management";
 import type { createAdminClient } from "@/lib/supabase/admin";
 
 type AdminSupabase = ReturnType<typeof createAdminClient>;
 
 /**
- * If this user is on the BookForge-managed OpenRouter path (see
- * src/lib/openrouter/management.ts), sync their scoped key's spend limit to
- * their current tier's cap (with the same goodwill bonus grant_tier_credits()
- * applies internally). A no-op for anyone else. Called last, after the
- * corresponding DB write already succeeded -- both that write and this
- * OpenRouter call are idempotent, so letting a failure here throw (and
- * Stripe retry the whole webhook) is safe and consistent with this file's
- * existing convention.
+ * If this user is on an OpenRouter-managed path (self_funded BYOT or
+ * bookforge_managed, see src/lib/openrouter/management.ts), sync their
+ * scoped key's spend limit to their current tier's cap (with the same
+ * goodwill bonus grant_tier_credits() applies internally). A no-op for
+ * anyone else. Called last, after the corresponding DB write already
+ * succeeded -- both that write and this OpenRouter call are idempotent, so
+ * letting a failure here throw (and Stripe retry the whole webhook) is safe
+ * and consistent with this file's existing convention.
  */
 async function syncOpenRouterManagedKeyLimit(admin: AdminSupabase, userId: string, tierId: string): Promise<void> {
   const { data: settings } = await admin
     .from("user_settings")
-    .select("openrouter_scoped_key_hash, llm_provider")
+    .select("openrouter_scoped_key_hash, llm_provider, openrouter_scoped_key_funding_model")
     .eq("user_id", userId)
     .maybeSingle();
   // Not on this path, or the user has since switched away from OpenRouter in
   // settings -- don't keep a key alive forever for a provider they no longer use.
   if (!settings?.openrouter_scoped_key_hash || settings.llm_provider !== "openrouter") return;
 
-  const { data: managementKey } = await admin.rpc("get_openrouter_management_key", { p_user_id: userId });
-  if (!managementKey) throw new Error(`No OpenRouter management key on file for user ${userId}.`);
-
   const { data: tier, error: tierError } = await admin
     .from("subscription_tiers")
-    .select("monthly_credit_cap_usd_micros")
+    .select("monthly_credit_cap_usd_micros, funding_model")
     .eq("id", tierId)
     .single();
   if (tierError || !tier) throw tierError || new Error(`Unknown tier ${tierId}.`);
 
+  const managementKey = await resolveOpenRouterManagementKey(admin, userId);
+
+  if (settings.openrouter_scoped_key_funding_model !== tier.funding_model) {
+    // The active key's owning account no longer matches this tier's funding
+    // model (the user moved into or out of a bookforge_managed tier) -- a
+    // key can't change which account it lives on, so disable rather than
+    // resize. The user re-onboards on their new tier to get a key that
+    // actually matches where they're billed.
+    await disableManagedOpenRouterKey(managementKey, settings.openrouter_scoped_key_hash);
+    return;
+  }
+
   await updateManagedOpenRouterKeyLimit(
-    managementKey as string,
+    managementKey,
     settings.openrouter_scoped_key_hash,
     computeOpenRouterKeyLimitUsd(tier.monthly_credit_cap_usd_micros),
   );
@@ -50,10 +59,8 @@ async function disableOpenRouterManagedKeyIfAny(admin: AdminSupabase, userId: st
     .maybeSingle();
   if (!settings?.openrouter_scoped_key_hash) return;
 
-  const { data: managementKey } = await admin.rpc("get_openrouter_management_key", { p_user_id: userId });
-  if (!managementKey) throw new Error(`No OpenRouter management key on file for user ${userId}.`);
-
-  await disableManagedOpenRouterKey(managementKey as string, settings.openrouter_scoped_key_hash);
+  const managementKey = await resolveOpenRouterManagementKey(admin, userId);
+  await disableManagedOpenRouterKey(managementKey, settings.openrouter_scoped_key_hash);
 }
 
 /**

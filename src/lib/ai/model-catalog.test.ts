@@ -76,10 +76,47 @@ describe("model-catalog", () => {
       expect(result.critic).toBe("google/gemini-2.5-flash");
     });
 
-    it("always falls back to deepseek-v4-pro when nothing in the priority list is allowed", () => {
-      const result = resolveManagedSaasTaskModelDefaults(new Set());
-      expect(result.critic).toBe("deepseek/deepseek-v4-pro");
-      expect(result.planning).toBe("deepseek/deepseek-v4-pro");
+    // Superseded by the vendor-lock work below: this used to silently return
+    // "deepseek/deepseek-v4-pro" even when the allowed set was empty --  an
+    // unverified model that could belong to a different vendor than a locked
+    // user chose. It now throws instead of smuggling in an unverified pick.
+    it("throws instead of smuggling in an unverified model when nothing in the priority list is allowed", () => {
+      expect(() => resolveManagedSaasTaskModelDefaults(new Set())).toThrow(/No models available on your current plan/);
+    });
+
+    describe("vendor lock", () => {
+      // Mirrors subscription_tier_models' real Pro-tier allowlist (task='*'
+      // rows): deepseek/deepseek-v4-pro, google/gemini-2.5-flash,
+      // anthropic/claude-haiku-4.5. No openai/* models on any tier as of
+      // this test's writing.
+      const proTierModels = new Set(["deepseek/deepseek-v4-pro", "google/gemini-2.5-flash", "anthropic/claude-haiku-4.5"]);
+
+      it("unlocked: unchanged from today's behavior", () => {
+        const result = resolveManagedSaasTaskModelDefaults(proTierModels);
+        expect(result.critic).toBe("google/gemini-2.5-flash");
+        expect(result.extraction).toBe("google/gemini-2.5-flash");
+        expect(result.rewrite).toBe("deepseek/deepseek-v4-pro");
+        expect(result.planning).toBe("anthropic/claude-haiku-4.5");
+      });
+
+      it("locked to a vendor present in the priority list: picks that vendor's model", () => {
+        const result = resolveManagedSaasTaskModelDefaults(proTierModels, undefined, "anthropic");
+        expect(result.planning).toBe("anthropic/claude-haiku-4.5");
+        // anthropic isn't in critic/extraction/rewrite's priority lists, but
+        // IS in the allowed set -- falls back to the locked vendor's own
+        // model rather than throwing or violating the lock.
+        expect(result.critic).toBe("anthropic/claude-haiku-4.5");
+        expect(result.extraction).toBe("anthropic/claude-haiku-4.5");
+        expect(result.rewrite).toBe("anthropic/claude-haiku-4.5");
+      });
+
+      it("locked to a vendor with zero allowed models: throws instead of silently violating the lock", () => {
+        // No openai/* model in proTierModels at all -- the old hardcoded
+        // deepseek fallback would have silently handed back a different vendor.
+        expect(() => resolveManagedSaasTaskModelDefaults(proTierModels, undefined, "openai")).toThrow(
+          /No models available for vendor "openai"/,
+        );
+      });
     });
   });
 });

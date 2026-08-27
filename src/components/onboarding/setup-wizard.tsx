@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Alert,
@@ -28,7 +28,12 @@ import { createClient } from "@/lib/supabase/client";
 import { PROVIDER_META } from "@/lib/ai/providers";
 import { isManagedSaasDeployment } from "@/lib/deployment/mode";
 import { OPENROUTER_TASK_MODEL_DEFAULTS, resolveManagedSaasTaskModelDefaults } from "@/lib/ai/model-catalog";
-import { fetchAllowedModelsForCurrentUser, fetchCurrentModelPricing } from "@/lib/subscription/client-tier-models";
+import {
+  fetchAllowedModelsForCurrentUser,
+  fetchCurrentModelPricing,
+  fetchCurrentUserTierFundingModel,
+  fetchVendorsForCurrentUserTier,
+} from "@/lib/subscription/client-tier-models";
 import { useWizardAutoOpen, WizardShell } from "@/components/onboarding/wizard-shell";
 import { markOnboardingStepDone, ONBOARDING_STEPS } from "@/lib/onboarding/steps";
 import type { LmStudioTaskKind } from "@/lib/types";
@@ -121,6 +126,23 @@ async function createOpenRouterManagedKey(
     return { ok: res.ok && data.ok, error: data.error };
   } catch {
     return { ok: false, error: "Could not reach BookForge to set up your OpenRouter key." };
+  }
+}
+
+// BookForge-managed path: no key of any kind is requested from the user --
+// BookForge's own master OpenRouter account funds and mints the scoped key.
+// See src/app/api/onboarding/openrouter-bookforge-managed/route.ts.
+async function createBookForgeManagedKey(vendorLock: string | null): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/onboarding/openrouter-bookforge-managed", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ vendorLock: vendorLock || undefined }),
+    });
+    const data = await res.json();
+    return { ok: res.ok && data.ok, error: data.error };
+  } catch {
+    return { ok: false, error: "Could not reach BookForge to set up your managed AI." };
   }
 }
 
@@ -421,6 +443,49 @@ function CloudStep({
   );
 }
 
+function BookForgeManagedStep({ onConnected }: { onConnected: () => void }) {
+  const [vendors, setVendors] = useState<string[]>([]);
+  const [vendorLock, setVendorLock] = useState<string>("");
+  const [connecting, setConnecting] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; error?: string } | null>(null);
+
+  useEffect(() => {
+    void fetchVendorsForCurrentUserTier().then(setVendors);
+  }, []);
+
+  async function connect() {
+    setConnecting(true);
+    setResult(null);
+    const r = await createBookForgeManagedKey(vendorLock || null);
+    setResult(r);
+    setConnecting(false);
+    if (r.ok) onConnected();
+  }
+
+  return (
+    <Stack>
+      <Alert color="grape" title="No key needed" icon={<IconCheck size={16} />}>
+        Your plan includes BookForge-managed AI — we handle everything, at no setup cost to you.
+      </Alert>
+      <Select
+        label="Model vendor"
+        description="Let BookForge pick the most cost-effective model for each task, or lock yourself to one vendor's models."
+        data={[{ value: "", label: "Balance across all vendors (recommended)" }, ...vendors.map((v) => ({ value: v, label: v }))]}
+        value={vendorLock}
+        onChange={(v) => setVendorLock(v || "")}
+      />
+      {result && !result.ok && (
+        <Alert color="red" title="Could not connect">
+          {result.error ?? "Something went wrong setting up your managed AI. Please try again."}
+        </Alert>
+      )}
+      <Button loading={connecting} onClick={connect} color="grape">
+        Connect
+      </Button>
+    </Stack>
+  );
+}
+
 // ── Main wizard ───────────────────────────────────────────────────────────────
 
 export function SetupWizard({
@@ -446,6 +511,17 @@ export function SetupWizard({
   const [cloudModel, setCloudModel] = useState("");
   const [cloudTaskModels, setCloudTaskModels] = useState<TaskModels | undefined>(undefined);
   const [connected, setConnected] = useState(false);
+
+  // Which account funds this user's tier -- null while loading. On a
+  // bookforge_managed tier, the wizard skips engine/provider/key choice
+  // entirely (see the step-0 branch below): there's nothing to configure.
+  const [fundingModel, setFundingModel] = useState<"self_funded" | "bookforge_managed" | null>(
+    () => (isManagedSaasDeployment() ? null : "self_funded"),
+  );
+  useEffect(() => {
+    if (!isManagedSaasDeployment()) return;
+    void fetchCurrentUserTierFundingModel().then(setFundingModel);
+  }, []);
 
   async function finish() {
     setSaving(true);
@@ -501,8 +577,17 @@ export function SetupWizard({
         { label: "Done", description: "Ready to write" },
       ]}
     >
-        {/* Step 0 — pick engine */}
-        {active === 0 && (
+        {/* Step 0 — pick engine, or (bookforge_managed tier) connect directly */}
+        {active === 0 && fundingModel === "bookforge_managed" && (
+          <BookForgeManagedStep
+            onConnected={async () => {
+              await markOnboardingStepDone(userId, ONBOARDING_STEPS.aiSetup, completedSteps);
+              setDone(true);
+              setActive(2);
+            }}
+          />
+        )}
+        {active === 0 && fundingModel !== null && fundingModel !== "bookforge_managed" && (
           <Stack>
             <Text c="dimmed" size="sm">
               {isManagedSaasDeployment()
@@ -579,11 +664,13 @@ export function SetupWizard({
             </ThemeIcon>
             <Title order={3} ta="center">You&apos;re ready</Title>
             <Text c="dimmed" ta="center" maw={380}>
-              {engine === "lmstudio"
-                ? "LM Studio is configured. Import a manuscript or create a new book to get started."
-                : `${CLOUD_PROVIDERS.find((p) => p.value === cloudProvider)?.label} is configured${
-                    cloudTaskModels ? " with per-feature models" : ""
-                  }. Import a manuscript or create a new book to get started.`}
+              {fundingModel === "bookforge_managed"
+                ? "BookForge-managed AI is set up and ready. Import a manuscript or create a new book to get started."
+                : engine === "lmstudio"
+                  ? "LM Studio is configured. Import a manuscript or create a new book to get started."
+                  : `${CLOUD_PROVIDERS.find((p) => p.value === cloudProvider)?.label} is configured${
+                      cloudTaskModels ? " with per-feature models" : ""
+                    }. Import a manuscript or create a new book to get started.`}
             </Text>
             <Button color="grape" onClick={close}>
               Go to dashboard
