@@ -76,6 +76,7 @@ export async function POST(request: Request) {
         execution_mode: "cloud",
         openrouter_management_key: body.managementApiKey,
         openrouter_scoped_key_hash: hash,
+        openrouter_scoped_key_funding_model: "self_funded",
       },
       { onConflict: "user_id" },
     );

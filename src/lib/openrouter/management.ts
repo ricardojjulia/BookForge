@@ -2,11 +2,18 @@
  * OpenRouter Management/Provisioning API client.
  *
  * Wraps https://openrouter.ai/api/v1/keys -- used to create/update/disable a
- * scoped API key on a user's OWN OpenRouter account (via their own vaulted
- * management key), sized to their BookForge subscription tier. That scoped
- * key -- never the management key -- becomes the actual key used for
+ * scoped API key sized to a user's BookForge subscription tier. That scoped
+ * key -- never a management key -- becomes the actual key used for
  * completions (see src/lib/ai/providers.ts's createProviderClient, which
  * reads it unchanged from settings.apiKey).
+ *
+ * Two funding models share this same wrapper (see resolveOpenRouterManagementKey
+ * below): "self_funded" mints the scoped key on the USER's own OpenRouter
+ * account using a management key they supplied; "bookforge_managed" mints it
+ * on BookForge's own OpenRouter account using one shared master key
+ * (OPENROUTER_MASTER_MANAGEMENT_KEY). Every function below is agnostic to
+ * which -- they just take whichever management key string the caller
+ * resolved.
  *
  * FLAGGED FOR LIVE VERIFICATION: this module was written against OpenRouter's
  * documented field names (name, limit, disabled, limitReset,
@@ -142,4 +149,45 @@ export async function getManagedOpenRouterKeyUsage(
 export function isOpenRouterKeyLimitExceededError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return /\b402\b/.test(error.message) && /limit/i.test(error.message);
+}
+
+type ManagementKeySupabaseClient =
+  | Awaited<ReturnType<typeof import("@/lib/supabase/server").createClient>>
+  | ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>;
+
+/**
+ * Resolves which OpenRouter Management/Provisioning key authorizes changes
+ * to a user's active scoped key -- BookForge's own env-level master key for
+ * a bookforge_managed user, or the user's own vaulted key (via
+ * get_openrouter_management_key) for a self_funded one.
+ *
+ * Deliberately keyed off openrouter_scoped_key_funding_model (which account
+ * minted the CURRENT key), not the user's live subscription tier -- a
+ * scoped key lives permanently on whichever account created it, but tier
+ * funding_model can change out from under it on upgrade/downgrade. Callers
+ * that need to detect a funding-model mismatch (the key's origin no longer
+ * matching the user's current tier) must compare
+ * openrouter_scoped_key_funding_model against the tier row themselves --
+ * see syncOpenRouterManagedKeyLimit in src/lib/billing/webhook-handlers.ts.
+ */
+export async function resolveOpenRouterManagementKey(
+  supabase: ManagementKeySupabaseClient,
+  userId: string,
+): Promise<string> {
+  const { data: settings, error } = await supabase
+    .from("user_settings")
+    .select("openrouter_scoped_key_funding_model")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+
+  if (settings?.openrouter_scoped_key_funding_model === "bookforge_managed") {
+    const masterKey = process.env.OPENROUTER_MASTER_MANAGEMENT_KEY;
+    if (!masterKey) throw new Error("OPENROUTER_MASTER_MANAGEMENT_KEY is not configured.");
+    return masterKey;
+  }
+
+  const { data: managementKey, error: rpcError } = await supabase.rpc("get_openrouter_management_key", { p_user_id: userId });
+  if (rpcError || !managementKey) throw rpcError || new Error(`No OpenRouter management key on file for user ${userId}.`);
+  return managementKey as string;
 }

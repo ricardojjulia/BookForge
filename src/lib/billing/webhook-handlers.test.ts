@@ -6,18 +6,21 @@ vi.mock("@/lib/openrouter/management", () => ({
   computeOpenRouterKeyLimitUsd: (usdMicros: number) => Math.round((usdMicros / 1_000_000) * 1.2 * 100) / 100,
   updateManagedOpenRouterKeyLimit: vi.fn().mockResolvedValue(undefined),
   disableManagedOpenRouterKey: vi.fn().mockResolvedValue(undefined),
+  resolveOpenRouterManagementKey: vi.fn().mockResolvedValue("mgmt-key-1"),
 }));
 
-import { disableManagedOpenRouterKey, updateManagedOpenRouterKeyLimit } from "@/lib/openrouter/management";
+import { disableManagedOpenRouterKey, resolveOpenRouterManagementKey, updateManagedOpenRouterKeyLimit } from "@/lib/openrouter/management";
 
 type AdminSupabase = Parameters<typeof handleStripeEvent>[0];
 
 function fakeAdmin(config: {
   tierByPrice?: Record<string, { id: string } | undefined>;
-  tierById?: Record<string, { monthly_credit_cap_usd_micros: number } | undefined>;
+  tierById?: Record<string, { monthly_credit_cap_usd_micros: number; funding_model?: string } | undefined>;
   subscriptionByStripeId?: Record<string, { user_id: string; tier_id?: string } | undefined>;
-  userSettingsByUserId?: Record<string, { openrouter_scoped_key_hash: string | null; llm_provider?: string } | undefined>;
-  managementKeyByUserId?: Record<string, string | undefined>;
+  userSettingsByUserId?: Record<
+    string,
+    { openrouter_scoped_key_hash: string | null; llm_provider?: string; openrouter_scoped_key_funding_model?: string } | undefined
+  >;
   updateResultUserId?: string;
   upsertError?: unknown;
   updateError?: unknown;
@@ -84,9 +87,6 @@ function fakeAdmin(config: {
 
   const rpc = vi.fn((fn: string, args: Record<string, unknown>) => {
     rpcCalls.push({ fn, args });
-    if (fn === "get_openrouter_management_key") {
-      return Promise.resolve({ data: config.managementKeyByUserId?.[args.p_user_id as string] ?? null, error: null });
-    }
     return Promise.resolve({ error: config.rpcError ?? null });
   });
 
@@ -213,19 +213,39 @@ describe("handleStripeEvent: customer.subscription.deleted", () => {
 });
 
 describe("handleStripeEvent: OpenRouter-managed key sync", () => {
-  it("updates the scoped key's limit on a new subscription when one is on file", async () => {
+  it("updates the scoped key's limit on a new subscription when the funding model matches", async () => {
     vi.clearAllMocks();
-    const { admin, rpcCalls } = fakeAdmin({
+    vi.mocked(resolveOpenRouterManagementKey).mockResolvedValue("mgmt-key-1");
+    const { admin } = fakeAdmin({
       tierByPrice: { price_pro: { id: "pro" } },
-      tierById: { pro: { monthly_credit_cap_usd_micros: 18_000_000 } },
-      userSettingsByUserId: { "user-1": { openrouter_scoped_key_hash: "hash-1", llm_provider: "openrouter" } },
-      managementKeyByUserId: { "user-1": "mgmt-key-1" },
+      tierById: { pro: { monthly_credit_cap_usd_micros: 18_000_000, funding_model: "self_funded" } },
+      userSettingsByUserId: {
+        "user-1": { openrouter_scoped_key_hash: "hash-1", llm_provider: "openrouter", openrouter_scoped_key_funding_model: "self_funded" },
+      },
     });
 
     await handleStripeEvent(admin, eventOf("customer.subscription.created", fakeSubscription()));
 
-    expect(rpcCalls).toContainEqual({ fn: "get_openrouter_management_key", args: { p_user_id: "user-1" } });
     expect(updateManagedOpenRouterKeyLimit).toHaveBeenCalledWith("mgmt-key-1", "hash-1", 21.6);
+    expect(disableManagedOpenRouterKey).not.toHaveBeenCalled();
+  });
+
+  it("disables (does not resize) when the key's funding model no longer matches the tier's", async () => {
+    vi.clearAllMocks();
+    vi.mocked(resolveOpenRouterManagementKey).mockResolvedValue("mgmt-key-1");
+    const { admin } = fakeAdmin({
+      tierByPrice: { price_pro: { id: "pro" } },
+      // Tier is now bookforge_managed, but the active key was minted self_funded (e.g. user upgraded).
+      tierById: { pro: { monthly_credit_cap_usd_micros: 18_000_000, funding_model: "bookforge_managed" } },
+      userSettingsByUserId: {
+        "user-1": { openrouter_scoped_key_hash: "hash-1", llm_provider: "openrouter", openrouter_scoped_key_funding_model: "self_funded" },
+      },
+    });
+
+    await handleStripeEvent(admin, eventOf("customer.subscription.created", fakeSubscription()));
+
+    expect(disableManagedOpenRouterKey).toHaveBeenCalledWith("mgmt-key-1", "hash-1");
+    expect(updateManagedOpenRouterKeyLimit).not.toHaveBeenCalled();
   });
 
   it("does nothing for a user with no OpenRouter-managed key", async () => {
@@ -235,15 +255,17 @@ describe("handleStripeEvent: OpenRouter-managed key sync", () => {
     await handleStripeEvent(admin, eventOf("customer.subscription.created", fakeSubscription()));
 
     expect(updateManagedOpenRouterKeyLimit).not.toHaveBeenCalled();
+    expect(disableManagedOpenRouterKey).not.toHaveBeenCalled();
   });
 
   it("does nothing when the user has since switched away from OpenRouter in settings", async () => {
     vi.clearAllMocks();
     const { admin } = fakeAdmin({
       tierByPrice: { price_pro: { id: "pro" } },
-      tierById: { pro: { monthly_credit_cap_usd_micros: 18_000_000 } },
-      userSettingsByUserId: { "user-1": { openrouter_scoped_key_hash: "hash-1", llm_provider: "anthropic" } },
-      managementKeyByUserId: { "user-1": "mgmt-key-1" },
+      tierById: { pro: { monthly_credit_cap_usd_micros: 18_000_000, funding_model: "self_funded" } },
+      userSettingsByUserId: {
+        "user-1": { openrouter_scoped_key_hash: "hash-1", llm_provider: "anthropic", openrouter_scoped_key_funding_model: "self_funded" },
+      },
     });
 
     await handleStripeEvent(admin, eventOf("customer.subscription.created", fakeSubscription()));
@@ -253,10 +275,10 @@ describe("handleStripeEvent: OpenRouter-managed key sync", () => {
 
   it("disables the scoped key on cancellation when one is on file", async () => {
     vi.clearAllMocks();
+    vi.mocked(resolveOpenRouterManagementKey).mockResolvedValue("mgmt-key-1");
     const { admin } = fakeAdmin({
       updateResultUserId: "user-1",
       userSettingsByUserId: { "user-1": { openrouter_scoped_key_hash: "hash-1", llm_provider: "openrouter" } },
-      managementKeyByUserId: { "user-1": "mgmt-key-1" },
     });
 
     await handleStripeEvent(admin, eventOf("customer.subscription.deleted", fakeSubscription()));
