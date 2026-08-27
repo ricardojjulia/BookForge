@@ -430,9 +430,6 @@ export function BookChatRail({ bookId }: { bookId: string }) {
             </Text>
           </div>
           <Group gap="xs">
-            <Badge color="blue" variant="light">
-              MVP
-            </Badge>
             <Badge color="grape" variant="light">
               {mode}
             </Badge>
@@ -443,7 +440,7 @@ export function BookChatRail({ bookId }: { bookId: string }) {
         </Group>
 
         <Group gap="xs">
-          {(["ask", "edit", "run", "council"] as ChatMode[]).map((entryMode) => (
+          {(["ask", "run"] as ChatMode[]).map((entryMode) => (
             <Button
               key={entryMode}
               size="xs"
