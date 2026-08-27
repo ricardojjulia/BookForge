@@ -82,12 +82,20 @@ function mapStripeStatus(stripeStatus: Stripe.Subscription.Status): "active" | "
   return "canceled";
 }
 
+/**
+ * Resolves via tier_stripe_prices, not subscription_tiers.stripe_price_id
+ * directly -- a tier's price can be rotated (see
+ * src/lib/subscription/managed-price-tuning.ts), and an existing
+ * subscriber's webhook events keep citing whatever price id their
+ * subscription was actually created with, indefinitely. tier_stripe_prices
+ * retains every price id a tier has ever used, not just the current one.
+ */
 async function resolveTierIdForPrice(admin: AdminSupabase, priceId: string): Promise<string> {
-  const { data, error } = await admin.from("subscription_tiers").select("id").eq("stripe_price_id", priceId).maybeSingle();
+  const { data, error } = await admin.from("tier_stripe_prices").select("tier_id").eq("stripe_price_id", priceId).maybeSingle();
   if (error || !data) {
-    throw new UnprocessableStripeEventError(`No subscription_tiers row has stripe_price_id "${priceId}".`);
+    throw new UnprocessableStripeEventError(`No tier_stripe_prices row has stripe_price_id "${priceId}".`);
   }
-  return data.id;
+  return data.tier_id;
 }
 
 /**

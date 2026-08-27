@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { runMarginTuningPass } from "@/lib/subscription/margin-tuning";
 
-type TierRow = { id: string; monthly_price_usd_cents: number; monthly_credit_cap_usd_micros: number };
+type TierRow = { id: string; monthly_price_usd_cents: number; monthly_credit_cap_usd_micros: number; funding_model?: string };
 type StatsRow = { tier_id: string; active_users: number; total_cost_usd_micros: number };
 
 function fakeAdminSupabase(input: { tiers: TierRow[]; stats: StatsRow[]; statsError?: unknown; updateError?: unknown }) {
@@ -127,5 +127,36 @@ describe("runMarginTuningPass", () => {
     const { supabase } = fakeAdminSupabase({ tiers, stats: [], statsError: new Error("rpc failed") });
 
     await expect(runMarginTuningPass(supabase, new Date())).resolves.toEqual([]);
+  });
+
+  it("never tunes the credit cap for a bookforge_managed tier, even when the step math would qualify", async () => {
+    // Same shape as the "auto-applies a bounded credit-cap increase" case
+    // above (a move well within bounds if this were self-funded), but
+    // funding_model is bookforge_managed -- the cap must stay frozen
+    // (see managed-price-tuning.ts, which tunes price instead for these tiers).
+    const tiers: TierRow[] = [{ id: "managed_starter", monthly_price_usd_cents: 1950, monthly_credit_cap_usd_micros: 4_320_000, funding_model: "bookforge_managed" }];
+    const stats: StatsRow[] = [{ tier_id: "managed_starter", active_users: 20, total_cost_usd_micros: 880_000 }];
+    const { supabase, updateCalls, insertCalls } = fakeAdminSupabase({ tiers, stats });
+
+    const outcomes = await runMarginTuningPass(supabase, new Date("2026-08-20T00:00:00Z"));
+
+    expect(outcomes.some((o) => o.field === "credit_cap")).toBe(false);
+    expect(updateCalls).toHaveLength(0);
+    expect(insertCalls.some((c) => (c.payload as Record<string, unknown>).field === "credit_cap")).toBe(false);
+  });
+
+  it("still proposes a model-allowlist review for a bookforge_managed tier when its own target margin is missed", async () => {
+    // managed_starter's target margin is 0.93 (TARGET_MARGIN_MANAGED); real
+    // margin here is ~84.6%, below the 88% (0.93 - 0.05 tolerance) floor.
+    const tiers: TierRow[] = [{ id: "managed_starter", monthly_price_usd_cents: 1950, monthly_credit_cap_usd_micros: 4_320_000, funding_model: "bookforge_managed" }];
+    const stats: StatsRow[] = [{ tier_id: "managed_starter", active_users: 20, total_cost_usd_micros: 2_000_000 }];
+    const { supabase, updateCalls, insertCalls } = fakeAdminSupabase({ tiers, stats });
+
+    const outcomes = await runMarginTuningPass(supabase, new Date("2026-08-20T00:00:00Z"));
+
+    expect(updateCalls).toHaveLength(0); // still never touches the cap
+    const proposal = outcomes.find((o) => o.field === "model_allowlist");
+    expect(proposal).toMatchObject({ tierId: "managed_starter", status: "proposed", field: "model_allowlist" });
+    expect(insertCalls.some((c) => (c.payload as Record<string, unknown>).field === "model_allowlist")).toBe(true);
   });
 });
