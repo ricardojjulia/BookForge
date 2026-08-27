@@ -13,6 +13,10 @@
       "schedule": "0 7 * * 1"
     },
     {
+      "path": "/api/internal/subscription/managed-price-tuning",
+      "schedule": "0 8 1 * *"
+    },
+    {
       "path": "/api/internal/resume-stale-chunked-jobs",
       "schedule": "*/2 * * * *"
     }

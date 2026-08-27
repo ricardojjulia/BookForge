@@ -31,6 +31,18 @@ function fakeAdmin(config: {
   const rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
 
   const from = vi.fn((table: string) => {
+    if (table === "tier_stripe_prices") {
+      return {
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn((_col: string, val: string) => ({
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: config.tierByPrice?.[val] ? { tier_id: config.tierByPrice[val]!.id } : null,
+              error: null,
+            }),
+          })),
+        }),
+      };
+    }
     if (table === "subscription_tiers") {
       return {
         select: vi.fn().mockReturnValue({
@@ -150,6 +162,27 @@ describe("handleStripeEvent: customer.subscription.created", () => {
     ).rejects.toThrow(UnprocessableStripeEventError);
     expect(upsertCalls).toHaveLength(0);
     expect(rpcCalls).toHaveLength(0);
+  });
+
+  it("resolves the tier via tier_stripe_prices, not subscription_tiers directly", async () => {
+    // Proves resolveTierIdForPrice now queries tier_stripe_prices (which
+    // retains every price id a tier has ever used -- see
+    // 202608280001_tier_stripe_price_history.sql) rather than
+    // subscription_tiers.stripe_price_id directly, which would break
+    // resolution for an existing subscriber after managed-price-tuning.ts
+    // rotates a tier's current price out from under their old one.
+    const fromCalls: string[] = [];
+    const { admin, upsertCalls } = fakeAdmin({ tierByPrice: { price_pro: { id: "pro" } } });
+    const originalFrom = admin.from;
+    (admin as { from: typeof admin.from }).from = ((table: string) => {
+      fromCalls.push(table);
+      return originalFrom(table);
+    }) as typeof admin.from;
+
+    await handleStripeEvent(admin, eventOf("customer.subscription.created", fakeSubscription()));
+
+    expect(fromCalls).toContain("tier_stripe_prices");
+    expect(upsertCalls[0]).toMatchObject({ tier_id: "pro" });
   });
 });
 

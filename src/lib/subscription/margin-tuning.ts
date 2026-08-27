@@ -1,4 +1,6 @@
 import type { createAdminClient } from "@/lib/supabase/admin";
+import { TARGET_MARGIN, TARGET_MARGIN_MANAGED } from "@/lib/subscription/margin-targets";
+import { logPricingAdjustment } from "@/lib/subscription/pricing-adjustment-log";
 
 type AdminSupabase = ReturnType<typeof createAdminClient>;
 
@@ -10,14 +12,6 @@ type TierMarginDailyStatsRow = {
   total_cost_usd_micros: number | string;
   avg_cost_per_user_usd_micros: number | string | null;
 };
-
-// "Margin @ typical" from the redone tier cost analysis (docs/pricing plan) --
-// the band this job steers the credit cap toward, and the floor below which it
-// proposes (never applies) an allowlist review. Publisher's target was raised
-// from 0.52 to 0.56 alongside its $199->$219 price correction (see
-// 202608200008_publisher_tier_price_correction.sql) -- the original 0.52 was
-// paired with a 9.5% worst-case floor margin that was flagged as too thin.
-const TARGET_MARGIN: Record<string, number> = { starter: 0.92, pro: 0.76, studio: 0.73, publisher: 0.56 };
 
 // "Credit cap ($)" column from the same table, expressed as a multiplier of
 // typical cost (e.g. Starter's $3.60 cap on ~$1.20 typical cost is ~3x). The
@@ -65,7 +59,7 @@ export type MarginTuningOutcome = {
 export async function runMarginTuningPass(supabase: AdminSupabase, now: Date = new Date()): Promise<MarginTuningOutcome[]> {
   const { data: tiers, error: tiersError } = await supabase
     .from("subscription_tiers")
-    .select("id,monthly_price_usd_cents,monthly_credit_cap_usd_micros")
+    .select("id,monthly_price_usd_cents,monthly_credit_cap_usd_micros,funding_model")
     .eq("is_active", true);
   if (tiersError || !tiers) return [];
 
@@ -75,9 +69,14 @@ export async function runMarginTuningPass(supabase: AdminSupabase, now: Date = n
   const outcomes: MarginTuningOutcome[] = [];
 
   for (const tier of tiers) {
-    const targetMargin = TARGET_MARGIN[tier.id];
+    const isManaged = tier.funding_model === "bookforge_managed";
+    // Managed tiers use their own target-margin table (credit-cap tuning is
+    // frozen for them -- see below -- so capMultiplier is only ever needed
+    // for the self-funded branch, and TARGET_CAP_MULTIPLIER deliberately has
+    // no managed-tier entries).
+    const targetMargin = isManaged ? TARGET_MARGIN_MANAGED[tier.id] : TARGET_MARGIN[tier.id];
     const capMultiplier = TARGET_CAP_MULTIPLIER[tier.id];
-    if (targetMargin === undefined || capMultiplier === undefined) continue;
+    if (targetMargin === undefined || (!isManaged && capMultiplier === undefined)) continue;
 
     const tierStats = (stats as TierMarginDailyStatsRow[]).filter((row) => row.tier_id === tier.id);
     const totalActiveUserDays = tierStats.reduce((sum, row) => sum + Number(row.active_users), 0);
@@ -102,58 +101,43 @@ export async function runMarginTuningPass(supabase: AdminSupabase, now: Date = n
       targetMargin,
     };
 
-    const currentCapUsdMicros = tier.monthly_credit_cap_usd_micros;
-    const desiredCapUsdMicros = Math.round(capMultiplier * impliedMonthlyCostPerUserUsdMicros);
-    const stepFraction = currentCapUsdMicros > 0 ? (desiredCapUsdMicros - currentCapUsdMicros) / currentCapUsdMicros : 0;
+    // Credit-cap tuning is frozen for bookforge_managed tiers -- unlike
+    // self-funded tiers, where the cap is a free lever (the user's own
+    // OpenRouter account pays for tokens, not BookForge), a managed tier's
+    // cap is a literal ceiling on real cash BookForge pays out per
+    // subscriber. Raising it automatically would directly increase
+    // BookForge's cost, the opposite of a free lever. See
+    // src/lib/subscription/managed-price-tuning.ts, which tunes PRICE
+    // instead for these tiers, holding the cap fixed.
+    if (!isManaged && capMultiplier !== undefined) {
+      const currentCapUsdMicros = tier.monthly_credit_cap_usd_micros;
+      const desiredCapUsdMicros = Math.round(capMultiplier * impliedMonthlyCostPerUserUsdMicros);
+      const stepFraction = currentCapUsdMicros > 0 ? (desiredCapUsdMicros - currentCapUsdMicros) / currentCapUsdMicros : 0;
 
-    if (Math.abs(stepFraction) > MAX_CAP_STEP_FRACTION) {
-      const triggerMetric = { ...baseTriggerMetric, desiredCapUsdMicros, stepFraction: Number(stepFraction.toFixed(4)), maxStepFraction: MAX_CAP_STEP_FRACTION };
-      outcomes.push({ tierId: tier.id, status: "blocked", field: "credit_cap", oldValue: String(currentCapUsdMicros), newValue: String(currentCapUsdMicros), triggerMetric });
-      await logAdjustment(supabase, tier.id, "credit_cap", String(currentCapUsdMicros), String(currentCapUsdMicros), triggerMetric, "blocked", now);
-    } else if (Math.abs(stepFraction) >= MIN_CAP_STEP_TO_ACT_FRACTION) {
-      const { error: updateError } = await supabase
-        .from("subscription_tiers")
-        .update({ monthly_credit_cap_usd_micros: desiredCapUsdMicros, updated_at: now.toISOString() })
-        .eq("id", tier.id);
-      if (!updateError) {
-        const triggerMetric = { ...baseTriggerMetric, stepFraction: Number(stepFraction.toFixed(4)) };
-        outcomes.push({ tierId: tier.id, status: "applied", field: "credit_cap", oldValue: String(currentCapUsdMicros), newValue: String(desiredCapUsdMicros), triggerMetric });
-        await logAdjustment(supabase, tier.id, "credit_cap", String(currentCapUsdMicros), String(desiredCapUsdMicros), triggerMetric, "applied", now);
+      if (Math.abs(stepFraction) > MAX_CAP_STEP_FRACTION) {
+        const triggerMetric = { ...baseTriggerMetric, desiredCapUsdMicros, stepFraction: Number(stepFraction.toFixed(4)), maxStepFraction: MAX_CAP_STEP_FRACTION };
+        outcomes.push({ tierId: tier.id, status: "blocked", field: "credit_cap", oldValue: String(currentCapUsdMicros), newValue: String(currentCapUsdMicros), triggerMetric });
+        await logPricingAdjustment(supabase, tier.id, "credit_cap", String(currentCapUsdMicros), String(currentCapUsdMicros), triggerMetric, "blocked", now);
+      } else if (Math.abs(stepFraction) >= MIN_CAP_STEP_TO_ACT_FRACTION) {
+        const { error: updateError } = await supabase
+          .from("subscription_tiers")
+          .update({ monthly_credit_cap_usd_micros: desiredCapUsdMicros, updated_at: now.toISOString() })
+          .eq("id", tier.id);
+        if (!updateError) {
+          const triggerMetric = { ...baseTriggerMetric, stepFraction: Number(stepFraction.toFixed(4)) };
+          outcomes.push({ tierId: tier.id, status: "applied", field: "credit_cap", oldValue: String(currentCapUsdMicros), newValue: String(desiredCapUsdMicros), triggerMetric });
+          await logPricingAdjustment(supabase, tier.id, "credit_cap", String(currentCapUsdMicros), String(desiredCapUsdMicros), triggerMetric, "applied", now);
+        }
       }
     }
 
     if (typicalMargin < targetMargin - MARGIN_TOLERANCE) {
       outcomes.push({ tierId: tier.id, status: "proposed", field: "model_allowlist", oldValue: null, newValue: null, triggerMetric: baseTriggerMetric });
-      await logAdjustment(supabase, tier.id, "model_allowlist", null, null, baseTriggerMetric, "proposed", nextCalendarMonthStart(now));
+      await logPricingAdjustment(supabase, tier.id, "model_allowlist", null, null, baseTriggerMetric, "proposed", nextCalendarMonthStart(now));
     }
   }
 
   return outcomes;
-}
-
-async function logAdjustment(
-  supabase: AdminSupabase,
-  tierId: string,
-  field: "credit_cap" | "model_allowlist",
-  oldValue: string | null,
-  newValue: string | null,
-  triggerMetric: Record<string, unknown>,
-  status: "applied" | "blocked" | "proposed",
-  effectiveAt: Date,
-): Promise<void> {
-  try {
-    await supabase.from("pricing_adjustment_log").insert({
-      tier_id: tierId,
-      field,
-      old_value: oldValue,
-      new_value: newValue,
-      trigger_metric: triggerMetric,
-      status,
-      effective_at: effectiveAt.toISOString(),
-    });
-  } catch {
-    // Best-effort audit write -- a logging failure must not roll back or repeat the decision above.
-  }
 }
 
 function nextCalendarMonthStart(now: Date): Date {

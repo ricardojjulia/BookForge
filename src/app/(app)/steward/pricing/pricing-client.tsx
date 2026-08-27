@@ -19,7 +19,10 @@ function statusColor(status: string) {
 }
 
 function fieldLabel(field: string) {
-  return field === "credit_cap" ? "Credit cap" : field === "model_allowlist" ? "Model allowlist" : field;
+  if (field === "credit_cap") return "Credit cap";
+  if (field === "model_allowlist") return "Model allowlist";
+  if (field === "subscription_price") return "Subscription price";
+  return field;
 }
 
 export function TiersTable({ tiers }: { tiers: StewardPricingTier[] }) {
