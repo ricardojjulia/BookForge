@@ -602,29 +602,46 @@ export function BookChatRail({ bookId }: { bookId: string }) {
                       Ask about chapters, structure, tone, continuity, or planning.
                     </Text>
                   ) : (
-                    messages.map((message) => (
-                      <Paper
-                        key={message.id}
-                        withBorder
-                        radius="sm"
-                        p="sm"
-                        bg={message.role === "user" ? "#f2f7ff" : "#f8fff5"}
-                      >
-                        <Group justify="space-between" mb={4}>
-                          <Badge size="xs" color={message.role === "user" ? "blue" : "teal"} variant="light">
-                            {message.role}
-                          </Badge>
-                          <Text size="xs" c="dimmed">
-                            {new Date(message.created_at).toLocaleTimeString()}
+                    messages.map((message) => {
+                      const proposalCard = message.role === "assistant" ? renderProposalCard(message) : null;
+                      const toolCallCard = message.role === "assistant" ? renderToolCallCard(message) : null;
+                      // A reply with neither a structured proposal nor a tool-call
+                      // card is conversation only -- nothing was written to the
+                      // manuscript, regardless of how action-oriented its wording
+                      // sounds. Make that explicit rather than leaving it to the
+                      // model's phrasing (which can still sound like work is
+                      // underway even with the tightened system prompt).
+                      const isTalkOnly = message.role === "assistant" && !proposalCard && !toolCallCard;
+                      return (
+                        <Paper
+                          key={message.id}
+                          withBorder
+                          radius="sm"
+                          p="sm"
+                          bg={message.role === "user" ? "#f2f7ff" : "#f8fff5"}
+                        >
+                          <Group justify="space-between" mb={4}>
+                            <Badge size="xs" color={message.role === "user" ? "blue" : "teal"} variant="light">
+                              {message.role}
+                            </Badge>
+                            <Text size="xs" c="dimmed">
+                              {new Date(message.created_at).toLocaleTimeString()}
+                            </Text>
+                          </Group>
+                          <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                            {message.content}
                           </Text>
-                        </Group>
-                        <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-                          {message.content}
-                        </Text>
-                        {message.role === "assistant" && renderProposalCard(message)}
-                        {message.role === "assistant" && renderToolCallCard(message)}
-                      </Paper>
-                    ))
+                          {proposalCard}
+                          {toolCallCard}
+                          {isTalkOnly && (
+                            <Text size="xs" c="dimmed" mt="xs" fs="italic">
+                              This is feedback, not applied changes — nothing in your manuscript was touched. Use Edit
+                              or Run mode to act on it.
+                            </Text>
+                          )}
+                        </Paper>
+                      );
+                    })
                   )}
                 </Stack>
               </ScrollArea>

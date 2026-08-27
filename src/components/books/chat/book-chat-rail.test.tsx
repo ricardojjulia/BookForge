@@ -78,6 +78,49 @@ describe("BookChatRail", () => {
     expect(screen.getByRole("button", { name: "Run Humanize Guidance" })).toBeInTheDocument();
   });
 
+  it("shows a not-applied notice for a plain ask-mode reply with no proposal or tool call", async () => {
+    stubDocumentFonts();
+    const now = new Date().toISOString();
+
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/chat/threads") && (!init || init.method === undefined)) {
+        return new Response(
+          JSON.stringify({
+            threads: [
+              { id: "thread-1", title: "Book Copilot", mode: "ask", updated_at: now, created_at: now, last_message_preview: "reply", last_message_at: now },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (url.includes("/chat/threads/thread-1") && (!init || init.method === undefined)) {
+        return new Response(
+          JSON.stringify({
+            thread: { id: "thread-1", title: "Book Copilot", mode: "ask", updated_at: now, created_at: now, last_message_preview: "reply", last_message_at: now },
+            messages: [
+              { id: "assistant-ask-1", role: "assistant", content: "Here's my take on the repetition in chapter 3.", created_at: now },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+    });
+
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderRail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Here's my take on the repetition in chapter 3.")).toBeInTheDocument();
+      expect(screen.getByText(/This is feedback, not applied changes/)).toBeInTheDocument();
+    });
+  });
+
   it("renders metadata proposal cards returned by assistant", async () => {
     stubDocumentFonts();
     const now = new Date().toISOString();
@@ -170,6 +213,10 @@ describe("BookChatRail", () => {
       expect(screen.getByText("title: New Title")).toBeInTheDocument();
       expect(screen.getByText("genre: Fiction")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Apply" })).toBeInTheDocument();
+      // A reply carrying a real proposal is NOT talk-only -- the not-applied
+      // notice must stay hidden here, or a user would (correctly) read it as
+      // implying the visible Apply button/proposal card doesn't count either.
+      expect(screen.queryByText(/This is feedback, not applied changes/)).not.toBeInTheDocument();
     });
   });
 
