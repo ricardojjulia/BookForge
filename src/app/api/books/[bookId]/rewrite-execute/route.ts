@@ -732,106 +732,142 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         ) {
           chunk.push(eligibleUnits[chunk.length]);
         }
-        chunkProcessedCount = chunk.length;
-        await logDiag("diag_chunk_built", `chunkSize=${chunk.length}`);
-        const heartbeat = createRevisionJobHeartbeat(supabase, jobId, jobSettings, {
-          currentUnit: `Rewrite units ${attempted + 1}-${attempted + chunk.length} of ${totalUnits}`,
-          totalUnits,
-          attempted,
-          successful: rewritten,
-          failed,
-          skipped,
-        });
-        const settled = await Promise.allSettled(chunk.map((unit) => runUnit(unit)));
-        heartbeat.stop();
-        await logDiag("diag_settled_resolved", `results=${settled.length}`);
+        // Atomic claim: same class of race as generate-draft's chapter-status
+        // claim (see that route's "Atomic claim" comment, and the migration
+        // 202608280003_paragraph_rewrite_claim.sql). This route self-chains
+        // via after() the instant a chunk finishes, AND the browser's own
+        // runChunkedJob driver calls back in with the same jobId -- normally
+        // harmless, but if the client's follow-up gets delayed (e.g. a mobile
+        // tab backgrounded by a screen lock) it can land while the
+        // self-chained request is still mid-flight. Unlike chapters,
+        // paragraphs have no "planned" status to flip and no unique
+        // constraint on revision_versions.paragraph_id, so a lost race here
+        // wouldn't hard-fail the job the way it did for generate-draft -- it
+        // would silently double-spend and insert two revision_versions rows
+        // for the same paragraph. Claim each unit in the chunk before
+        // generating; only the caller that flips the claim from null gets to
+        // process it.
+        const claimedChunk: RewriteUnit[] = [];
+        for (const unit of chunk) {
+          const { data: claimRows, error: claimError } = await supabase
+            .from("paragraphs")
+            .update({ rewrite_claim_job_id: jobId })
+            .eq("id", unit.paragraph.id)
+            .is("rewrite_claim_job_id", null)
+            .select("id");
+          if (claimError) throw claimError;
+          if (claimRows && claimRows.length > 0) claimedChunk.push(unit);
+        }
+        chunkProcessedCount = claimedChunk.length;
+        await logDiag("diag_chunk_built", `chunkSize=${chunk.length} claimed=${claimedChunk.length}`);
 
-        for (const [chunkIndex, result] of settled.entries()) {
-          const unit = chunk[chunkIndex];
-          const { chapter, paragraph } = unit;
-          const unitLabel = `chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`;
-          attempted += 1;
+        const releaseClaim = (paragraphId: string) =>
+          supabase.from("paragraphs").update({ rewrite_claim_job_id: null }).eq("id", paragraphId).eq("rewrite_claim_job_id", jobId);
 
-          if (result.status === "rejected") {
-            failed += 1;
-            const message = getErrorMessage(result.reason);
-            failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
-            hardError = hardError || result.reason;
-            jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
-              currentUnit: `Failed at ${unitLabel}`,
-              totalUnits,
-              attempted,
-              successful: rewritten,
-              failed,
-              skipped,
-              message,
-              failedUnits: failedUnitsLog,
-            });
-            break;
-          }
-
-          const { parsed, revisedText, emptyCompletionAttempts, technologyFailureAttempts } = result.value;
-          if (!revisedText) {
-            failed += 1;
-            const message =
-              technologyFailureAttempts > 0
-                ? `Connection/timeout error after ${technologyFailureAttempts} attempt(s); paragraph left untouched.`
-                : `Model returned an empty completion after ${emptyCompletionAttempts} attempt(s); paragraph left untouched.`;
-            failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
-            jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
-              currentUnit: `Empty completion at ${unitLabel}`,
-              totalUnits,
-              attempted,
-              successful: rewritten,
-              failed,
-              skipped,
-              message,
-              failedUnits: failedUnitsLog,
-            });
-            continue;
-          }
-
-          const continuityWarnings = extractArray(parsed, "continuityWarnings");
-          const { error: versionError } = await supabase.from("revision_versions").insert({
-            revision_job_id: jobId,
-            book_id: bookId,
-            chapter_id: chapter.id,
-            scene_id: paragraph.scene_id,
-            paragraph_id: paragraph.id,
-            original_text: paragraph.original_text,
-            revised_text: revisedText,
-            revision_notes: extractString(parsed, "revisionNotes") || "Full-book rewrite draft.",
-            continuity_warnings: continuityWarnings,
-          });
-          if (versionError) {
-            failed += 1;
-            const message = getErrorMessage(versionError);
-            failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
-            hardError = hardError || versionError;
-            jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
-              currentUnit: `Failed to save ${unitLabel}`,
-              totalUnits,
-              attempted,
-              successful: rewritten,
-              failed,
-              skipped,
-              message,
-              failedUnits: failedUnitsLog,
-            });
-            break;
-          }
-
-          rewritten += 1;
-          warnings.push(...continuityWarnings);
-          jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
-            currentUnit: `Rewrite unit ${attempted} of ${totalUnits}`,
+        if (claimedChunk.length > 0) {
+          const heartbeat = createRevisionJobHeartbeat(supabase, jobId, jobSettings, {
+            currentUnit: `Rewrite units ${attempted + 1}-${attempted + claimedChunk.length} of ${totalUnits}`,
             totalUnits,
             attempted,
             successful: rewritten,
             failed,
             skipped,
-            failedUnits: failedUnitsLog,
           });
+          const settled = await Promise.allSettled(claimedChunk.map((unit) => runUnit(unit)));
+          heartbeat.stop();
+          await logDiag("diag_settled_resolved", `results=${settled.length}`);
+
+          for (const [chunkIndex, result] of settled.entries()) {
+            const unit = claimedChunk[chunkIndex];
+            const { chapter, paragraph } = unit;
+            const unitLabel = `chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`;
+            attempted += 1;
+
+            if (result.status === "rejected") {
+              failed += 1;
+              const message = getErrorMessage(result.reason);
+              failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
+              hardError = hardError || result.reason;
+              jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+                currentUnit: `Failed at ${unitLabel}`,
+                totalUnits,
+                attempted,
+                successful: rewritten,
+                failed,
+                skipped,
+                message,
+                failedUnits: failedUnitsLog,
+              });
+              await releaseClaim(paragraph.id);
+              break;
+            }
+
+            const { parsed, revisedText, emptyCompletionAttempts, technologyFailureAttempts } = result.value;
+            if (!revisedText) {
+              failed += 1;
+              const message =
+                technologyFailureAttempts > 0
+                  ? `Connection/timeout error after ${technologyFailureAttempts} attempt(s); paragraph left untouched.`
+                  : `Model returned an empty completion after ${emptyCompletionAttempts} attempt(s); paragraph left untouched.`;
+              failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
+              jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+                currentUnit: `Empty completion at ${unitLabel}`,
+                totalUnits,
+                attempted,
+                successful: rewritten,
+                failed,
+                skipped,
+                message,
+                failedUnits: failedUnitsLog,
+              });
+              await releaseClaim(paragraph.id);
+              continue;
+            }
+
+            const continuityWarnings = extractArray(parsed, "continuityWarnings");
+            const { error: versionError } = await supabase.from("revision_versions").insert({
+              revision_job_id: jobId,
+              book_id: bookId,
+              chapter_id: chapter.id,
+              scene_id: paragraph.scene_id,
+              paragraph_id: paragraph.id,
+              original_text: paragraph.original_text,
+              revised_text: revisedText,
+              revision_notes: extractString(parsed, "revisionNotes") || "Full-book rewrite draft.",
+              continuity_warnings: continuityWarnings,
+            });
+            if (versionError) {
+              failed += 1;
+              const message = getErrorMessage(versionError);
+              failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
+              hardError = hardError || versionError;
+              jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+                currentUnit: `Failed to save ${unitLabel}`,
+                totalUnits,
+                attempted,
+                successful: rewritten,
+                failed,
+                skipped,
+                message,
+                failedUnits: failedUnitsLog,
+              });
+              await releaseClaim(paragraph.id);
+              break;
+            }
+
+            rewritten += 1;
+            warnings.push(...continuityWarnings);
+            jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+              currentUnit: `Rewrite unit ${attempted} of ${totalUnits}`,
+              totalUnits,
+              attempted,
+              successful: rewritten,
+              failed,
+              skipped,
+              failedUnits: failedUnitsLog,
+            });
+            await releaseClaim(paragraph.id);
+          }
         }
       }
     }
@@ -871,7 +907,18 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       // keeps running post-response -- see the same fix applied to
       // generate-draft and the auto-review orchestrator's own
       // checkpoint continuations, which had this identical latent bug.
-      if (!body.externalDriver) {
+      //
+      // chunkProcessedCount > 0 additionally gates this: if every unit in
+      // this chunk lost its atomic claim above (see "Atomic claim" comment
+      // on the claim loop), this call did no real work, and the paragraphs
+      // it tried for still look eligible to it (no revision_versions row
+      // exists yet) -- self-chaining again here would just lose the claim
+      // again and spin in a tight loop for as long as the actual winner is
+      // still generating. The response below still correctly reports
+      // status "running" either way; only the extra self-chained request is
+      // skipped, since the winner's own eventual self-chain and the
+      // client's independent polling redrive already keep the job moving.
+      if (!body.externalDriver && chunkProcessedCount > 0) {
         const cookie = request.headers.get("cookie") || "";
         const selfUrl = new URL(request.url);
         // TEMPORARY diagnostic instrumentation: this self-chain has silently
