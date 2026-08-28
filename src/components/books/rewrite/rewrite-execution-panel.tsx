@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Alert, Badge, Box, Button, Checkbox, Group, NumberInput, Paper, Progress, SimpleGrid, Stack, Text, Textarea, Title } from "@mantine/core";
+import { Alert, Badge, Box, Button, Checkbox, Group, Modal, NumberInput, Paper, Progress, SimpleGrid, Stack, Text, Textarea, Title } from "@mantine/core";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AiJobQueue, AiJobQueueInlineStatus, type AiJobQueueState } from "@/components/ai/ai-job-queue";
@@ -934,6 +934,7 @@ function PersistentRewriteCampaignPanel({
   const draftPercent = stats.totalParagraphs ? Math.round((draftedParagraphs / stats.totalParagraphs) * 100) : 0;
   const estimatedBatches = suggestedBatchSize ? Math.ceil(stats.untouchedParagraphs / suggestedBatchSize) : 0;
   const health = getCampaignHealth({ campaign, stats, jobs, latestDriftReport, suggestedBatchSize });
+  const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
 
   if (!campaign) {
     return (
@@ -1034,12 +1035,41 @@ function PersistentRewriteCampaignPanel({
           <Button color="green" variant="light" disabled={!isPaused} loading={campaignLoading === "resume"} onClick={onResume}>
             Resume campaign
           </Button>
-          <Button color="red" variant="outline" disabled={isTerminal} loading={campaignLoading === "cancel"} onClick={onCancel}>
+          <Button
+            color="red"
+            variant="outline"
+            disabled={isTerminal}
+            loading={campaignLoading === "cancel"}
+            onClick={() => setConfirmCancelOpen(true)}
+          >
             Cancel campaign
           </Button>
           <Button color="dark" variant="subtle" disabled={isTerminal} loading={campaignLoading === "complete"} onClick={onComplete}>
             Mark complete
           </Button>
+          <Modal opened={confirmCancelOpen} onClose={() => setConfirmCancelOpen(false)} title="Cancel this campaign?" centered>
+            <Stack>
+              <Text size="sm">
+                This stops the campaign for good, including any batch currently running -- you&apos;d need to create a
+                new campaign to keep going. Progress already drafted and accepted stays saved.
+              </Text>
+              <Group justify="flex-end">
+                <Button variant="subtle" color="dark" onClick={() => setConfirmCancelOpen(false)}>
+                  Keep it running
+                </Button>
+                <Button
+                  color="red"
+                  loading={campaignLoading === "cancel"}
+                  onClick={() => {
+                    setConfirmCancelOpen(false);
+                    onCancel();
+                  }}
+                >
+                  Cancel campaign
+                </Button>
+              </Group>
+            </Stack>
+          </Modal>
         </Group>
         <CampaignBatchHistory bookId={bookId} jobs={jobs} />
       </Stack>
