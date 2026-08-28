@@ -38,6 +38,12 @@ type ArchitectureChapter = {
 // by the 10-minute stale-heartbeat sweep with no real error ever thrown.
 export const maxDuration = 780;
 const CHAPTER_COMPLETION_TIMEOUT_MS = 760_000;
+// Same fallback used by rewrite-execute's per-paragraph retry (that file's
+// REWRITE_FALLBACK_MODEL) -- retrying a failed cloud call against the exact
+// same model wastes a full generation attempt for very little chance of a
+// different outcome, since the failure mode is usually correlated with that
+// specific model rather than the prompt.
+const DRAFT_FALLBACK_MODEL = "google/gemini-2.5-flash";
 
 const sceneBreakPattern = /^\s{0,3}(\*\s*\*\s*\*|#{3,}|-{3,}|_{3,})\s*$/m;
 
@@ -339,38 +345,78 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
             runtimeWordCeiling,
           );
 
-          const completion = await createManagedChatCompletion(
-            client,
-            preparedModel,
-            {
-              temperature: Math.min(Math.max(settings.temperature, 0.45), 0.8),
-              top_p: settings.topP,
-              max_tokens: Math.min(Math.max(settings.maxOutputTokens, 6000), 12000),
-              messages: [{ role: "user", content: prompt }],
-            },
-            (content) => validateLongFormOutput(parseChapterCompletion(content, chapter.title || "").chapterText, { minimumWordFloor }),
-            telemetryContext,
-            { timeoutMs: CHAPTER_COMPLETION_TIMEOUT_MS },
-          )
-          .catch((error) => {
-            throw new Error(
-              `Chapter ${chapter.chapter_number}: ${chapter.title || "Untitled"}: ${getErrorMessage(error, {
-                model,
-                task: "Generate Planned Draft",
-                modelSource: modelSelection.source,
-                configuredModels: modelSelection.configuredModels,
-              })}`,
-            );
-          });
+          // Retry loop: this call used to fire exactly once and hard-fail the
+          // WHOLE job (every chapter, not just this one) the instant a
+          // single completion came back short -- unlike rewrite-execute,
+          // which retries a flaky paragraph up to 3 times and switches
+          // models on later attempts. Reproduced live 2026-08-28 against a
+          // local model with zero concurrency involved: a single, ordinary
+          // sequential call returned a truncated-but-substantial completion
+          // (real prose in the raw response, but cut off before valid JSON
+          // closed, so parseChapterCompletion's broken-JSON guard correctly
+          // treated it as empty) -- the same "0 words despite real content
+          // in the snippet" signature as the original prod incident, with no
+          // race in sight. A single flaky completion is common enough
+          // (~17-26% empty/truncated rates measured elsewhere in this
+          // codebase for cloud models) that it shouldn't be allowed to kill
+          // an entire multi-chapter job on the first miss.
+          const maxChapterAttempts = 3;
+          let parsed: ReturnType<typeof parseChapterCompletion> | undefined;
+          let chapterText = "";
+          let lastRawContent = "";
+          let lastWordCount = 0;
+          let lastCompletionError: unknown = null;
 
-          const rawContent = completion.choices[0]?.message.content || "";
-          const parsed = parseChapterCompletion(rawContent, chapter.title || "");
-          const chapterText = parsed.chapterText;
-          const wordCount = chapterText.split(/\s+/).filter(Boolean).length;
-          if (wordCount < minimumWordFloor) {
-            const snippet = rawContent.slice(0, 300).replace(/\n/g, " ");
+          for (let chapterAttempt = 1; chapterAttempt <= maxChapterAttempts; chapterAttempt += 1) {
+            const useFallbackModel = chapterAttempt > 1 && preparedModel.isCloud && DRAFT_FALLBACK_MODEL !== model;
+            let completion;
+            try {
+              completion = await createManagedChatCompletion(
+                client,
+                preparedModel,
+                {
+                  temperature: Math.min(Math.max(settings.temperature, 0.45), 0.8),
+                  top_p: settings.topP,
+                  max_tokens: Math.min(Math.max(settings.maxOutputTokens, 6000), 12000),
+                  messages: [{ role: "user", content: prompt }],
+                  ...(useFallbackModel ? { model: DRAFT_FALLBACK_MODEL } : {}),
+                },
+                (content) => validateLongFormOutput(parseChapterCompletion(content, chapter.title || "").chapterText, { minimumWordFloor }),
+                telemetryContext,
+                { timeoutMs: CHAPTER_COMPLETION_TIMEOUT_MS },
+              );
+            } catch (completionError) {
+              lastCompletionError = completionError;
+              continue;
+            }
+
+            const rawContent = completion.choices[0]?.message.content || "";
+            const parsedAttempt = parseChapterCompletion(rawContent, chapter.title || "");
+            const wordCount = parsedAttempt.chapterText.split(/\s+/).filter(Boolean).length;
+            lastRawContent = rawContent;
+            lastWordCount = wordCount;
+            lastCompletionError = null;
+            if (wordCount >= minimumWordFloor) {
+              parsed = parsedAttempt;
+              chapterText = parsedAttempt.chapterText;
+              break;
+            }
+          }
+
+          if (!parsed) {
+            if (lastCompletionError && !lastRawContent) {
+              throw new Error(
+                `Chapter ${chapter.chapter_number}: ${chapter.title || "Untitled"}: ${getErrorMessage(lastCompletionError, {
+                  model,
+                  task: "Generate Planned Draft",
+                  modelSource: modelSelection.source,
+                  configuredModels: modelSelection.configuredModels,
+                })}`,
+              );
+            }
+            const snippet = lastRawContent.slice(0, 300).replace(/\n/g, " ");
             throw new Error(
-              `Chapter ${chapter.chapter_number} generation returned too little text (${wordCount} words, expected at least ${minimumWordFloor}). Raw response snippet: "${snippet}"`,
+              `Chapter ${chapter.chapter_number} generation returned too little text after ${maxChapterAttempts} attempt(s) (${lastWordCount} words, expected at least ${minimumWordFloor}). Raw response snippet: "${snippet}"`,
             );
           }
 
