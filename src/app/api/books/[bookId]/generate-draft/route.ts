@@ -279,6 +279,32 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
           totalUnits,
         });
 
+        // Atomic claim: this route self-chains via after() the instant a
+        // chapter finishes, AND the browser's own runChunkedJob driver calls
+        // back in with the same jobId once it sees a response -- normally
+        // the second arrival is harmless (finds the chapter already
+        // "draft"). But if the client's own follow-up call gets delayed
+        // (e.g. a mobile tab backgrounded/throttled by a screen lock, then
+        // resuming and firing its queued call right as the self-chained
+        // request is also mid-flight), both can pass the plannedChapters
+        // "planned" check before either has flipped this chapter's status --
+        // a real race, confirmed live via prod logs 2026-08-27: two POSTs
+        // ~100-500ms apart both generating the same chapter concurrently,
+        // degrading both completions until "too little text" hard-failed
+        // the job. This conditional update is the actual lock: only the
+        // caller that flips planned -> generating gets to proceed.
+        const { data: claimedChapterRows, error: claimError } = await supabase
+          .from("chapters")
+          .update({ status: "generating" })
+          .eq("id", chapter.id)
+          .eq("status", "planned")
+          .select("id");
+        if (claimError) throw claimError;
+        if (!claimedChapterRows || claimedChapterRows.length === 0) {
+          heartbeat.stop();
+          continue;
+        }
+
         try {
           const architectureChapter =
             architectureChapters.find((item) => item.chapterNumber === chapter.chapter_number) || {
@@ -414,6 +440,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
             title: chapter.title,
             paragraphCount,
           });
+        } catch (chapterError) {
+          // Release the claim so a later retry (new job launch, or another
+          // backstop) can pick this chapter back up -- original_text still
+          // holds the placeholder, so plannedChapters' isPlaceholderText
+          // fallback keeps finding it regardless of this status flip, but
+          // the atomic-claim check above only matches status === "planned".
+          // Without this, a chapter whose generation failed would stay
+          // stuck at "generating" forever and never be claimable again.
+          await supabase.from("chapters").update({ status: "planned" }).eq("id", chapter.id).eq("status", "generating");
+          throw chapterError;
         } finally {
           heartbeat.stop();
         }
@@ -489,7 +525,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       // response below is sent, before that fetch's request even leaves the
       // machine. after() is the platform-supported way to guarantee this
       // keeps running post-response.
-      if (!isJobDone) {
+      //
+      // generated.length > 0 gates this: a call that lost the atomic claim
+      // above (see "Atomic claim" comment) did no work, and the chapter it
+      // tried for still looks eligible to it (original_text still holds the
+      // placeholder) -- without this gate it would self-chain again
+      // immediately, lose the claim again, and repeat in a tight loop for
+      // as long as the actual winner is still generating. The winner's own
+      // eventual self-chain (once it finishes) and the client's independent
+      // polling redrive both already keep the job moving, so a losing call
+      // doesn't need to also schedule a continuation.
+      if (!isJobDone && generated.length > 0) {
         const cookie = request.headers.get("cookie") || "";
         const selfUrl = new URL(request.url).toString();
         after(() =>
