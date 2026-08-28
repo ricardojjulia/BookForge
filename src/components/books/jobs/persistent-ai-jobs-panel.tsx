@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Badge, Button, Group, Paper, Progress, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { Alert, Badge, Button, Group, Modal, Paper, Progress, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { useRouter } from "next/navigation";
 import { getJobProgressDisplay } from "@/lib/ai/job-state";
 import { fetchJson } from "@/lib/http/fetch-json";
@@ -320,6 +320,16 @@ function JobCard({
   const eta = getEta(job);
   const stale = Boolean(job.isStale);
   const failedUnits = progress?.failedUnits || [];
+  // Cancelling used to fire the instant the button was tapped, no
+  // confirmation at all -- a real risk on mobile, where a layout shift
+  // right after a page reload/unlock can land a stray tap on a button that
+  // was in a different spot a moment ago. Found live 2026-08-28: a user
+  // reported a healthy, still-running job "cancelled" itself after they
+  // refreshed on their phone -- the job's own record showed it actually
+  // completed fine, but an unguarded one-tap Cancel sitting right next to
+  // an alarming "possibly interrupted" banner (see below) is exactly the
+  // kind of thing that produces that impression, confirmed or not.
+  const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
 
   return (
     <Paper withBorder radius="md" p="lg" bg="white">
@@ -349,9 +359,10 @@ function JobCard({
         {progress?.message && <Alert color="blue" variant="light">{progress.message}</Alert>}
         {stale && (
           <Alert color="orange" variant="light">
-            This job has not saved a heartbeat recently. The server may have been refreshed, the AI provider may be
-            stalled, or the request may have been interrupted. Mark it failed or cancel it before starting a
-            replacement run.
+            No progress update in a couple of minutes -- a single unit can legitimately take that long. The system
+            automatically retries a job that's genuinely stuck, so this usually clears on its own within a few
+            minutes with no action needed. If it's still showing this after 10+ minutes, it's safe to mark it failed
+            or cancel it.
           </Alert>
         )}
         {failedUnits.length > 0 && (
@@ -396,10 +407,34 @@ function JobCard({
             color="red"
             disabled={!["running", "paused", "queued"].includes(job.status || "")}
             loading={loadingAction === `cancel:${job.id}`}
-            onClick={onCancel}
+            onClick={() => setConfirmCancelOpen(true)}
           >
             Cancel
           </Button>
+          <Modal opened={confirmCancelOpen} onClose={() => setConfirmCancelOpen(false)} title="Cancel this job?" centered>
+            <Stack>
+              <Text size="sm">
+                {stale
+                  ? "This hasn't reported progress in a couple of minutes, but it may still be working -- cancelling now stops it for good, including any progress on the unit it's currently working on."
+                  : "This job is actively running. Cancelling stops it for good, including any progress on the unit it's currently working on -- you'd need to start a new run to pick up where it left off."}
+              </Text>
+              <Group justify="flex-end">
+                <Button variant="subtle" color="dark" onClick={() => setConfirmCancelOpen(false)}>
+                  Keep it running
+                </Button>
+                <Button
+                  color="red"
+                  loading={loadingAction === `cancel:${job.id}`}
+                  onClick={() => {
+                    setConfirmCancelOpen(false);
+                    onCancel();
+                  }}
+                >
+                  Cancel job
+                </Button>
+              </Group>
+            </Stack>
+          </Modal>
           <Button
             variant="outline"
             color="orange"
