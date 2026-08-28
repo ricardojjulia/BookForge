@@ -360,9 +360,9 @@ function JobCard({
         {stale && (
           <Alert color="orange" variant="light">
             No progress update in a couple of minutes -- a single unit can legitimately take that long. The system
-            automatically retries a job that's genuinely stuck, so this usually clears on its own within a few
-            minutes with no action needed. If it's still showing this after 10+ minutes, it's safe to mark it failed
-            or cancel it.
+            automatically retries a job that&apos;s genuinely stuck, so this usually clears on its own within a few
+            minutes with no action needed. If it&apos;s still showing this after 10+ minutes, it&apos;s safe to mark it
+            failed or cancel it.
           </Alert>
         )}
         {failedUnits.length > 0 && (
