@@ -1,6 +1,7 @@
 "use client";
 
-import { Badge, Button, Group, Loader, Paper, Progress, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { useState } from "react";
+import { Badge, Button, Group, Loader, Modal, Paper, Progress, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { motion } from "framer-motion";
 
 export type AiJobQueueState = {
@@ -48,6 +49,7 @@ export function AiJobQueue({
   const currentCall = getCurrentCall(job);
   const unitLabel = job.estimatedProgress ? "call" : "step";
   const unitLabelTitle = job.estimatedProgress ? "Call" : "Step";
+  const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
 
   return (
     <Paper withBorder radius="md" p="xl" bg="white">
@@ -134,12 +136,39 @@ export function AiJobQueue({
           <Button variant="light" color="green" disabled={job.status !== "paused"} onClick={onResume}>
             Resume
           </Button>
-          <Button variant="outline" color="red" disabled={job.status === "idle" || job.status === "complete"} onClick={onCancel}>
+          <Button
+            variant="outline"
+            color="red"
+            disabled={job.status === "idle" || job.status === "complete"}
+            onClick={() => setConfirmCancelOpen(true)}
+          >
             Cancel
           </Button>
           <Button variant="outline" color="grape" disabled={job.failedUnits === 0} onClick={onRetryFailed}>
             Retry Failed
           </Button>
+          <Modal opened={confirmCancelOpen} onClose={() => setConfirmCancelOpen(false)} title="Cancel this job?" centered>
+            <Stack>
+              <Text size="sm">
+                This job is actively running. Cancelling stops it for good, including any progress on the current
+                unit -- you&apos;d need to start a new run to pick up where it left off.
+              </Text>
+              <Group justify="flex-end">
+                <Button variant="subtle" color="dark" onClick={() => setConfirmCancelOpen(false)}>
+                  Keep it running
+                </Button>
+                <Button
+                  color="red"
+                  onClick={() => {
+                    setConfirmCancelOpen(false);
+                    onCancel?.();
+                  }}
+                >
+                  Cancel job
+                </Button>
+              </Group>
+            </Stack>
+          </Modal>
         </Group>
       </Stack>
     </Paper>
