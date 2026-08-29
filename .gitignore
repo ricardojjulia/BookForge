@@ -40,6 +40,11 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Playwright MCP trace/snapshot artifacts -- accessibility snapshots can
+# capture field values verbatim (e.g. a password typed during a live test),
+# so these must never be eligible for a broad `git add`.
+.playwright-mcp/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
