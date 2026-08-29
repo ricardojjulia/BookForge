@@ -3,6 +3,7 @@ import { z } from "zod";
 import { resolveManagedSaasTaskModelDefaults, type ModelPrice } from "@/lib/ai/model-catalog";
 import { computeOpenRouterKeyLimitUsd, createManagedOpenRouterKey, disableManagedOpenRouterKey } from "@/lib/openrouter/management";
 import { getUserSubscriptionTier } from "@/lib/subscription/enforcement";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 const schema = z.object({
@@ -86,7 +87,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: message }, { status: 400 });
     }
 
-    const { error: saveError } = await supabase.from("user_settings").upsert(
+    // Admin client, not the user's own session -- openrouter_scoped_key_hash
+    // and openrouter_scoped_key_funding_model are locked down (migration
+    // 202608290001) so a user can no longer write them directly via their own
+    // RLS-gated session, only server code acting on their already-verified
+    // identity above can. See that migration's comment for why.
+    const admin = createAdminClient();
+    const { error: saveError } = await admin.from("user_settings").upsert(
       {
         user_id: user.id,
         llm_provider: "openrouter",
