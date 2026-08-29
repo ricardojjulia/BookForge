@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { resolveManagedSaasTaskModelDefaults, type ModelPrice } from "@/lib/ai/model-catalog";
-import {
-  computeOpenRouterKeyLimitUsd,
-  createManagedOpenRouterKey,
-  disableManagedOpenRouterKey,
-  resolveOpenRouterManagementKey,
-} from "@/lib/openrouter/management";
+import { computeOpenRouterKeyLimitUsd, createManagedOpenRouterKey, disableManagedOpenRouterKey } from "@/lib/openrouter/management";
 import { getUserSubscriptionTier } from "@/lib/subscription/enforcement";
 import { createClient } from "@/lib/supabase/server";
 
@@ -51,7 +46,17 @@ export async function POST(request: Request) {
       );
     }
 
-    const masterKey = await resolveOpenRouterManagementKey(supabase, user.id);
+    // Not resolveOpenRouterManagementKey() -- that resolves which account backs
+    // a user's EXISTING scoped key (keyed off user_settings.openrouter_scoped_key_funding_model),
+    // which is unset for a first-time signup with no key yet. Live-verified
+    // 2026-08-29: calling it here always fell through to the self_funded
+    // branch and threw "No OpenRouter management key on file," breaking this
+    // route for every first-time BookForge-managed user. The tier check above
+    // already establishes this is the bookforge_managed path unambiguously.
+    const masterKey = process.env.OPENROUTER_MASTER_MANAGEMENT_KEY;
+    if (!masterKey) {
+      return NextResponse.json({ ok: false, error: "BookForge-managed AI isn't configured on this deployment." }, { status: 500 });
+    }
     const limitUsd = computeOpenRouterKeyLimitUsd(tier.monthly_credit_cap_usd_micros);
     const { hash, apiKey } = await createManagedOpenRouterKey(masterKey, { userId: user.id, limitUsd });
 
