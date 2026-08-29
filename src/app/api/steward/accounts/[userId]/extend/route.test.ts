@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/steward/accounts/[userId]/extend/route";
 
 const { mockCreateClient, mockCreateAdminClient, requireStaffMock } = vi.hoisted(() => ({
@@ -25,7 +25,14 @@ describe("steward account extend route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCreateClient.mockResolvedValue({});
-    Date.now = () => new Date("2026-08-18T00:00:00.000Z").getTime();
+    // The route calls `new Date()` (no-arg), which reads the real system
+    // clock regardless of a `Date.now` override -- only vi.useFakeTimers
+    // actually freezes it.
+    vi.useFakeTimers({ now: new Date("2026-08-18T00:00:00.000Z") });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("rejects a non-staff caller", async () => {
