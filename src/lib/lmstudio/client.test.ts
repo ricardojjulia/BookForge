@@ -79,7 +79,11 @@ describe("createManagedChatCompletion -- credit reservation gate", () => {
     expect(reserveCreditsForCall).toHaveBeenCalled();
   });
 
-  it("skips credit reservation for a BookForge-managed OpenRouter scoped key", async () => {
+  it("also reserves credits for a BookForge-managed OpenRouter scoped key", async () => {
+    // Live-verified 2026-08-29: OpenRouter's own key `limit` lags real spend
+    // by several seconds and doesn't block a burst of over-limit calls, so
+    // it can't be the sole enforcer -- the internal ledger reservation must
+    // run for managed keys too, not just self_funded.
     const client = fakeOpenAiClient();
     await createManagedChatCompletion(
       client,
@@ -88,7 +92,7 @@ describe("createManagedChatCompletion -- credit reservation gate", () => {
       undefined,
       fakeTelemetryContext(),
     );
-    expect(reserveCreditsForCall).not.toHaveBeenCalled();
+    expect(reserveCreditsForCall).toHaveBeenCalled();
   });
 });
 

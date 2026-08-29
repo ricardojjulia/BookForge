@@ -15,15 +15,23 @@
  * which -- they just take whichever management key string the caller
  * resolved.
  *
- * FLAGGED FOR LIVE VERIFICATION: this module was written against OpenRouter's
- * documented field names (name, limit, disabled, limitReset,
- * includeByokInLimit) but has NOT been exercised against a real OpenRouter
- * account. Before this ships, confirm against a live call: (1) exact field
- * casing in request/response bodies, (2) the created-key response shape
- * (hash + one-time key string), (3) that PATCH limit is cumulative against
- * lifetime `usage`, not a period-based reset, (4) the exact status/body when
- * a scoped key's limit is exceeded on a real chat completion (isOpenRouterKeyLimitExceededError's
- * 402 guess below is unverified). See the plan's §7 verification steps.
+ * LIVE-VERIFIED against a real OpenRouter account (2026-08-29): field casing
+ * is snake_case throughout responses (fixed a stray `limitReset` -> `limit_reset`
+ * in createManagedOpenRouterKey below), the created-key response shape
+ * (hash + one-time key string) matches, and PATCH limit is confirmed
+ * cumulative against lifetime `usage`, not period-based.
+ *
+ * IMPORTANT CAVEAT found during that verification: OpenRouter's key `limit`
+ * is NOT a real-time enforcer. A key created with essentially a $0 limit
+ * accepted 4 back-to-back completions with zero pushback, and the `usage`
+ * field itself lagged ~10-15s behind actual spend in testing. Never rely on
+ * this module's limit alone to cap spend synchronously -- see
+ * src/lib/lmstudio/client.ts's createManagedChatCompletion, which now runs
+ * BookForge's own atomic reserve_ai_credits() reservation as the primary
+ * gate for these keys too; the OpenRouter-side limit here is a backstop.
+ * isOpenRouterKeyLimitExceededError's 402 guess below still hasn't been
+ * triggered even under that worst-case test, so its exact trigger condition
+ * remains unconfirmed -- treat it as best-effort, not load-bearing.
  */
 
 const OPENROUTER_KEYS_URL = "https://openrouter.ai/api/v1/keys";
@@ -82,7 +90,11 @@ export async function createManagedOpenRouterKey(
     body: {
       name: `BookForge — ${input.userId}`,
       limit: input.limitUsd,
-      limitReset: null,
+      // snake_case, matching every field name OpenRouter's own response uses
+      // (limit_remaining, limit_reset, include_byok_in_limit) -- live-verified
+      // 2026-08-29. The prior `limitReset` (camelCase) was silently ignored;
+      // harmless only because it was always sent as null (already the default).
+      limit_reset: null,
     },
   });
 

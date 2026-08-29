@@ -48,9 +48,11 @@ export type PreparedLmStudioModel = {
   /**
    * True when this call is against a BookForge-managed OpenRouter scoped key
    * (see src/lib/openrouter/management.ts) rather than a user-pasted personal
-   * key. OpenRouter's own key limit is the real spend enforcer for these
-   * users, so createManagedChatCompletion skips the internal credit
-   * reservation for them -- see StandardLlmSettings.isBookForgeManagedKey.
+   * key. createManagedChatCompletion still runs the internal credit
+   * reservation for these users (OpenRouter's own key limit lags real spend
+   * by several seconds, so it's a backstop, not the enforcer); this flag is
+   * used to map an OpenRouter key-limit error to the same InsufficientCreditsError
+   * the internal ledger throws -- see StandardLlmSettings.isBookForgeManagedKey.
    */
   isManagedOpenRouterKey?: boolean;
 };
@@ -282,13 +284,19 @@ export async function createManagedChatCompletion(
   // local LM Studio calls have no real $ cost to reserve against. A single
   // reservation covers the deprecated-temperature retry below too (that
   // retry is the same logical request, not additional real generation).
-  // Skipped for a BookForge-managed OpenRouter scoped key: OpenRouter's own
-  // key limit is the real spend enforcer for those users (see
-  // isManagedOpenRouterKey's doc comment) -- reserving against the internal
-  // ledger too would reintroduce the exact "two disagreeing caps" confusion
-  // this whole mechanism exists to eliminate.
+  // Also runs for a BookForge-managed OpenRouter scoped key, not just
+  // self_funded -- live-verified (2026-08-29) that OpenRouter's own key
+  // `limit` is NOT a real-time enforcer: usage accounting lags several
+  // seconds behind actual spend, and a burst of calls in that window sails
+  // straight through even when already many times over the key's stated
+  // limit. reserve_ai_credits()'s atomic UPDATE...WHERE balance>=amount is
+  // the only synchronous, race-safe gate here, so it's now the primary
+  // enforcer for both funding models; the OpenRouter-side key limit (sized
+  // at 1.2x the same tier cap, see computeOpenRouterKeyLimitUsd) is kept as
+  // a looser backstop against this internal ledger being bypassed or wrong,
+  // not the first line of defense.
   let reservation: { reservationId: string } | null = null;
-  if (telemetryContext && prepared.isCloud && !prepared.isManagedOpenRouterKey) {
+  if (telemetryContext && prepared.isCloud) {
     reservation = await reserveCreditsForCall(telemetryContext.supabase, {
       userId: telemetryContext.userId,
       model: resolvedModel,
@@ -324,9 +332,12 @@ export async function createManagedChatCompletion(
     void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
     return completion;
   } catch (error) {
-    // A BookForge-managed OpenRouter scoped key hit its own spend limit --
-    // map into the same InsufficientCreditsError the internal ledger throws,
-    // so it flows through the already-shipped isInsufficientCreditsMessage /
+    // Backstop path: the internal ledger reservation above is the primary
+    // gate now, so this should be rare -- e.g. the ledger under-collected
+    // relative to real OpenRouter cost, or the key's own limit tripped for
+    // some other reason. Map it into the same InsufficientCreditsError the
+    // internal ledger throws, so it flows through the already-shipped
+    // isInsufficientCreditsMessage /
     // InsufficientCreditsAlert UI with no separate UI work needed. Checked
     // first: retrying (below) can't help an exhausted key.
     if (prepared.isManagedOpenRouterKey && isOpenRouterKeyLimitExceededError(error)) {
