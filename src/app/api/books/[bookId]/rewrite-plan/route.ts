@@ -56,7 +56,21 @@ function getErrorMessage(error: unknown) {
 // the 45s client-side SDK timeout, which a real cloud-model call can exceed
 // on a slower model/tier. See src/lib/critic/run.ts for the incident this
 // pattern traces back to.
-export const maxDuration = 150;
+// Must exceed BOOKFORGE_REWRITE_PLAN_TIMEOUT_MS (see below) or Vercel kills
+// the function before the model-call timeout it's meant to allow ever fires.
+export const maxDuration = 400;
+
+const DEFAULT_REWRITE_PLAN_TIMEOUT_MS = 300_000;
+
+// Large/local planner models on a big manuscript can exceed the previous
+// hardcoded 140s timeout ("Request timed out." on real Rewrite Architect
+// calls) -- env-configurable so this can be tuned per-deployment without a
+// code change for a slower self-hosted model.
+function getRewritePlanTimeoutMs() {
+  const raw = process.env.BOOKFORGE_REWRITE_PLAN_TIMEOUT_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_REWRITE_PLAN_TIMEOUT_MS;
+}
 
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
   try {
@@ -295,7 +309,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         },
         undefined,
         telemetryContext,
-        { timeoutMs: 140_000 },
+        { timeoutMs: getRewritePlanTimeoutMs() },
       );
 
       const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({
