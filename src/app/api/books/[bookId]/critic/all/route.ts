@@ -17,6 +17,42 @@ const schema = z.object({
   metadataBranchName: z.string().min(1).max(80).optional(),
 });
 
+// A cloud provider genuinely parallelizes independent requests (separate
+// backend capacity per call), but a local LM Studio instance shares one
+// GPU/model regardless of how many HTTP connections it accepts -- dispatching
+// all 8 lenses at once just queues them behind each other, and a lens near
+// the back of that queue can still be legitimately waiting when its own
+// per-call timeout expires. Confirmed live: full unbounded concurrency
+// against a local model failed 4 of 8 lenses, each timing out at almost
+// exactly 140.0s while the other 4 (which actually got to run) finished in
+// 98-124s -- not a connection/abort bug, just self-inflicted queuing with no
+// throughput benefit locally. Capping concurrency for local execution avoids
+// that pileup; cloud keeps full concurrency since it doesn't have this
+// problem (see the "no ordering or drift concern" comment at the call site).
+const LOCAL_CRITIC_CONCURRENCY = 2;
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    for (;;) {
+      const index = nextIndex++;
+      if (index >= items.length) return;
+      try {
+        results[index] = { status: "fulfilled", value: await fn(items[index]) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+  return results;
+}
+
 function getErrorMessage(error: unknown) {
   const lmStudioMessage = getLmStudioErrorMessage(error, "");
   if (lmStudioMessage) return lmStudioMessage;
@@ -27,12 +63,13 @@ function getErrorMessage(error: unknown) {
   return "BookForge Critic batch failed.";
 }
 
-// Runs up to 8 lenses sequentially in one invocation -- same undersized-
-// timeout risk as src/app/api/books/[bookId]/critic/route.ts (see that
-// file's comment), just multiplied. Near Vercel Pro's 800s ceiling; a real
-// worst-case run (every lens needing the full ~140s a slow cloud model can
-// take) can still exceed even this -- not fully solved by a bigger number,
-// same residual risk noted on the architecture route.
+// Runs up to 8 lenses in one invocation -- cloud concurrently, local capped
+// (see criticConcurrency below) -- same undersized-timeout risk as
+// src/app/api/books/[bookId]/critic/route.ts (see that file's comment), just
+// multiplied. Near Vercel Pro's 800s ceiling; a real worst-case run (every
+// lens needing the full per-call timeout) can still exceed even this -- not
+// fully solved by a bigger number, same residual risk noted on the
+// architecture route.
 export const maxDuration = 780;
 
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
@@ -152,10 +189,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     // All 8 lenses are independent, read-only evaluations of the same static
     // context — unlike rewrite-execute's paragraphs, there's no ordering or
-    // drift concern, so they run fully concurrently rather than one at a
-    // time. Shared state (counters, job progress, failedUnits) is only ever
-    // touched in the plain sequential loop below, over already-settled
-    // results, so there's no race on the job row's progress column.
+    // drift concern, so cloud runs them fully concurrently. Local execution
+    // caps concurrency instead (see LOCAL_CRITIC_CONCURRENCY) since a single
+    // LM Studio instance can't actually parallelize that many large-context
+    // generations. Shared state (counters, job progress, failedUnits) is only
+    // ever touched in the plain sequential loop below, over already-settled
+    // results, so there's no race on the job row's progress column either way.
+    const criticConcurrency = modelExecution.modelPlan.preparedModel.isCloud ? lenses.length : LOCAL_CRITIC_CONCURRENCY;
     jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
       currentUnit: `Running all ${lenses.length} critic lenses`,
       totalUnits: lenses.length,
@@ -175,18 +215,16 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     const settled =
       preDispatchStatus === "cancelled"
         ? []
-        : await Promise.allSettled(
-            lenses.map((lens) =>
-              runCriticLens({
-                supabase,
-                bookId,
-                userId: user.id,
-                lens,
-                stage: batchStage,
-                preloadedContext,
-                modelExecution,
-              }),
-            ),
+        : await mapWithConcurrency(lenses, criticConcurrency, (lens) =>
+            runCriticLens({
+              supabase,
+              bookId,
+              userId: user.id,
+              lens,
+              stage: batchStage,
+              preloadedContext,
+              modelExecution,
+            }),
           );
     heartbeat.stop();
 
