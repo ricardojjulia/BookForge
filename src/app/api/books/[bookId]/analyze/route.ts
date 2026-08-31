@@ -47,6 +47,21 @@ function getErrorMessage(
 // already noted on critic/all, creation/architecture, and chapters/summarize.
 export const maxDuration = 780;
 
+const DEFAULT_ANALYZE_CHUNK_TIMEOUT_MS = 240_000;
+
+// Each chunk's own model-call timeout, distinct from the whole-request
+// maxDuration above -- a single slow/large-local-model chunk shouldn't be
+// allowed to silently eat the entire multi-chunk budget, but the old
+// hardcoded 90s was too tight even for one chunk: confirmed live (job
+// 4ed6bf13 on a 1-chunk book) a real local-model call needed longer than
+// that and surfaced "Request timed out." Env-configurable per the same
+// reasoning as rewrite-plan's timeout (see that route).
+function getAnalyzeChunkTimeoutMs() {
+  const raw = process.env.BOOKFORGE_ANALYZE_CHUNK_TIMEOUT_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_ANALYZE_CHUNK_TIMEOUT_MS;
+}
+
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
   let discoveryContext: {
     bookId: string;
@@ -245,7 +260,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           },
           undefined,
           telemetryContext,
-          { timeoutMs: 90_000 },
+          { timeoutMs: getAnalyzeChunkTimeoutMs() },
         );
 
         const content = completion.choices[0]?.message.content || "{}";
