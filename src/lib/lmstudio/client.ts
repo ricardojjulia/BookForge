@@ -278,6 +278,19 @@ export async function createManagedChatCompletion(
   const startedAt = Date.now();
   const resolvedModel = params.model || prepared.model;
   const maxOutputTokens = params.max_tokens ?? prepared.runtimeLimits.maxOutputTokens;
+  // The OpenAI SDK's own client (created with no maxRetries override, so its
+  // default of 2 applies) silently retries a connection/read timeout up to
+  // 2 more times before throwing -- meaning a caller-supplied timeoutMs is
+  // actually a 3x budget in practice, not the single-attempt figure every
+  // caller's maxDuration math above assumes. Confirmed live: a route with
+  // timeoutMs=90_000 and maxDuration=780 took ~9m41s (not ~90s) to finally
+  // surface "Request timed out." on a slow local model. Once a caller opts
+  // into an explicit timeoutMs, they've already reasoned about their own
+  // total wall-clock budget for ONE attempt -- let that be the real ceiling
+  // rather than silently multiplying it underneath them.
+  const requestTimeoutOptions = requestOptions?.timeoutMs
+    ? { timeout: requestOptions.timeoutMs, maxRetries: 0 }
+    : undefined;
 
   // The money chokepoint -- reserved BEFORE the provider is ever invoked,
   // worst-case from maxOutputTokens (never underestimates). Cloud only:
@@ -327,7 +340,7 @@ export async function createManagedChatCompletion(
         // calls), regardless of what the architecture route asked for.
         max_tokens: maxOutputTokens,
       },
-      requestOptions?.timeoutMs ? { timeout: requestOptions.timeoutMs } : undefined,
+      requestTimeoutOptions,
     );
     void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
     return completion;
@@ -359,7 +372,7 @@ export async function createManagedChatCompletion(
           model: resolvedModel,
           max_tokens: maxOutputTokens,
         },
-        requestOptions?.timeoutMs ? { timeout: requestOptions.timeoutMs } : undefined,
+        requestTimeoutOptions,
       );
       void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
       return completion;
