@@ -146,6 +146,16 @@ export function BookActions({
   const [output, setOutput] = useState("");
   const [pendingTask, setPendingTask] = useState<PendingTask | null>(null);
   const [pendingGuardTask, setPendingGuardTask] = useState<AiDashboardTask | null>(null);
+  // Only the single-lens critic run reaches the generic run() path (every
+  // other task has its own runQueued* function with its own retry case
+  // below) -- remembered here so "Retry Failed" can actually re-invoke it
+  // instead of just flipping the queue widget back to "running" with no
+  // request behind it.
+  const [lastGenericRunTask, setLastGenericRunTask] = useState<{
+    path: string;
+    body: unknown;
+    preflight: AiTaskPreflightData | null;
+  } | null>(null);
   const { job: latestAutoReviewJob, autoReviewOutputStale } = useAutoReviewStatus(bookId);
   // Starts false on both server and the client's first render -- reading
   // localStorage inside the useState initializer runs on the client's
@@ -603,6 +613,7 @@ export function BookActions({
   }
 
   async function run(path: string, body: unknown, preflight: AiTaskPreflightData | null) {
+    setLastGenericRunTask({ path, body, preflight });
     setLoading(path);
     setOutput("");
     const taskName = preflight?.taskName || "AI task";
@@ -1673,6 +1684,10 @@ export function BookActions({
             }
             if (queue.mode === "bookforge_critic_batch") {
               void runQueuedCriticAll(null, { stage: "baseline" });
+              return;
+            }
+            if (queue.mode === "bookforge_critic" && lastGenericRunTask) {
+              void run(lastGenericRunTask.path, lastGenericRunTask.body, lastGenericRunTask.preflight);
               return;
             }
 
