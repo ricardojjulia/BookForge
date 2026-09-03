@@ -569,7 +569,7 @@ export function BookActions({
           estimatedTotalSeconds:
             task === "auto-review"
               ? plan.estimatedSecondsPerCall * 9
-              : task === "chapter-summaries" || task === "generate-draft"
+              : task === "chapter-summaries" || task === "generate-draft" || task === "critic-all"
                 ? plan.estimatedSecondsPerCall * expectedAiCalls
                 : plan.estimatedTotalSeconds,
           unitStrategy:
