@@ -523,8 +523,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           continue;
         }
         if (currentJobDraftParagraphIds.has(paragraph.id)) {
-          skipped += 1;
-          skippedExistingDrafts += 1;
+          // Already drafted by an earlier chunk of THIS job -- completed
+          // work, already reflected in `rewritten`/ok above. Must still be
+          // excluded from re-selection (see comment on
+          // currentJobDraftParagraphIds), but counting it as "skipped" here
+          // double-counts every finished paragraph on each subsequent
+          // chunk's whole-book re-scan, e.g. "25 ok - 25 skipped" for a job
+          // that has only actually skipped 0 paragraphs.
           continue;
         }
         if (!body.rewriteExistingDrafts && pendingDraftParagraphIds.has(paragraph.id)) {
