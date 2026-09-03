@@ -1378,10 +1378,11 @@ export function BookActions({
       {latestAutoReviewJob?.status === "completed" && !autoReviewOutputStale && (
         <Alert color="green" title="Auto-Review already completed for this manuscript">
           <Text size="sm" mb={6}>
-            {`Last run: ${describeAutoReviewMode(latestAutoReviewJob.mode)} completed ${formatAutoReviewCompletionTime(
-              latestAutoReviewJob.completed_at,
-              latestAutoReviewJob.created_at,
-            )}.`}
+            {`Last run: ${describeAutoReviewMode(latestAutoReviewJob.mode)} completed `}
+            <span suppressHydrationWarning>
+              {formatAutoReviewCompletionTime(latestAutoReviewJob.completed_at, latestAutoReviewJob.created_at)}
+            </span>
+            {"."}
           </Text>
           <Text size="sm" c="dimmed">
             Review the revised manuscript and exports first. Prepare Context and Critic actions are still available, but they are usually redundant right after a completed Auto-Review.
@@ -1392,10 +1393,11 @@ export function BookActions({
       {latestAutoReviewJob?.status === "completed" && autoReviewOutputStale && (
         <Alert color="yellow" title="Manuscript reset since the last Auto-Review">
           <Text size="sm" mb={6}>
-            {`Last run: ${describeAutoReviewMode(latestAutoReviewJob.mode)} completed ${formatAutoReviewCompletionTime(
-              latestAutoReviewJob.completed_at,
-              latestAutoReviewJob.created_at,
-            )}, but no paragraphs currently have accepted text -- the manuscript has been reset since then.`}
+            {`Last run: ${describeAutoReviewMode(latestAutoReviewJob.mode)} completed `}
+            <span suppressHydrationWarning>
+              {formatAutoReviewCompletionTime(latestAutoReviewJob.completed_at, latestAutoReviewJob.created_at)}
+            </span>
+            {", but no paragraphs currently have accepted text -- the manuscript has been reset since then."}
           </Text>
           <Text size="sm" c="dimmed">
             {"That run's critic scores and revised text no longer reflect the current manuscript. A fresh Auto-Review is recommended rather than assuming the old results still apply."}
@@ -1486,7 +1488,7 @@ export function BookActions({
                 </Button>
                 {bookBibleUpdatedAt && !localActive && !remoteJob && (
                   <Text size="xs" c="teal">
-                    ✓ Generated {new Date(bookBibleUpdatedAt).toLocaleString()}
+                    ✓ Generated <span suppressHydrationWarning>{new Date(bookBibleUpdatedAt).toLocaleString()}</span>
                   </Text>
                 )}
                 <AiJobQueueInlineStatus
