@@ -536,7 +536,7 @@ export function RevisionReviewList({
                                     Paragraph {version.paragraphNumber || "unknown"}
                                   </Title>
                                   <Text c="dimmed" size="sm">
-                                    {new Date(version.created_at).toLocaleString()}
+                                    <span suppressHydrationWarning>{new Date(version.created_at).toLocaleString()}</span>
                                   </Text>
                                 </div>
                                 <Group>
