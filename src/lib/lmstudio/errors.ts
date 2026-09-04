@@ -5,11 +5,27 @@ const CLOUD_PROVIDER_LABELS: Record<string, string> = {
   google: "Google Gemini",
 };
 
+/**
+ * Thrown by selectAndPrepareActiveModel when a managed-SaaS user has no
+ * cloud provider configured yet -- LM Studio can never be reachable from a
+ * Vercel-hosted server, so falling through to the LM Studio orchestrator in
+ * that case previously produced a raw, unhelpful "Connection error." (the
+ * OpenAI SDK's own APIConnectionError message, which doesn't match any of
+ * this file's ECONNREFUSED-style patterns below).
+ */
+export class AiEngineNotConfiguredError extends Error {
+  constructor() {
+    super("Connect an AI engine in Settings before generating -- this account hasn't configured one yet.");
+    this.name = "AiEngineNotConfiguredError";
+  }
+}
+
 export function getLmStudioErrorMessage(
   error: unknown,
   fallback: string,
   context: { model?: string; task?: string; modelSource?: string; configuredModels?: string[] } = {},
 ) {
+  if (error instanceof AiEngineNotConfiguredError) return error.message;
   const message = extractErrorMessage(error);
   if (/Expected model:/i.test(message) || /Configured fallback order:/i.test(message)) {
     return message;
