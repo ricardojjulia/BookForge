@@ -599,21 +599,28 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         totalUnits,
         completedAt: isJobDone ? nowIso : undefined,
       });
+      // currentJobSettings already carries the right progress -- the
+      // updateRevisionJobProgress call above just built and persisted it via
+      // buildJobProgress, which merges onto the job's existing progress
+      // (preserving lastHeartbeatAt, message, startedAt, failedUnits) rather
+      // than replacing it. This used to re-derive settings via
+      // mergeJobSettings(currentJobSettings, { ...a hand-rolled partial
+      // object without lastHeartbeatAt... }) -- mergeJobSettings assigns its
+      // second argument as the WHOLE progress field (no field-by-field
+      // merge), so that silently wiped lastHeartbeatAt back to undefined on
+      // every single batch completion. isStaleRunningJob/isStaleChunkedJob
+      // both treat a missing lastHeartbeatAt as "never stale" (`heartbeatMs
+      // !== null && ...`), so a job whose self-chain died right after this
+      // write became permanently invisible to both the per-page and
+      // platform-cron stale-job backstops -- found live 2026-09-04: a job
+      // sat "running" for 20+ minutes with all 15 chapters actually drafted
+      // in the DB, and neither backstop ever fired to reconcile it.
       await supabase
         .from("revision_jobs")
         .update({
           status: isJobDone ? "completed" : "running",
           completed_at: isJobDone ? nowIso : null,
-          settings: mergeJobSettings(currentJobSettings, {
-            taskName: "Creation Draft Generation",
-            currentUnit: `${successCount} chapter${successCount === 1 ? "" : "s"} generated`,
-            totalUnits,
-            attempted: successCount,
-            successful: successCount,
-            failed: 0,
-            skipped: 0,
-            completedAt: isJobDone ? nowIso : null,
-          }),
+          settings: currentJobSettings,
         })
         .eq("id", jobId);
 
