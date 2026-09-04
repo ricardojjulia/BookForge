@@ -31,6 +31,19 @@ export async function POST(request: Request) {
 
     const body = schema.parse(await request.json());
 
+    // A user still inside their free trial is always eligible here too, even
+    // though a trial sits on 'starter' (a self_funded tier meant for paying
+    // BYOK customers) -- see fetchCurrentUserTierFundingModel's doc comment
+    // for why. This is the actually-enforced half of that rule; the client
+    // check only decides what the wizard renders.
+    const { data: subscription } = await supabase
+      .from("user_subscriptions")
+      .select("status, trial_ends_at")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const isTrialing =
+      subscription?.status === "trialing" && !!subscription.trial_ends_at && new Date(subscription.trial_ends_at).getTime() > Date.now();
+
     const tierId = (await getUserSubscriptionTier(supabase, user.id)) || "starter";
     const { data: tier, error: tierError } = await supabase
       .from("subscription_tiers")
@@ -40,7 +53,7 @@ export async function POST(request: Request) {
     if (tierError || !tier) {
       return NextResponse.json({ ok: false, error: "Could not resolve your subscription tier." }, { status: 500 });
     }
-    if (tier.funding_model !== "bookforge_managed") {
+    if (tier.funding_model !== "bookforge_managed" && !isTrialing) {
       return NextResponse.json(
         { ok: false, error: "Your plan doesn't include BookForge-managed AI. Upgrade to a Managed plan first." },
         { status: 403 },

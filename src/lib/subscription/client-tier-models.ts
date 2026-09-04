@@ -54,6 +54,13 @@ export async function fetchAllowedModelsForCurrentUser(): Promise<Set<string>> {
  * is always re-checked server-side (see
  * src/app/api/onboarding/openrouter-bookforge-managed/route.ts), never
  * trusted from this client-side read alone.
+ *
+ * A user still inside their free trial always resolves to "bookforge_managed",
+ * regardless of which tier the trial is nominally attached to (trials sit on
+ * 'starter', a self_funded tier meant for paying BYOK customers) -- a trial
+ * user has no API key of their own to bring, so BookForge auto-provisions a
+ * scoped key on its own OpenRouter account, capped to the trial's usual
+ * allowance. The server-side route applies this identical rule.
  */
 export async function fetchCurrentUserTierFundingModel(): Promise<"self_funded" | "bookforge_managed"> {
   const supabase = createClient();
@@ -68,10 +75,11 @@ export async function fetchCurrentUserTierFundingModel(): Promise<"self_funded" 
     .eq("user_id", user.id)
     .maybeSingle();
 
-  const hasActiveTier =
-    subscription?.status === "active" ||
-    (subscription?.status === "trialing" && !!subscription.trial_ends_at && new Date(subscription.trial_ends_at).getTime() > Date.now());
-  const tierId = hasActiveTier && subscription?.tier_id ? subscription.tier_id : "starter";
+  const isTrialing =
+    subscription?.status === "trialing" && !!subscription.trial_ends_at && new Date(subscription.trial_ends_at).getTime() > Date.now();
+  if (isTrialing) return "bookforge_managed";
+
+  const tierId = subscription?.status === "active" && subscription?.tier_id ? subscription.tier_id : "starter";
 
   const { data: tier } = await supabase.from("subscription_tiers").select("funding_model").eq("id", tierId).maybeSingle();
   return tier?.funding_model === "bookforge_managed" ? "bookforge_managed" : "self_funded";
