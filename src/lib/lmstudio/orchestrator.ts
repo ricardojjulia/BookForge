@@ -20,6 +20,8 @@ import {
   type ModelTaskHealth,
 } from "@/lib/ai/model-performance";
 import { assertModelAllowedForUser } from "@/lib/subscription/enforcement";
+import { isManagedSaasDeployment } from "@/lib/deployment/mode";
+import { AiEngineNotConfiguredError } from "@/lib/lmstudio/errors";
 import type { LmStudioSettings } from "@/lib/types";
 
 type ModelCandidate = {
@@ -362,6 +364,15 @@ export async function selectAndPrepareActiveModel(
   settings: LmStudioSettings,
   profile: LmStudioTaskProfile,
 ): Promise<ActiveModelPlan> {
+  // Managed-SaaS deployments run on Vercel -- there is no reachable LM Studio
+  // server to fall through to, ever. A user who hasn't configured a cloud
+  // provider yet must be told that directly here, before any LM Studio call
+  // is attempted; otherwise every one of this function's ~16 callers surfaces
+  // the raw, unhelpful connection failure from a doomed attempt instead.
+  if (isManagedSaasDeployment() && !settings.standardSettings) {
+    throw new AiEngineNotConfiguredError();
+  }
+
   if (shouldUseCloud(settings, profile.task) && settings.standardSettings) {
     const std = settings.standardSettings;
     const meta = PROVIDER_META.find((p) => p.id === std.provider);
