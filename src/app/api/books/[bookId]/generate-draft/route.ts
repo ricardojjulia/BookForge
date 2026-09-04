@@ -1,8 +1,9 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { buildCreationDraftChapterPrompt } from "@/lib/creation/draft-prompt";
-import { createRevisionJobHeartbeat, extractJobProgress, mergeJobSettings, type AiJobProgress, updateRevisionJobProgress } from "@/lib/ai/job-state";
+import { buildJobProgress, createRevisionJobHeartbeat, extractJobProgress, mergeJobSettings, type AiJobProgress, updateRevisionJobProgress } from "@/lib/ai/job-state";
 import { resolveRequestAuth } from "@/lib/ai/cron-auth";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
@@ -71,6 +72,23 @@ const schema = z.object({
   // Set only by the resume-stale-chunked-jobs cron -- see resolveRequestAuth.
   actingUserId: z.string().uuid().optional(),
 });
+
+// Best-effort breadcrumb for a failed self-chain continuation -- read fresh
+// rather than trust closure state, since this runs from inside after() after
+// the triggering request's own response has already gone out. Never throws:
+// a failure to record the failure shouldn't mask the failure itself in logs.
+async function recordSelfChainFailure(supabase: SupabaseClient, jobId: string, message: string) {
+  try {
+    const { data: row } = await supabase.from("revision_jobs").select("settings").eq("id", jobId).single();
+    const existingProgress = extractJobProgress(row?.settings) || buildJobProgress({});
+    await supabase
+      .from("revision_jobs")
+      .update({ settings: mergeJobSettings(row?.settings, { ...existingProgress, message }) })
+      .eq("id", jobId);
+  } catch {
+    // best effort only -- console.error at the call site already ran
+  }
+}
 
 function getErrorMessage(error: unknown, context: { model?: string; task?: string; modelSource?: string; configuredModels?: string[] } = {}) {
   const lmStudioMessage = getLmStudioErrorMessage(error, "", context);
@@ -632,13 +650,32 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       if (!isJobDone && generated.length > 0) {
         const cookie = request.headers.get("cookie") || "";
         const selfUrl = new URL(request.url).toString();
-        after(() =>
-          fetch(selfUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", cookie },
-            body: JSON.stringify({ ...body, jobId }),
-          }).catch(() => {}),
-        );
+        after(async () => {
+          // The self-chain used to swallow every outcome (`.catch(() => {})`,
+          // response status never inspected) -- a failure here left zero
+          // trace anywhere, and Vercel's own runtime log retention is short
+          // enough (confirmed live: gone within ~1-2h) that even console.error
+          // alone isn't a durable enough record for a stall someone notices
+          // later. Persist the outcome onto the job row itself instead, which
+          // survives indefinitely and is what the Persistent AI Jobs panel
+          // and Jobs History already read from.
+          try {
+            const response = await fetch(selfUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", cookie },
+              body: JSON.stringify({ ...body, jobId }),
+            });
+            if (!response.ok) {
+              const bodyText = await response.text().catch(() => "");
+              console.error("generate-draft self-chain returned non-OK", { jobId, status: response.status, bodyText: bodyText.slice(0, 500) });
+              await recordSelfChainFailure(supabase, jobId, `Self-chain continuation returned HTTP ${response.status}.`);
+            }
+          } catch (selfChainError) {
+            const message = selfChainError instanceof Error ? selfChainError.message : String(selfChainError);
+            console.error("generate-draft self-chain fetch failed", { jobId, error: message });
+            await recordSelfChainFailure(supabase, jobId, `Self-chain continuation failed: ${message}`);
+          }
+        });
       }
 
       return NextResponse.json({
