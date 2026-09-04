@@ -39,6 +39,18 @@ type ArchitectureChapter = {
 // by the 10-minute stale-heartbeat sweep with no real error ever thrown.
 export const maxDuration = 780;
 const CHAPTER_COMPLETION_TIMEOUT_MS = 760_000;
+// Vercel's own infinite-loop protection (HTTP 508 "Infinite loop detected")
+// kills the self-chain below once it decides this function is calling
+// itself too many times -- confirmed live 2026-09-04, trip point varied
+// (6, 6, then 12 self-chain hops across three real runs), so no fixed hop
+// count is safe. Drafting exactly one chapter per invocation (as this used
+// to) means a 15-chapter book needs up to 14 self-chain hops; batching
+// several chapters into one invocation cuts that dramatically in the common
+// case (chapters actually take ~80-140s against a 760s worst-case ceiling),
+// without weakening the per-chapter safety margin: this only gates STARTING
+// an additional chapter, so a slow first chapter still gets its full
+// worst-case allowance untouched, same as before this change.
+const CHAPTER_BATCH_TIME_BUDGET_MS = 400_000;
 // A claimed chapter (status flipped planned -> generating, see the atomic
 // claim below) can be abandoned without ever reaching the catch block that
 // releases it -- not just a local dev crash, but Vercel's own maxDuration
@@ -315,14 +327,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     let successCount = priorProgress?.successful ?? 0;
 
     try {
-      // Exactly one chapter per request -- never the full plannedChapters
-      // list -- so a single HTTP request can't run long enough to hit
-      // Vercel's function timeout generating a whole book's worth of
-      // chapters. The caller (runChunkedJob) calls this route again with the
-      // same jobId while remainingChapters > 0; plannedChapters is re-derived
-      // fresh from durable state (chapters.status) on every such call, so an
-      // already-drafted chapter never gets regenerated.
-      for (const chapter of plannedChapters.slice(0, 1)) {
+      // Batched, time-boxed per invocation -- never the full plannedChapters
+      // list unconditionally, so a single HTTP request still can't run long
+      // enough to hit Vercel's function timeout generating a whole book's
+      // worth of chapters, but it CAN draft several chapters back-to-back
+      // when each one finishes quickly (see CHAPTER_BATCH_TIME_BUDGET_MS
+      // above -- this is the fix for Vercel's own infinite-loop protection
+      // tripping on too many same-route self-chain hops). The caller
+      // (runChunkedJob, or this route's own self-chain below) calls this
+      // route again with the same jobId while remainingChapters > 0;
+      // plannedChapters is re-derived fresh from durable state
+      // (chapters.status) on every such call, so an already-drafted chapter
+      // never gets regenerated.
+      const batchStartedAt = Date.now();
+      for (const chapter of plannedChapters) {
+        if (generated.length > 0 && Date.now() - batchStartedAt >= CHAPTER_BATCH_TIME_BUDGET_MS) break;
         const chapterLabel = `Chapter ${chapter.chapter_number}${chapter.title ? `: ${chapter.title}` : ""}`;
         currentJobSettings = await updateRevisionJobProgress(supabase, jobId, currentJobSettings, {
           currentUnit: chapterLabel,
@@ -622,15 +641,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
 
       revalidatePath(`/books/${bookId}`);
 
-      // This route only ever drafts one chapter per call and relies on the
-      // caller (the browser's runChunkedJob, via book-actions.tsx's "Write
-      // Your Chapters" button) to call it again while remainingChapters > 0
-      // -- so navigating away, closing the tab, or the tab getting
+      // This route drafts a time-boxed batch of chapters per call (see
+      // CHAPTER_BATCH_TIME_BUDGET_MS) and relies on the caller (the
+      // browser's runChunkedJob, via book-actions.tsx's "Write Your
+      // Chapters" button) to call it again while remainingChapters > 0 --
+      // so navigating away, closing the tab, or the tab getting
       // backgrounded/throttled silently stops all further drafting. Same
       // bug and same fix as rewrite-execute: self-chain a continuation so
       // the server keeps making progress regardless of whether anyone's
       // still watching. A still-open tab's own next call becomes redundant
-      // but harmless -- it just finds this chapter already drafted.
+      // but harmless -- it just finds this batch's chapters already drafted.
       //
       // A bare un-awaited `void fetch(...)` here is NOT safe: Vercel is free
       // to freeze/tear down this function's execution the instant the
