@@ -67,6 +67,20 @@ export function getLmStudioErrorMessage(
     return "BookForge could not reach LM Studio. Start the LM Studio local server and retry.";
   }
 
+  // A cloud provider's own 401 -- the connected key was rejected outright
+  // (invalid, expired, or disabled server-side, e.g. a bookforge_managed
+  // OpenRouter key a lapsed-trial cron already disabled -- see
+  // expireLapsedTrialManagedKeys). Every call site scoped to reach this
+  // function is already deep in an AI-provider call, so a 401 here is never
+  // BookForge's own auth -- always the provider's. Previously surfaced
+  // verbatim (e.g. OpenRouter's own "401 User not found."), which reads like
+  // an internal error rather than something the user can act on.
+  if (/\b401\b/.test(message)) {
+    const cloudLabel = context.modelSource ? CLOUD_PROVIDER_LABELS[context.modelSource] : undefined;
+    const provider = cloudLabel || "Your AI provider";
+    return `${provider} rejected the request as unauthorized -- the connected API key is invalid, expired, or was disabled. Reconnect your AI engine in Settings.`;
+  }
+
   return message || fallback;
 }
 
