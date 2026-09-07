@@ -2081,6 +2081,7 @@ function RewriteCoverageSummary({
   const totalChapters = coverage.length;
   const totalParagraphs = coverage.reduce((sum, chapter) => sum + chapter.realTotalParagraphs, 0);
   const rewrittenParagraphs = coverage.reduce((sum, chapter) => sum + chapter.realRewrittenParagraphs, 0);
+  const pendingParagraphs = coverage.reduce((sum, chapter) => sum + chapter.pendingParagraphs, 0);
   const percent = totalParagraphs ? Math.round((rewrittenParagraphs / totalParagraphs) * 100) : 0;
 
   return (
@@ -2089,7 +2090,8 @@ function RewriteCoverageSummary({
         <div>
           <Text fw={900}>Rewrite coverage</Text>
           <Text size="sm" c="dimmed">
-            {rewrittenParagraphs}/{totalParagraphs} paragraphs have rewrite drafts across {touchedChapters}/{totalChapters} chapters.
+            {rewrittenParagraphs}/{totalParagraphs} paragraphs accepted across {touchedChapters}/{totalChapters} chapters
+            {pendingParagraphs > 0 ? ` (${pendingParagraphs} more awaiting your review)` : ""}.
           </Text>
         </div>
         <Text fw={900}>{percent}%</Text>
