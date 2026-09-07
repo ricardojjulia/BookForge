@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { after } from "next/server";
 import type { LmStudioSettings, LmStudioTaskKind } from "@/lib/types";
 export type { LmStudioTaskKind } from "@/lib/types";
 import {
@@ -342,7 +343,18 @@ export async function createManagedChatCompletion(
       },
       requestTimeoutOptions,
     );
-    void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
+    // after(), not a bare void call -- this codebase has already been burned
+    // twice by a fire-and-forget promise silently dying when Vercel tears
+    // down the function right after the response is sent (see the same
+    // fix in rewrite-execute/generate-draft/auto-review's self-chaining).
+    // recordCompletionOutcome does real async work (pricing lookup, the
+    // model_call_events insert, and the credit-reservation true-up) that a
+    // fast-finishing caller (e.g. a JSON parse immediately followed by a
+    // couple of Supabase inserts) can easily outrace. durationMs is captured
+    // now, not inside the deferred callback, so it still reflects when the
+    // completion actually finished rather than whenever after() gets to run.
+    const durationMs = Date.now() - startedAt;
+    after(() => recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, durationMs, reservation));
     return completion;
   } catch (error) {
     // Backstop path: the internal ledger reservation above is the primary
@@ -374,23 +386,27 @@ export async function createManagedChatCompletion(
         },
         requestTimeoutOptions,
       );
-      void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
+      const durationMs = Date.now() - startedAt;
+      after(() => recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, durationMs, reservation));
       return completion;
     }
 
     if (telemetryContext) {
       const { outcome, signature } = classifyLmStudioError(error);
-      void recordModelCallEvent(telemetryContext.supabase, {
-        userId: telemetryContext.userId,
-        // No response came back to read the real model from -- the best
-        // available signal is what this attempt actually requested.
-        model: params.model || telemetryContext.model,
-        task: telemetryContext.task,
-        contextLength: prepared.runtimeLimits.configuredContextTokens,
-        outcome,
-        errorSignature: signature,
-        durationMs: Date.now() - startedAt,
-      });
+      const durationMs = Date.now() - startedAt;
+      after(() =>
+        recordModelCallEvent(telemetryContext.supabase, {
+          userId: telemetryContext.userId,
+          // No response came back to read the real model from -- the best
+          // available signal is what this attempt actually requested.
+          model: params.model || telemetryContext.model,
+          task: telemetryContext.task,
+          contextLength: prepared.runtimeLimits.configuredContextTokens,
+          outcome,
+          errorSignature: signature,
+          durationMs,
+        }),
+      );
     }
 
     if (isLmStudioContextError(error)) {
