@@ -233,6 +233,25 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
+# Deliberately code-only (no {{ .ConfirmationURL }}): Outlook/Hotmail's "Safe
+# Links" scanner auto-visits every URL in an incoming email server-side to
+# check for phishing, silently burning a one-time confirmation link before
+# the real user ever clicks it -- confirmed live as "Email link is invalid or
+# has expired" on a hotmail.com signup. A 6-digit code typed in by hand has
+# nothing for a link-scanner to consume. src/components/auth/auth-form.tsx's
+# signup flow calls verifyOtp({ type: "signup" }) expecting exactly this
+# template's {{ .Token }} -- without this override, Supabase's default
+# confirmation template (a bare {{ .ConfirmationURL }} link, no code) leaves
+# that screen waiting for a code that never arrives. This local config only
+# governs `supabase start`; the hosted production project's equivalent
+# "Confirm signup" template must be set to matching content by hand in the
+# Supabase Dashboard (Authentication -> Email Templates), since there is no
+# config-as-code push path for a linked remote project's auth email
+# templates.
+[auth.email.template.confirmation]
+subject = "Confirm your BookForge account"
+content_path = "./supabase/templates/confirmation.html"
+
 # Uncomment to customize email template
 # [auth.email.template.invite]
 # subject = "You have been invited"
