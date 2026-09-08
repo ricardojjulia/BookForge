@@ -66,6 +66,72 @@ describe("isChapterStartLine (via parseManuscript)", () => {
   });
 });
 
+describe("outline-style nonfiction headings", () => {
+  it("detects bare Roman-numeral section headings", () => {
+    const filler = Array.from({ length: 40 }, (_, i) => `Body sentence number ${i} continues the scene.`).join(" ");
+    const text = [
+      "Introduction",
+      "",
+      `${filler}`,
+      "",
+      "I. Growing Up Years",
+      "",
+      `${filler}`,
+      "",
+      "II. Current Life",
+      "",
+      `${filler}`,
+      "",
+      "Conclusion",
+      "",
+      `${filler}`,
+    ].join("\n");
+
+    const result = parseManuscript(text, "Test Book");
+
+    expect(result.chapters.map((chapter) => chapter.title)).toEqual([
+      "Introduction",
+      "I. Growing Up Years",
+      "II. Current Life",
+      "Conclusion",
+    ]);
+  });
+
+  it("does not treat an ordinary word made of Roman-numeral letters as a heading", () => {
+    const filler = Array.from({ length: 40 }, (_, i) => `Body sentence number ${i} continues the scene.`).join(" ");
+    const text = [`${filler}`, "", "Civil. War stories", "", `${filler}`].join("\n");
+
+    const result = parseManuscript(text, "Test Book");
+
+    expect(result.chapters).toHaveLength(1);
+  });
+
+  it("does not treat A/B/C/D outline-letter bullets as chapter headings, even though C and D also spell valid Roman numerals", () => {
+    const filler = Array.from({ length: 40 }, (_, i) => `Body sentence number ${i} continues the scene.`).join(" ");
+    const text = [
+      "I. Growing Up Years",
+      "",
+      `${filler}`,
+      "",
+      "A. Favorite Subjects in School",
+      "",
+      `${filler}`,
+      "",
+      "C. Significant Friendships",
+      "",
+      `${filler}`,
+      "",
+      "II. Current Life",
+      "",
+      `${filler}`,
+    ].join("\n");
+
+    const result = parseManuscript(text, "Test Book");
+
+    expect(result.chapters.map((chapter) => chapter.title)).toEqual(["I. Growing Up Years", "II. Current Life"]);
+  });
+});
+
 describe("chapter heading detection in other languages", () => {
   it("detects French chapter headings", () => {
     const filler = Array.from({ length: 40 }, (_, i) => `Body sentence number ${i} continues the scene.`).join(" ");

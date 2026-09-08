@@ -16,11 +16,45 @@ const NUMBER_WORDS =
 // than a "word + number" shape (e.g. "第3章", "제1장") -- matched as its own
 // top-level alternative instead of folded into CHAPTER_WORDS/NUMBER_WORDS.
 const CJK_CHAPTER_MARKER = String.raw`第\s*[0-9〇一二三四五六七八九十百千]+\s*[章回节節]|제\s*[0-9]+\s*[장화]`;
-
 const chapterPattern = new RegExp(
-  String.raw`^(#{1,2}\s*)?((${CHAPTER_WORDS})\s+(${NUMBER_WORDS})(\s*[:.-]\s*.*)?|prologue|pr[oó]logo|epilogue|ep[ií]logo|introduction|introducci[oó]n|afterword|${CJK_CHAPTER_MARKER}|[0-9]+\.\s+.+|[0-9]+\s*:\s+.+)$`,
+  String.raw`^(#{1,2}\s*)?((${CHAPTER_WORDS})\s+(${NUMBER_WORDS})(\s*[:.-]\s*.*)?|prologue|pr[oó]logo|epilogue|ep[ií]logo|introduction|introducci[oó]n|afterword|conclusion|conclusi[oó]n|${CJK_CHAPTER_MARKER}|[0-9]+\.\s+.+|[0-9]+\s*:\s+.+)$`,
   "imu",
 );
+
+// Nonfiction manuscripts (memoirs, reports, applications) commonly outline
+// their top-level sections with bare Roman numerals ("I. Growing Up Years",
+// "II. Current Life") rather than a "Chapter N" keyword. Matched separately
+// from chapterPattern (rather than folded in as another alternative) because
+// a syntactically valid Roman numeral alone is too permissive -- single
+// letters like "C." or "D." are extremely common as plain A/B/C/D outline
+// bullets, and even words like "mix" or "dim" spell out valid numerals. The
+// isBareRomanNumeralHeading check below additionally requires the value to
+// fall in a plausible chapter-count range, which keeps outline lettering
+// (C=100, D=500) out while still accepting real low chapter/section numbers.
+const bareRomanNumeralHeadingPattern = new RegExp(
+  String.raw`^((?=[MDCLXVI])M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3}))\.\s+.+$`,
+  "imu",
+);
+const MAX_PLAUSIBLE_ROMAN_CHAPTER_NUMBER = 50;
+
+function romanNumeralToInt(roman: string): number {
+  const values: Record<string, number> = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1000 };
+  const upper = roman.toUpperCase();
+  let total = 0;
+  for (let i = 0; i < upper.length; i++) {
+    const current = values[upper[i]];
+    const next = values[upper[i + 1]];
+    total += next && current < next ? -current : current;
+  }
+  return total;
+}
+
+function isBareRomanNumeralHeading(line: string): boolean {
+  const match = bareRomanNumeralHeadingPattern.exec(line);
+  if (!match) return false;
+  const value = romanNumeralToInt(match[1]);
+  return value >= 1 && value <= MAX_PLAUSIBLE_ROMAN_CHAPTER_NUMBER;
+}
 
 const inlineChapterHeadingPattern = new RegExp(
   String.raw`(^|[.!?…]\s+)((${CHAPTER_WORDS})\s+(?:${NUMBER_WORDS})(?:\s*[:.-])?)`,
@@ -132,6 +166,7 @@ function splitChapters(text: string): ParsedChapter[] {
 function isChapterStartLine(line: string, lines: string[], index: number) {
   if (!line || line.length > 110) return false;
   if (chapterPattern.test(line)) return true;
+  if (isBareRomanNumeralHeading(line)) return true;
 
   const words = line.split(/\s+/).filter(Boolean).length;
   if (/^t[ií]tulo$/i.test(line)) {

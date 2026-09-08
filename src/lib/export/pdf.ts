@@ -140,10 +140,12 @@ export async function buildFinalManuscriptPdf(input: BuildMarkdownInput, options
 
     let previousSceneId: string | null = null;
     chapterParagraphs.forEach((paragraph, index) => {
+      const text = selectExportParagraphText(paragraph, input);
+      if (text === null) return;
       if (index > 0 && paragraph.scene_id && previousSceneId && paragraph.scene_id !== previousSceneId) {
         doc.moveDown(0.75).font("Body").fontSize(12).text("***", { align: "center" }).moveDown(0.75);
       }
-      appendBodyText(doc, selectExportParagraphText(paragraph, input), {
+      appendBodyText(doc, text, {
         fontSize,
         lineGap: options.lineGap,
       });

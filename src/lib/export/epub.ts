@@ -97,10 +97,12 @@ function buildEpubSections(input: BuildMarkdownInput) {
     let previousSceneId: string | null = null;
 
     chapterParagraphs.forEach((paragraph, index) => {
+      const text = selectExportParagraphText(paragraph, input);
+      if (text === null) return;
       if (index > 0 && paragraph.scene_id && previousSceneId && paragraph.scene_id !== previousSceneId) {
         body.push(`<p class="scene-break">***</p>`);
       }
-      body.push(...textToParagraphs(selectExportParagraphText(paragraph, input)));
+      body.push(...textToParagraphs(text));
       previousSceneId = paragraph.scene_id;
     });
 

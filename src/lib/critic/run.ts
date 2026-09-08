@@ -3,6 +3,7 @@ import { buildCriticPrompt } from "@/lib/critic/prompts";
 import { extractCriticScore } from "@/lib/critic/score";
 import { summarizeCriticContent } from "@/lib/critic/summary";
 import { computeDialogueRatio } from "@/lib/dialogue-density";
+import { buildChapterFallbackExcerpts } from "@/lib/manuscript/chapter-fallback-excerpt";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
 import { getReasoningModelCandidates } from "@/lib/lmstudio/model-selection";
@@ -18,6 +19,14 @@ type ChapterRow = {
   id: string;
   title: string | null;
   summary: string | null;
+  // A book brought in via manuscript import already has real prose in
+  // original_text/current_text but never gets an AI-generated chapter.summary
+  // (that field is only ever written as a byproduct of generate-draft's
+  // per-chapter drafting call) -- without this, every critic lens saw
+  // "No summary yet." for every chapter of an imported book and scored a
+  // manuscript it never actually read. Populated in preloadCriticRunContext
+  // from the chapter's own paragraphs and used only when summary is null.
+  fallbackExcerpt: string;
 };
 
 type ParagraphRow = {
@@ -99,8 +108,13 @@ export async function preloadCriticRunContext(input: {
   if (bookError) throw bookError;
   if (chaptersError) throw chaptersError;
 
-  const chapterRows = (chapters || []) as ChapterRow[];
+  const rawChapterRows = (chapters || []) as Array<Omit<ChapterRow, "fallbackExcerpt">>;
   const paragraphRows = (paragraphsForContext || []) as ParagraphRow[];
+  const fallbackExcerpts = buildChapterFallbackExcerpts(rawChapterRows, paragraphRows);
+  const chapterRows: ChapterRow[] = rawChapterRows.map((chapter) => ({
+    ...chapter,
+    fallbackExcerpt: fallbackExcerpts.get(chapter.id) || "",
+  }));
 
   return {
     title: book.title,
@@ -170,7 +184,7 @@ export async function runCriticLens(input: {
     bookBible: context.bookBible,
     chapterSummaries: chapterRows.map((chapter) => ({
       title: chapter.title || "Untitled chapter",
-      summary: chapter.summary,
+      summary: chapter.summary || chapter.fallbackExcerpt || null,
     })),
     acceptedRevisionContext: stage === "post_rewrite" ? context.acceptedRevisionContext : undefined,
     rewriteStage: stage,

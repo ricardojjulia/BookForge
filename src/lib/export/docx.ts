@@ -80,6 +80,8 @@ export async function buildFinalManuscriptDocx(input: BuildMarkdownInput) {
 
     let previousSceneId: string | null = null;
     chapterParagraphs.forEach((paragraph, index) => {
+      const text = selectExportParagraphText(paragraph, input);
+      if (text === null) return;
       if (index > 0 && paragraph.scene_id && previousSceneId && paragraph.scene_id !== previousSceneId) {
         children.push(
           new Paragraph({
@@ -90,7 +92,7 @@ export async function buildFinalManuscriptDocx(input: BuildMarkdownInput) {
         );
       }
 
-      appendBodyText(children, selectExportParagraphText(paragraph, input));
+      appendBodyText(children, text);
       previousSceneId = paragraph.scene_id;
     });
   });
@@ -126,7 +128,8 @@ function appendMatter(children: Paragraph[], sections: MatterSectionForExport[])
   });
 }
 
-function appendBodyText(children: Paragraph[], text: string) {
+function appendBodyText(children: Paragraph[], text: string | null) {
+  if (!text) return;
   text
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())

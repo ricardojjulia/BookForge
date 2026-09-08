@@ -1,3 +1,4 @@
+import { looksLikeStructuralHeading } from "@/lib/manuscript/structural-heading";
 import { repairCommonMojibake } from "@/lib/text/repair-mojibake";
 
 export type BookForExport = {
@@ -96,10 +97,12 @@ export function buildFinalManuscriptMarkdown(input: BuildMarkdownInput) {
 
     let previousSceneId: string | null = null;
     chapterParagraphs.forEach((paragraph, index) => {
+      const text = selectExportParagraphText(paragraph, input);
+      if (text === null) return;
       if (index > 0 && paragraph.scene_id && previousSceneId && paragraph.scene_id !== previousSceneId) {
         lines.push("", "***", "");
       }
-      lines.push(selectExportParagraphText(paragraph, input));
+      lines.push(text);
       previousSceneId = paragraph.scene_id;
       lines.push("");
     });
@@ -119,6 +122,18 @@ function appendMatter(lines: string[], sections: MatterSectionForExport[]) {
   });
 }
 
+// Returns null when the paragraph should be omitted from the export
+// entirely -- rather than a string to render. This only ever happens for a
+// bare structural heading (an outline sub-heading, a title-page line) that
+// was never rewritten: showing its raw label verbatim in an otherwise-
+// rewritten manuscript leaves outline debris scattered through the final
+// book (found live on a real imported memoir -- see
+// looksLikeStructuralHeading's own comment). A paragraph that DID get
+// rewritten is always shown even if its original text looked like a
+// heading, since rewrite-execute never sends true headings to the model in
+// the first place (see that route's eligibility check) -- so a rewritten
+// heading-shaped paragraph reaching this function is real, intentional
+// content, not a leftover label.
 export function selectExportParagraphText(
   paragraph: ParagraphForExport,
   input: {
@@ -126,7 +141,7 @@ export function selectExportParagraphText(
     latestDraftsByParagraph?: LatestDraftByParagraph;
     useOriginalForLocked: boolean;
   },
-) {
+): string | null {
   if (input.useOriginalForLocked && paragraph.is_locked) {
     return normalizeExportText(paragraph.original_text);
   }
@@ -136,15 +151,15 @@ export function selectExportParagraphText(
   }
 
   if (input.sourceMode === "latest") {
-    return normalizeExportText(
-      input.latestDraftsByParagraph?.[paragraph.id] ||
-      paragraph.current_text ||
-      paragraph.accepted_text ||
-      paragraph.original_text,
-    );
+    const rewritten = input.latestDraftsByParagraph?.[paragraph.id] || paragraph.current_text || paragraph.accepted_text;
+    if (rewritten) return normalizeExportText(rewritten);
+    if (looksLikeStructuralHeading(paragraph.original_text)) return null;
+    return normalizeExportText(paragraph.original_text);
   }
 
-  return normalizeExportText(paragraph.accepted_text || paragraph.original_text);
+  if (paragraph.accepted_text) return normalizeExportText(paragraph.accepted_text);
+  if (looksLikeStructuralHeading(paragraph.original_text)) return null;
+  return normalizeExportText(paragraph.original_text);
 }
 
 export function humanizeSectionType(sectionType: string) {
