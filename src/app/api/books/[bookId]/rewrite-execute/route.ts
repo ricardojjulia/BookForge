@@ -8,6 +8,7 @@ import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
 import { getDraftModelCandidates } from "@/lib/lmstudio/model-selection";
 import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
+import { looksLikeStructuralHeading } from "@/lib/manuscript/structural-heading";
 import { buildFullBookRewriteUnitPrompt } from "@/lib/prompts/builders";
 import { buildRewriteContextPacket } from "@/lib/rewrite/context-packet";
 import { applyRewritePlanDefaults } from "@/lib/rewrite/plan-defaults";
@@ -531,7 +532,18 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           skippedPreviouslyFailed += 1;
           continue;
         }
-        if (paragraph.is_locked || (!body.forceTinyParagraphs && shouldSkipParagraph(paragraph.original_text, chapter.title))) {
+        // A bare structural heading (an outline sub-heading, a title-page
+        // line) is never eligible for rewrite, even with
+        // forceTinyParagraphs -- there's no real content to expand, and
+        // forcing the model to invent narrative from just a label produced
+        // duplicate/invented filler on a real imported manuscript (see
+        // looksLikeStructuralHeading's own comment). These paragraphs are
+        // instead omitted from export entirely rather than rewritten.
+        if (
+          paragraph.is_locked ||
+          looksLikeStructuralHeading(paragraph.original_text, chapter.title) ||
+          (!body.forceTinyParagraphs && shouldSkipParagraph(paragraph.original_text, chapter.title))
+        ) {
           skipped += 1;
           continue;
         }
@@ -630,6 +642,17 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       error: string;
     }>;
     let hardError: unknown = null;
+    // Paragraphs within one chapter are rewritten independently and often
+    // concurrently (see the chunk-building comment below), with no
+    // awareness of a sibling paragraph's own output. When two adjacent
+    // source paragraphs are short and structurally similar (e.g. a heading
+    // immediately followed by a one-line restatement of it), the model can
+    // converge on the exact same generic sentence for both -- confirmed
+    // live on a real imported manuscript. Tracking only the immediately
+    // previous unit's text (not a full-chapter history) keeps this cheap
+    // and catches the common back-to-back case without a DB round trip;
+    // resets across chapters since chunks never span them.
+    let previousRewrittenUnit: { chapterId: string; text: string } | null = null;
 
     async function runUnit(unit: RewriteUnit) {
       const { chapter, chapterIndex, paragraph, paragraphIndex, rows } = unit;
@@ -879,6 +902,25 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
               continue;
             }
 
+            if (previousRewrittenUnit && previousRewrittenUnit.chapterId === chapter.id && revisedText.trim() === previousRewrittenUnit.text.trim()) {
+              failed += 1;
+              const message =
+                "Model produced text identical to the previous paragraph's rewrite; skipped to avoid a duplicate. Retry this paragraph individually for a distinct version.";
+              failedUnitsLog.push({ id: paragraph.id, type: "paragraph", label: `Chapter ${chapter.chapter_number}, paragraph ${paragraph.paragraph_number}`, error: message });
+              jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+                currentUnit: `Duplicate output at ${unitLabel}`,
+                totalUnits,
+                attempted,
+                successful: rewritten,
+                failed,
+                skipped,
+                message,
+                failedUnits: failedUnitsLog,
+              });
+              await releaseClaim(paragraph.id);
+              continue;
+            }
+
             const continuityWarnings = extractArray(parsed, "continuityWarnings");
             const { error: versionError } = await supabase.from("revision_versions").insert({
               revision_job_id: jobId,
@@ -911,6 +953,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             }
 
             rewritten += 1;
+            previousRewrittenUnit = { chapterId: chapter.id, text: revisedText };
             warnings.push(...continuityWarnings);
             jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
               currentUnit: `Rewrite unit ${attempted} of ${totalUnits}`,

@@ -16,6 +16,7 @@ import { getReasoningModelCandidates } from "@/lib/lmstudio/model-selection";
 import { selectAndPrepareActiveModel, shouldUseCloud } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
 import { resolveMetadataSnapshotContext } from "@/lib/book-metadata/timeline";
+import { buildChapterFallbackExcerpts } from "@/lib/manuscript/chapter-fallback-excerpt";
 import { applyRewritePlanDefaults } from "@/lib/rewrite/plan-defaults";
 import { buildRewritePlanPrompt } from "@/lib/rewrite/plan-prompt";
 import { createClient } from "@/lib/supabase/server";
@@ -232,7 +233,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         supabase.from("book_bibles").select("content").eq("book_id", bookId).maybeSingle(),
         supabase
           .from("chapters")
-          .select("chapter_number,title,summary")
+          .select("id,chapter_number,title,summary")
           .eq("book_id", bookId)
           .order("chapter_number"),
         supabase
@@ -254,6 +255,22 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       if (bookError) throw bookError;
       if (chaptersError) throw chaptersError;
       if (reportsError) throw reportsError;
+
+      // See buildChapterFallbackExcerpts: an imported manuscript's chapters
+      // never get an AI-generated summary, so without this the planner sees
+      // "No summary yet." for every chapter and plans a rewrite for content
+      // it never read.
+      const { data: paragraphsForFallback } = await supabase
+        .from("paragraphs")
+        .select("chapter_id,paragraph_number,original_text,accepted_text")
+        .eq("book_id", bookId)
+        .order("paragraph_number");
+      const chapterFallbackExcerpts = buildChapterFallbackExcerpts(chapters || [], paragraphsForFallback || []);
+      const chaptersWithFallback = (chapters || []).map((chapter) => ({
+        chapter_number: chapter.chapter_number,
+        title: chapter.title,
+        summary: chapter.summary || chapterFallbackExcerpts.get(chapter.id) || null,
+      }));
 
       const settings = await getUserLmStudioSettings(user.id);
       const modelPlan = await selectAndPrepareActiveModel(settings, {
@@ -293,7 +310,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         dialogDensity: book.dialog_density,
         manuscriptBlueprint: bible?.content,
         rewriteModelSelection,
-        chapters: chapters || [],
+        chapters: chaptersWithFallback,
         criticReports: reports || [],
         focusLenses: body.focusLenses,
         promptCharBudget: preparedModel.runtimeLimits.promptCharBudget,
